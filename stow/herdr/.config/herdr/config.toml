@@ -1,0 +1,43 @@
+onboarding = false
+[theme]
+name = "rose-pine"
+auto_switch = false
+
+[theme.custom]
+panel_bg = "reset"
+accent = "#f6c177"
+
+[ui]
+pane_gaps = false
+agent_panel_sort = "priority"
+show_agent_labels_on_pane_borders = true
+hide_tab_bar_when_single_tab = true
+
+[keys]
+prefix = "ctrl+b"
+focus_pane_left = ["prefix+h", "ctrl+alt+h"]
+focus_pane_down = ["prefix+j", "ctrl+alt+j"]
+focus_pane_up = ["prefix+k", "ctrl+alt+k"]
+focus_pane_right = ["prefix+l", "ctrl+alt+l"]
+
+previous_tab = ["prefix+p", "ctrl+alt+["]
+next_tab = ["prefix+n", "ctrl+alt+]"]
+
+zoom = ["prefix+z","ctrl+alt+z"]
+
+previous_agent = ["prefix+comma", "cmd+["]
+next_agent = ["prefix+period", "cmd+]"]
+focus_agent = "cmd+1..9"
+
+previous_workspace = "cmd+shift+["
+next_workspace = "cmd+shift+]"
+
+cycle_pane_previous = "cmd+alt+["
+cycle_pane_next = "cmd+alt+]"
+
+[ui.toast]
+delivery = "system"
+delay_seconds = 1
+
+[ui.toast.herdr]
+position = "bottom-right"

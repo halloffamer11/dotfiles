@@ -47,10 +47,19 @@ config.scrollback_lines = 100000
 config.term = "xterm-256color"
 -- copy-on-select -> clipboard (matches Ghostty copy-on-select = clipboard)
 config.mouse_bindings = {
+	-- Restores WezTerm's default click-opens-link behavior on top of
+	-- copy-on-select (plain CompleteSelection removes the link half).
 	{
 		event = { Up = { streak = 1, button = "Left" } },
 		mods = "NONE",
-		action = act.CompleteSelection("ClipboardAndPrimarySelection"),
+		action = act.CompleteSelectionOrOpenLinkAtMouseCursor("ClipboardAndPrimarySelection"),
+	},
+	-- Cmd+click opens links; inside herdr use Cmd+Shift+click (Shift
+	-- bypasses herdr's mouse capture, then matches here as CMD).
+	{
+		event = { Up = { streak = 1, button = "Left" } },
+		mods = "SUPER",
+		action = act.OpenLinkAtMouseCursor,
 	},
 }
 
