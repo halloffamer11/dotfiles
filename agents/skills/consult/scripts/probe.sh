@@ -1,0 +1,23 @@
+#!/bin/sh
+# probe.sh — read-only environment sensing for the consult/council skills.
+# Per known agent CLI: presence, version, model catalog. Never invokes a model.
+# Absence is data, not an error: always exits 0.
+
+probe() {
+  name=$1 bin=$2 models_cmd=$3
+  if command -v "$bin" >/dev/null 2>&1; then
+    version=$("$bin" --version 2>/dev/null | head -1)
+    printf '## %s: present (%s)\n' "$name" "${version:-version unknown}"
+    if [ -n "$models_cmd" ]; then
+      $models_cmd 2>/dev/null | sed 's/^/  /'
+    fi
+  else
+    printf '## %s: absent\n' "$name"
+  fi
+}
+
+probe codex codex "codex debug models"
+probe antigravity agy "agy models"
+probe claude claude ""
+probe kiro kiro-cli "kiro-cli chat --list-models"
+exit 0
