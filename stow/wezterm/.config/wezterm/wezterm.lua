@@ -53,6 +53,14 @@ config.mouse_bindings = {
 		action = act.CompleteSelection("ClipboardAndPrimarySelection"),
 	},
 }
+
+-- Prompt-jump through scrollback (Shift+Up/Down, needs OSC 133 zones
+-- from shell-integration.sh; upstream ships no default binding).
+config.keys = {
+	{ key = "UpArrow", mods = "SHIFT", action = act.ScrollToPrompt(-1) },
+	{ key = "DownArrow", mods = "SHIFT", action = act.ScrollToPrompt(1) },
+}
+
 -- Left option is Alt, right option composes (matches macos-option-as-alt = left)
 config.send_composed_key_when_left_alt_is_pressed = false
 config.send_composed_key_when_right_alt_is_pressed = true
