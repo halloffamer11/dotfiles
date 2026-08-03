@@ -16,7 +16,13 @@ probe() {
   fi
 }
 
-probe codex codex "codex debug models"
+# codex's raw catalog is JSON; extract just the slug field so the block
+# stays comparable in size to the other CLIs' model lists.
+codex_slugs() {
+  codex debug models 2>/dev/null | grep -o '"slug":"[^"]*"' | sed 's/"slug":"//;s/"$//'
+}
+
+probe codex codex codex_slugs
 probe antigravity agy "agy models"
 probe claude claude ""
 probe kiro kiro-cli "kiro-cli chat --list-models"
