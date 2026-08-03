@@ -32,7 +32,9 @@ judgment, or parallel capacity materially improves the result.
   authorized implementation — and then inside an isolated git worktree.
 - Multi-line prompts via a temp file (`"$(cat file)"`) or stdin — never long
   inline shell args.
-- Close stdin (`</dev/null`) and set a hard `timeout`.
+- Close stdin (`</dev/null`) and enforce a hard timeout. macOS ships no `timeout`
+  binary: use your harness's command-timeout mechanism (e.g. the Bash tool's
+  timeout parameter), or `gtimeout` if coreutils is installed.
 - Every brief states: objective, working directory, in-scope files,
   constraints, definition of done, expected return format — and tells the
   child: do not delegate further; no external side effects.

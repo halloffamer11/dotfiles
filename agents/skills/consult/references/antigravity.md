@@ -17,3 +17,7 @@ gemini-3.1-pro-high). Catalog also lists claude-* and gpt-oss-* lanes.
 - Display names ("Gemini 3.5 Flash (Medium)") are dead; slugs replaced them.
 - Serves non-Gemini models too: per routing.md Harness selection, prefer agy
   only for Gemini models (native pairing).
+- Cold start (observed 2026-08-03): a session's first --print call can hang
+  to the 5m default timeout with zero output, then succeed in seconds on
+  identical retry. No output after ~60s → kill and retry once before
+  treating it as failure; a second hang is a real failure, not drift.
