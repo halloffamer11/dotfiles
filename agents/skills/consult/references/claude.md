@@ -3,17 +3,26 @@
 verified-against: 2.1.220 (Claude Code) (2026-08-03)
 
 ## Read-only / analysis
+claude -p --model <alias|id> --output-format json \
+  "$(cat <promptfile>)" </dev/null
+
+This is the primary form: the child inherits skills/CLAUDE.md context
+(fine for most consult delegations), and it's the form that works on
+subscription/OAuth auth — Orin's machines.
+
+### Conditional: `--bare` (only where ANTHROPIC_API_KEY/apiKeyHelper auth is available)
 claude -p --bare --model <alias|id> --output-format json \
   "$(cat <promptfile>)" </dev/null
 
-`--bare` is Anthropic's recommended mode for scripted/nested calls. Per its
-own `--help` text it skips hooks, LSP, plugin sync, attribution, auto-memory,
-background prefetches, keychain reads, and CLAUDE.md auto-discovery (sets
-`CLAUDE_CODE_SIMPLE=1`) — reproducible, isolated children. Skills still
-resolve via explicit `/skill-name`; auth under `--bare` is strictly
-`ANTHROPIC_API_KEY` or `apiKeyHelper` (OAuth and keychain are never read).
-Omit `--bare` only when the child SHOULD see auto-discovered skills/project
-instructions, and say so in the consult record line.
+Anthropic recommends `--bare` for scripted/nested calls where that auth is
+available. Per its own `--help` text it skips hooks, LSP, plugin sync,
+attribution, auto-memory, background prefetches, keychain reads, and
+CLAUDE.md auto-discovery (sets `CLAUDE_CODE_SIMPLE=1`) — reproducible,
+isolated children. Skills still resolve via explicit `/skill-name`; auth
+under `--bare` is strictly `ANTHROPIC_API_KEY` or `apiKeyHelper` (OAuth and
+keychain are never read) — it will fail with "Not logged in" on OAuth-only
+machines. Use it only when the child SHOULD be isolated from auto-discovered
+skills/project instructions, and say so in the consult record line.
 
 ## Write-enabled (only when the user authorized implementation)
 Isolated worktree + `--permission-mode acceptEdits`.
@@ -35,5 +44,6 @@ Aliases sonnet | opus | fable (haiku excluded by routing.md), or full IDs
   succeeded and enumerated the full installed skill catalog by name (auto-
   discovery working); `--bare` was not separately confirmed to expose that
   catalog, but `--help` states explicit `/skill-name` invocation still
-  resolves. Set `ANTHROPIC_API_KEY` (or `apiKeyHelper`) before scripting
-  `--bare` calls on machines using OAuth login.
+  resolves. On OAuth machines (Orin's), use the non-`--bare` form above —
+  it just works; reach for `ANTHROPIC_API_KEY`/`apiKeyHelper` provisioning
+  only if `--bare` isolation is specifically needed.
