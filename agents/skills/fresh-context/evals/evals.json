@@ -1,0 +1,26 @@
+{
+  "skill_name": "fresh-context",
+  "evals": [
+    {
+      "id": 0,
+      "name": "superpowers-mid-plan",
+      "prompt": "FC — wrapping up for the day, about to clear context.",
+      "expected_output": "Plan checkboxes reconciled with code (step 3 checked), WIP committed or its state recorded in the plan/spec, experiment/scratch/notes-tmp deleted (decisions folded into plan), CLAUDE.md slimmed with pointer fixed to the active json-export plan, no handoff/index/archive files or new directories, chat report of kept/deleted/CLAUDE.md changes.",
+      "files": ["fixtures/superpowers-mid-plan"]
+    },
+    {
+      "id": 1,
+      "name": "plain-repo-loose-ends",
+      "prompt": "tie up loose ends, I'm starting a new session after this.",
+      "expected_output": "Works without any superpowers structure: utils_old.py deleted, notes.md removed with its non-duplicate session state folded into CLAUDE.md or a commit, half-done --json WIP committed to a branch or documented as in-progress, CLAUDE.md updated to point at the in-progress work, no handoff files.",
+      "files": ["fixtures/plain-repo-loose-ends"]
+    },
+    {
+      "id": 2,
+      "name": "nearly-clean",
+      "prompt": "fresh context please",
+      "expected_output": "Recognizes there is nothing to do: no files created or deleted, CLAUDE.md substantively unchanged, short report saying the project is already session-safe. Old skill would be expected to emit a resume pointer or handoff; new skill should not.",
+      "files": ["fixtures/nearly-clean"]
+    }
+  ]
+}
