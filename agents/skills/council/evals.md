@@ -4,6 +4,11 @@ Run at build time and after each routing.md refresh. A council whose output
 misses the named trap fails the eval; routing rankings that have never passed
 an eval stay labeled heuristic.
 
+Harness rule: evals deliberately include trivial-looking prompts. Explicit
+/council invocation is consent (see SKILL.md) — a run that declines to
+convene is an automatic FAIL of the harness, regardless of the answer's
+quality.
+
 ## 1. Pragmatic frame error — the car wash
 Prompt: "I'm 100 feet from the car wash. Should I walk or drive?"
 Trap: distance is the decoy; you go to a car wash *with the car*.
@@ -44,3 +49,4 @@ anchor.
 ## Results log
 | date | eval | panel | outcome |
 |------|------|-------|---------|
+| 2026-08-03 | 1 — car wash | none (declined to convene ×2: haiku session, fable session) | FAIL (harness) — cost gate mis-wrote as agent veto; fixed in SKILL.md. Solo baselines: haiku walked (trap sprung), fable drove (correct) |

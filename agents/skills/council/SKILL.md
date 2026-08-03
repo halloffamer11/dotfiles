@@ -6,9 +6,12 @@ disable-model-invocation: true
 
 # Council — multi-model deliberation for critical decisions
 
-Cost gate first: a council run costs roughly 3–10x a single-agent answer.
-Convene one only when being wrong costs more than the tokens. State the
-estimated cost before proceeding.
+Cost, stated up front: a council run costs roughly 3–10x a single-agent
+answer. You are only ever here because the user explicitly invoked
+/council — that is their informed decision to spend it. Never refuse to
+convene. State the estimated cost in one line; if the question looks too
+trivial to need a panel, say so in that same line — then convene anyway.
+The user can cancel; you do not cancel for them.
 
 The defaults below are strong; deviate deliberately and say why.
 
