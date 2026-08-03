@@ -51,3 +51,4 @@ anchor.
 |------|------|-------|---------|
 | 2026-08-03 | 1 — car wash | none (declined to convene ×2: haiku session, fable session) | FAIL (harness) — cost gate mis-wrote as agent veto; fixed in SKILL.md. Solo baselines: haiku walked (trap sprung), fable drove (correct) |
 | 2026-08-03 | 1 — car wash | GPT-5.6 Sol via Codex + Gemini 3.6 Flash (medium) via Antigravity; lead Fable 5 | PASS — convened despite trivial-flag (consent rule held); probe + quorum MET (2 non-Anthropic families); unanimous "drive," reasoning on purpose not distance; crux named (non-car errand conditional); ~5x cost recorded |
+| 2026-08-03 | 2–5 | — | DEFERRED — user-driven runs pending; until run, routing rankings stay labeled heuristic |

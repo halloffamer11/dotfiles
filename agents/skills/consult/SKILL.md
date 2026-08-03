@@ -19,7 +19,9 @@ judgment, or parallel capacity materially improves the result.
 1. Classify the task into a tier via references/routing.md "Task tiers".
 2. Walk that tier's ranked list in "Preferences"; drop anything in
    "Exclusions".
-3. Run scripts/probe.sh — which CLIs are installed, what they serve.
+3. Run scripts/probe.sh — which CLIs are installed, what they serve. (probe
+   shows no catalog for claude: Anthropic aliases/IDs live in
+   references/claude.md → Models.)
 4. First surviving model wins. If more than one installed harness serves it,
    apply "Harness selection" (native pairing; Kiro = flexible/open-weight
    lane).
@@ -30,8 +32,8 @@ judgment, or parallel capacity materially improves the result.
 - Headless/exec mode only; interactive modes hang in this environment.
 - Read-only sandbox by default. Write access only when the user's request
   authorized implementation — and then inside an isolated git worktree.
-- Multi-line prompts via a temp file (`"$(cat file)"`) or stdin — never long
-  inline shell args.
+- Multi-line prompts via a temp file (`"$(cat file)"`) — never long inline
+  shell args.
 - Close stdin (`</dev/null`) and enforce a hard timeout. macOS ships no `timeout`
   binary: use your harness's command-timeout mechanism (e.g. the Bash tool's
   timeout parameter), or `gtimeout` if coreutils is installed.

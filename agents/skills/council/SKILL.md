@@ -26,7 +26,7 @@ One brief, received identically by every panelist:
 - Run ../consult/scripts/probe.sh for real availability.
 - Panelists: available harnesses serving models from different families.
   Exclude your own model family — no agent grades its own work.
-- Quorum (routing.md "Council defaults"): ≥2 families besides the lead's.
+- Quorum (../consult/references/routing.md "Council defaults"): ≥2 families besides the lead's.
   Below quorum: report the real composition and STOP. Never simulate absent
   panelists — a role-played council is worse than no council.
 - Deliberation shape is your judgment call: default is sealed memos only;

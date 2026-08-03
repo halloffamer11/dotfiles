@@ -3,12 +3,15 @@
 verified-against: 2.1.220 (Claude Code) (2026-08-03)
 
 ## Read-only / analysis
-claude -p --model <alias|id> --output-format json \
+claude -p --permission-mode plan --model <alias|id> --output-format json \
   "$(cat <promptfile>)" </dev/null
 
 This is the primary form: the child inherits skills/CLAUDE.md context
 (fine for most consult delegations), and it's the form that works on
-subscription/OAuth auth — Orin's machines.
+subscription/OAuth auth — Orin's machines. `--permission-mode plan`
+mechanically pins read-only, matching codex's `-s read-only` / agy's
+`--mode plan` (verified 2.1.220, 2026-08-03: succeeds with a normal
+`result` field, no output-shape distortion).
 
 ### Conditional: `--bare` (only where ANTHROPIC_API_KEY/apiKeyHelper auth is available)
 claude -p --bare --model <alias|id> --output-format json \
