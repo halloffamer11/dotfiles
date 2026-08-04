@@ -1,0 +1,42 @@
+#!/bin/bash
+# record-meeting — one meeting recording: system audio (Core Audio tap, via
+# audiotee) + default mic (ffmpeg), mixed to a single m4a in ~/Recordings with
+# a JSON sidecar (start/end times) for the downstream transcription pipeline.
+# Runs standalone (Ctrl-C to stop) or under Hammerspoon (hs.task:interrupt()).
+set -u
+
+REC_DIR="${RECORDINGS_DIR:-$HOME/Recordings}"
+AUDIOTEE="$HOME/.local/bin/audiotee"
+FFMPEG="/opt/homebrew/bin/ffmpeg"
+BASE="$REC_DIR/meeting-$(date +%Y-%m-%d-%H%M%S)"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/record-meeting.XXXXXX")"
+
+mkdir -p "$REC_DIR"
+START_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+"$AUDIOTEE" --sample-rate 48000 >"$TMP/system.raw" 2>"$TMP/audiotee.log" &
+AT_PID=$!
+"$FFMPEG" -hide_banner -nostdin -f avfoundation -i ":default" \
+  -ar 48000 -ac 1 -c:a pcm_s16le "$TMP/mic.wav" 2>"$TMP/ffmpeg-mic.log" &
+FF_PID=$!
+
+trap 'kill -INT "$AT_PID" "$FF_PID" 2>/dev/null' INT TERM
+
+while kill -0 "$AT_PID" 2>/dev/null || kill -0 "$FF_PID" 2>/dev/null; do
+  wait "$AT_PID" "$FF_PID" 2>/dev/null
+done
+
+END_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+if "$FFMPEG" -hide_banner -nostdin -loglevel error \
+  -f s16le -ar 48000 -ac 1 -i "$TMP/system.raw" -i "$TMP/mic.wav" \
+  -filter_complex "[1:a]volume=6dB[mic];[0:a][mic]amix=inputs=2:duration=longest" \
+  -c:a aac -b:a 96k "$BASE.m4a" 2>"$TMP/ffmpeg-mux.log"; then
+  printf '{\n  "audio": "%s",\n  "started": "%s",\n  "ended": "%s"\n}\n' \
+    "$BASE.m4a" "$START_ISO" "$END_ISO" >"$BASE.json"
+  rm -rf "$TMP"
+  echo "$BASE.m4a"
+else
+  echo "mux failed; intermediates kept in $TMP" >&2
+  exit 1
+fi
