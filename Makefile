@@ -13,9 +13,11 @@
 #   - HARNESS_SKILL_DIRS: which harnesses receive authored skills; add ~/.kiro/skills at work
 #   - Recipes must be indented with a literal TAB (make syntax rule)
 #   - Idempotency lives in the tools: `brew bundle` no-ops when satisfied; `stow -R` re-syncs
+-include local.mk
 
-CONFIG_PACKAGES := git herdr nvim starship wezterm yazi zsh hammerspoon
-HARNESS_SKILL_DIRS := $(HOME)/.claude/skills $(HOME)/.agents/skills
+CONFIG_PACKAGES ?= git herdr nvim starship wezterm yazi zsh hammerspoon
+HARNESS_SKILL_DIRS ?= $(HOME)/.claude/skills $(HOME)/.agents/skills
+EXTRA_BREWFILES ?= 
 
 .PHONY: bootstrap brew configs skills externals update
 
@@ -23,6 +25,7 @@ bootstrap: brew configs skills externals
 
 brew:
 	brew bundle --file=$(CURDIR)/Brewfile
+	@for f in $(EXTRA_BREWFILES); do brew bundle --file=$$f; done
 
 configs:
 	stow -d $(CURDIR)/stow -t $(HOME) -R $(CONFIG_PACKAGES)
@@ -39,6 +42,7 @@ externals:
 update:
 	brew bundle --file=$(CURDIR)/Brewfile
 	npx -y skills update -g -y
+	@for f in $(EXTRA_BREWFILES); do brew bundle --file=$$f; done
 
 audiotee:
 	rm -rf /tmp/audiotee-build
