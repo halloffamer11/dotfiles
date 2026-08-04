@@ -14,7 +14,7 @@
 #   - Recipes must be indented with a literal TAB (make syntax rule)
 #   - Idempotency lives in the tools: `brew bundle` no-ops when satisfied; `stow -R` re-syncs
 
-CONFIG_PACKAGES := git herdr nvim starship wezterm yazi zsh
+CONFIG_PACKAGES := git herdr nvim starship wezterm yazi zsh hammerspoon
 HARNESS_SKILL_DIRS := $(HOME)/.claude/skills $(HOME)/.agents/skills
 
 .PHONY: bootstrap brew configs skills externals update
@@ -38,3 +38,10 @@ externals:
 update:
 	brew bundle --file=$(CURDIR)/Brewfile
 	npx -y skills update -g -y
+
+audiotee:
+	rm -rf /tmp/audiotee-build
+	git clone --depth 1 https://github.com/makeusabrew/audiotee.git /tmp/audiotee-build
+	cd /tmp/audiotee-build && swift build -c release
+	mkdir -p $(HOME)/.local/bin
+	install /tmp/audiotee-build/.build/release/audiotee $(HOME)/.local/bin/audiotee
