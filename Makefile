@@ -34,6 +34,7 @@ skills:
 externals:
 	npx -y skills add kunchenguid/lavish-axi -g -y
 	npx -y skills add herdrdev/herdr --skill herdr -g -y
+	npx -y skills add blader/humanizer -g -y
 
 update:
 	brew bundle --file=$(CURDIR)/Brewfile
