@@ -26,7 +26,8 @@ alias ll='ls -l --git'
 alias la='ls -la --git'
 alias lt='ls --tree --level=2'
 alias pip='python3 -m pip'
-alias dots='git -C ~/dotfiles pull --rebase && stow -d ~/dotfiles/stow -t ~ --restow */ 2>/dev/null; git -C ~/dotfiles status --short'
+# alias dots='git -C ~/dotfiles pull --rebase && stow -d ~/dotfiles/stow -t ~ --restow */ 2>/dev/null; git -C ~/dotfiles status --short'
+alias dots='git -C ~/dotfiles pull --rebase && make -C ~/dotfiles configs; git -C ~/dotfiles status --short'
 
 # --- Yazi: 'y' to launch, q=cd into dir, Q=stay ---
 function y() {

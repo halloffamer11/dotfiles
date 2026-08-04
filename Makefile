@@ -50,3 +50,10 @@ audiotee:
 	cd /tmp/audiotee-build && swift build -c release
 	mkdir -p $(HOME)/.local/bin
 	install /tmp/audiotee-build/.build/release/audiotee $(HOME)/.local/bin/audiotee
+
+mictee:
+	mkdir -p $(HOME)/.local/bin
+	swiftc -O -o $(HOME)/.local/bin/mictee $(CURDIR)/tools/mictee/mictee.swift
+
+test-recorder:
+	python3 $(CURDIR)/tools/record-meeting-tests/harness.py
