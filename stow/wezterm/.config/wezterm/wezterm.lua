@@ -19,7 +19,7 @@ config.color_scheme = "rose-pine-moon"
 
 -- === Font ===
 -- Same options installed as Ghostty: MesloLGS NF / IosevkaTerm / JetBrainsMono / ZedMono
-config.font = wezterm.font("MesloLGS Nerd Font")
+-- config.font = wezterm.font("MesloLGS Nerd Font")
 -- config.font = wezterm.font("IosevkaTerm Nerd Font")
 -- config.font = wezterm.font("JetBrainsMono Nerd Font")
 -- config.font = wezterm.font("ZedMono Nerd Font")
@@ -30,7 +30,7 @@ config.font = wezterm.font("MesloLGS Nerd Font")
 -- config.font = wezterm.font("MonaspiceAr Nerd Font")
 -- config.font = wezterm.font("MonaspiceNe Nerd Font")
 -- config.font = wezterm.font("0xProto Nerd Font")
--- config.font = wezterm.font("CommitMono Nerd Font")
+config.font = wezterm.font("CommitMono Nerd Font")
 -- config.font = wezterm.font("Maple Mono NF")
 -- config.font = wezterm.font("Cascadia Code NF")
 -- config.font = wezterm.font("GeistMono Nerd Font")
