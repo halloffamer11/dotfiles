@@ -35,9 +35,21 @@ next_workspace = "cmd+shift+]"
 cycle_pane_previous = "cmd+alt+["
 cycle_pane_next = "cmd+alt+]"
 
+last_pane = ["cmd+alt+backtick"]
+
 [ui.toast]
 delivery = "system"
 delay_seconds = 1
 
 [ui.toast.herdr]
 position = "bottom-right"
+
+[[keys.command]]
+key = "prefix+y"          # lazygit popup (g/shift+g are goto & new_worktree defaults)
+type = "pane"
+command = "lazygit"
+
+[[keys.command]]
+key = "prefix+u"          # hunk: review working-tree changes, auto-reloading
+type = "pane"
+command = "hunk diff --watch"

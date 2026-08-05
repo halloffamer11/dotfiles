@@ -52,3 +52,9 @@ cask "font-jetbrains-mono-nerd-font"
 cask "font-zed-mono-nerd-font"
 cask "font-fira-code-nerd-font"
 cask "font-hack-nerd-font"
+cask "font-monaspice-nerd-font"     # GitHub 2024 (Monaspace; NF renames it Monaspice); texture healing; Argon/Neon compact variants
+cask "font-0xproto-nerd-font"       # small-size legibility specialist
+cask "font-commit-mono-nerd-font"   # neutral, smart kerning
+cask "font-maple-mono-nf"           # rounded, compact
+cask "font-cascadia-code-nf"        # MS terminal font, native NF glyphs, cursive italic
+cask "font-geist-mono-nerd-font"    # Vercel; tight and modern

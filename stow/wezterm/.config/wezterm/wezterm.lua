@@ -95,6 +95,11 @@ config.keys = {
 	{ key = "]", mods = "CMD|ALT", action = act.SendString("\x1b[93;11u") },
 	{ key = "[", mods = "CTRL|ALT", action = act.SendString("\x1b[91;7u") },
 	{ key = "]", mods = "CTRL|ALT", action = act.SendString("\x1b[93;7u") },
+	-- Word-nav: opt+←/→ jump by word (readline alt-b / alt-f)
+	{ key = "LeftArrow", mods = "OPT", action = act.SendKey({ key = "b", mods = "ALT" }) },
+	{ key = "RightArrow", mods = "OPT", action = act.SendKey({ key = "f", mods = "ALT" }) },
+	-- Last-pane toggle → herdr (cmd+alt+`): CSI-u codepoint 96, mods 1+alt(2)+super(8)=11
+	{ key = "`", mods = "CMD|ALT", action = act.SendString("\x1b[96;11u") },
 }
 
 -- cmd+1..9 → herdr focus_agent, as CSI-u (overrides WezTerm's ActivateTab defaults)
@@ -109,5 +114,29 @@ end
 -- Left option is Alt, right option composes (matches macos-option-as-alt = left)
 config.send_composed_key_when_left_alt_is_pressed = false
 config.send_composed_key_when_right_alt_is_pressed = true
+
+-- ── Open-in-nvim link handler ────────────────────────────
+-- cmd+click a bare file path (with optional :line:col) in terminal output →
+-- types `nvim [+line] <path>` into the clicked pane. Uses a private nvimedit:
+-- scheme so absolute file:// links keep opening via the system default (Zed);
+-- captures $1$2$3 exclude any surrounding quotes from the target.
+config.hyperlink_rules = wezterm.default_hyperlink_rules()
+table.insert(config.hyperlink_rules, {
+	regex = [[["]?([\w\d._\-/]+\.\w+)(:\d+)?(:\d+)?["]?]],
+	format = "nvimedit:$1$2$3",
+})
+wezterm.on("open-uri", function(window, pane, uri)
+	if uri:find("^nvimedit:") then
+		local file_path = uri:sub(10)
+		local file, line, col = file_path:match("([^:]+):?(%d*):?(%d*)")
+		local cmd = { "nvim" }
+		if line ~= "" then
+			table.insert(cmd, "+" .. line)
+		end
+		table.insert(cmd, file)
+		pane:send_text(table.concat(cmd, " ") .. "\n")
+		return false
+	end
+end)
 
 return config
