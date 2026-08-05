@@ -25,6 +25,15 @@ config.font = wezterm.font("MesloLGS Nerd Font")
 -- config.font = wezterm.font("ZedMono Nerd Font")
 -- config.font = wezterm.font("FiraCode Nerd Font")
 -- config.font = wezterm.font("Hack Nerd Font")
+-- 2026-08-04 additions (family names verified via `wezterm ls-fonts --list-system`;
+-- Monaspace ships five texture-healing variants — Ar=Argon, Ne=Neon are the compact picks):
+-- config.font = wezterm.font("MonaspiceAr Nerd Font")
+-- config.font = wezterm.font("MonaspiceNe Nerd Font")
+-- config.font = wezterm.font("0xProto Nerd Font")
+-- config.font = wezterm.font("CommitMono Nerd Font")
+-- config.font = wezterm.font("Maple Mono NF")
+-- config.font = wezterm.font("Cascadia Code NF")
+-- config.font = wezterm.font("GeistMono Nerd Font")
 config.font_size = 16.0
 config.freetype_load_target = "Light"
 config.freetype_load_flags = "NO_HINTING"
