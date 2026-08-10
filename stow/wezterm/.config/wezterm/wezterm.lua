@@ -104,11 +104,20 @@ config.keys = {
 	{ key = "]", mods = "CMD|ALT", action = act.SendString("\x1b[93;11u") },
 	{ key = "[", mods = "CTRL|ALT", action = act.SendString("\x1b[91;7u") },
 	{ key = "]", mods = "CTRL|ALT", action = act.SendString("\x1b[93;7u") },
+	-- Remapping ctrl+cmd so we can use the chord in herdr
+	{ key = "[", mods = "CTRL|CMD", action = act.SendString("\x1b[91;13u") },
+	{ key = "]", mods = "CTRL|CMD", action = act.SendString("\x1b[93;13u") },
+	{ key = "h", mods = "CMD|ALT", action = act.SendString("\x1b[104;11u") },
+	{ key = "j", mods = "CMD|ALT", action = act.SendString("\x1b[106;11u") },
+	{ key = "k", mods = "CMD|ALT", action = act.SendString("\x1b[107;11u") },
+	{ key = "l", mods = "CMD|ALT", action = act.SendString("\x1b[108;11u") },
 	-- Word-nav: opt+←/→ jump by word (readline alt-b / alt-f)
 	{ key = "LeftArrow", mods = "OPT", action = act.SendKey({ key = "b", mods = "ALT" }) },
 	{ key = "RightArrow", mods = "OPT", action = act.SendKey({ key = "f", mods = "ALT" }) },
 	-- Last-pane toggle → herdr (cmd+alt+`): CSI-u codepoint 96, mods 1+alt(2)+super(8)=11
-	{ key = "`", mods = "CMD|ALT", action = act.SendString("\x1b[96;11u") },
+	{ key = "phys:Grave", mods = "CMD|ALT", action = act.SendString("\x1b[96;11u") },
+	-- Zoom chord for herdr (cmd+alt+\): CSI-u codepoint 92, mods 1+alt(2)+super(8)=11
+	{ key = "phys:Backslash", mods = "CMD|ALT", action = act.SendString("\x1b[92;11u") },
 }
 
 -- cmd+1..9 → herdr focus_agent, as CSI-u (overrides WezTerm's ActivateTab defaults)

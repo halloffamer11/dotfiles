@@ -15,15 +15,18 @@ hide_tab_bar_when_single_tab = true
 
 [keys]
 prefix = "ctrl+b"
-focus_pane_left = ["prefix+h", "ctrl+alt+h"]
-focus_pane_down = ["prefix+j", "ctrl+alt+j"]
-focus_pane_up = ["prefix+k", "ctrl+alt+k"]
-focus_pane_right = ["prefix+l", "ctrl+alt+l"]
+focus_pane_left = ["prefix+h", "cmd+alt+h"]
+focus_pane_down = ["prefix+j", "cmd+alt+j"]
+focus_pane_up = ["prefix+k", "cmd+alt+k"]
+focus_pane_right = ["prefix+l", "cmd+alt+l"]
 
-previous_tab = ["prefix+p", "ctrl+alt+["]
-next_tab = ["prefix+n", "ctrl+alt+]"]
+previous_tab = ["prefix+p", "cmd+alt+["]
+next_tab = ["prefix+n", "cmd+alt+]"]
 
-zoom = ["prefix+z","ctrl+alt+z"]
+zoom = ["prefix+z", "cmd+alt+backslash"]
+
+cycle_pane_previous = "ctrl+cmd+["
+cycle_pane_next = "ctrl+cmd+]"
 
 previous_agent = ["prefix+comma", "cmd+["]
 next_agent = ["prefix+period", "cmd+]"]
@@ -31,9 +34,6 @@ focus_agent = "cmd+1..9"
 
 previous_workspace = "cmd+shift+["
 next_workspace = "cmd+shift+]"
-
-cycle_pane_previous = "cmd+alt+["
-cycle_pane_next = "cmd+alt+]"
 
 last_pane = ["cmd+alt+backtick"]
 
@@ -45,11 +45,11 @@ delay_seconds = 1
 position = "bottom-right"
 
 [[keys.command]]
-key = "prefix+y"          # lazygit popup (g/shift+g are goto & new_worktree defaults)
+key = "prefix+y"    # lazygit popup (g/shift+g are goto & new_worktree defaults)
 type = "pane"
 command = "lazygit"
 
 [[keys.command]]
-key = "prefix+u"          # hunk: review working-tree changes, auto-reloading
+key = "prefix+u"              # hunk: review working-tree changes, auto-reloading
 type = "pane"
 command = "hunk diff --watch"
