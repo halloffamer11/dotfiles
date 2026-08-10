@@ -1,6 +1,6 @@
 # Model routing preferences
 
-updated: 2026-08-03
+updated: 2026-08-08
 status: DRAFT — rankings seeded from global CLAUDE.md 2026-08-03; Orin corrects, agents never edit.
 
 Consumers: any agent choosing a model for a subagent, workflow stage, agent-team
@@ -19,7 +19,7 @@ walk the ranked list, honor Exclusions absolutely.
 
 ## Preferences (ranked, harness-agnostic)
 - deep-reasoning: Fable 5 > GPT-5.6 Sol > Gemini 3.1 Pro (high)
-- hard-coding: GPT-5.6 Sol > Opus 5 > Gemini 3.1 Pro (high)
+- hard-coding: GPT-5.6 Sol > Opus 5 > Gemini 3.6 Flash (high)
 - routine-coding: GPT-5.6 Terra > Sonnet 5 > Gemini 3.6 Flash (high)
 - mechanical: GPT-5.6 Luna > Gemini 3.6 Flash (medium)
 - review: top-ranked deep-reasoning or hard-coding model NOT in the author's

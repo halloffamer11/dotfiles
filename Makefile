@@ -16,7 +16,7 @@
 -include local.mk
 
 CONFIG_PACKAGES ?= git herdr nvim starship wezterm yazi zsh hammerspoon
-HARNESS_SKILL_DIRS ?= $(HOME)/.claude/skills $(HOME)/.agents/skills
+HARNESS_SKILL_DIRS ?= $(HOME)/.claude/skills $(HOME)/.agents/skills $(HOME)/.kiro/skills
 EXTRA_BREWFILES ?= 
 
 .PHONY: bootstrap brew configs skills externals update
