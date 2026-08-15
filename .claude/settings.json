@@ -1,0 +1,5 @@
+{
+  "claudeMdExcludes": [
+    "**/dotfiles/references/CLAUDE.md"
+  ]
+}

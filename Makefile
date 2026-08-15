@@ -10,12 +10,16 @@
 #
 # Editing:
 #   - CONFIG_PACKAGES: config packages under stow/, targeted at ~
+#   - hammerspoon is NOT in CONFIG_PACKAGES: .stowrc sets --no-folding, but Hammerspoon
+#     needs ~/.hammerspoon to be ONE whole-directory symlink (per-file links break
+#     hs.configdir and the pathwatcher auto-reload — upstream issue #830), so `configs`
+#     links it explicitly instead of stowing it
 #   - HARNESS_SKILL_DIRS: which harnesses receive authored skills; add ~/.kiro/skills at work
 #   - Recipes must be indented with a literal TAB (make syntax rule)
 #   - Idempotency lives in the tools: `brew bundle` no-ops when satisfied; `stow -R` re-syncs
 -include local.mk
 
-CONFIG_PACKAGES ?= git herdr nvim starship wezterm yazi zsh hammerspoon
+CONFIG_PACKAGES ?= git herdr nvim starship wezterm yazi zsh
 HARNESS_SKILL_DIRS ?= $(HOME)/.claude/skills $(HOME)/.agents/skills $(HOME)/.kiro/skills
 EXTRA_BREWFILES ?= 
 
@@ -29,6 +33,9 @@ brew:
 
 configs:
 	stow -d $(CURDIR)/stow -t $(HOME) -R $(CONFIG_PACKAGES)
+	@if [ -d $(HOME)/.hammerspoon ] && [ ! -L $(HOME)/.hammerspoon ]; then \
+		echo "ERROR: ~/.hammerspoon is a real directory (Hammerspoon launched before configs?) — move it aside first"; exit 1; fi
+	ln -sfn $(CURDIR)/stow/hammerspoon/.hammerspoon $(HOME)/.hammerspoon
 
 skills:
 	for t in $(HARNESS_SKILL_DIRS); do mkdir -p $$t && stow -d $(CURDIR)/agents -t $$t -R skills; done
@@ -57,3 +64,5 @@ mictee:
 
 test-recorder:
 	python3 $(CURDIR)/tools/record-meeting-tests/harness.py
+
+#   references/  — reference material pulled with the repo but not provisioned by brew/stow/skills (e.g. personal CLAUDE.md for the work Mac to cherry-pick from)

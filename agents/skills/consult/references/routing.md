@@ -19,9 +19,9 @@ walk the ranked list, honor Exclusions absolutely.
 
 ## Preferences (ranked, harness-agnostic)
 - deep-reasoning: Fable 5 > GPT-5.6 Sol > Gemini 3.1 Pro (high)
-- hard-coding: GPT-5.6 Sol > Opus 5 > Gemini 3.6 Flash (high)
-- routine-coding: GPT-5.6 Terra > Sonnet 5 > Gemini 3.6 Flash (high)
-- mechanical: GPT-5.6 Luna > Gemini 3.6 Flash (medium)
+- hard-coding: GPT-5.6 Sol > Opus 5 > Gemini 3.7 Flash (high)
+- routine-coding: GPT-5.6 Terra > Sonnet 5 > Gemini 3.7 Flash (high)
+- mechanical: GPT-5.6 Luna > Gemini 3.7 Flash (medium)
 - review: top-ranked deep-reasoning or hard-coding model NOT in the author's
   family (house rule: reviewer ≠ author's family)
 
