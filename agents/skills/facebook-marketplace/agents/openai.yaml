@@ -1,0 +1,4 @@
+interface:
+  display_name: "Facebook Marketplace"
+  short_description: "Research, price, draft, and post Marketplace listings"
+  default_prompt: "Use $facebook-marketplace to research, design, and prepare this item for Facebook Marketplace with human approval before form entry or publication."

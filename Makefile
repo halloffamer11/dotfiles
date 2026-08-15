@@ -15,6 +15,9 @@
 #     hs.configdir and the pathwatcher auto-reload — upstream issue #830), so `configs`
 #     links it explicitly instead of stowing it
 #   - HARNESS_SKILL_DIRS: which harnesses receive authored skills; add ~/.kiro/skills at work
+#   - `skills` runs stow from agents/ (not repo root) so .stowrc's --no-folding is not read:
+#     each skill stays ONE whole-directory symlink, so files added later appear without a restow.
+#     Codex reads ~/.agents/skills (follows dir symlinks); ~/.codex/skills is deprecated upstream.
 #   - Recipes must be indented with a literal TAB (make syntax rule)
 #   - Idempotency lives in the tools: `brew bundle` no-ops when satisfied; `stow -R` re-syncs
 -include local.mk
@@ -38,7 +41,7 @@ configs:
 	ln -sfn $(CURDIR)/stow/hammerspoon/.hammerspoon $(HOME)/.hammerspoon
 
 skills:
-	for t in $(HARNESS_SKILL_DIRS); do mkdir -p $$t && stow -d $(CURDIR)/agents -t $$t -R skills; done
+	for t in $(HARNESS_SKILL_DIRS); do mkdir -p $$t && (cd $(CURDIR)/agents && stow -t $$t -R skills); done
 	ln -sfn "$$(brew --prefix hunk)/libexec/skills/hunk-review" $(HOME)/.claude/skills/hunk-review
 
 externals:
