@@ -80,6 +80,10 @@ for confirmed variant, condition evidence, tests, included items, visible wear
 or defects, location and handoff convenience, and listing recency. Keep
 condition evidence distinct from assertions a competing seller makes.
 
+When the category is time-sensitive (seasonal goods, weather-driven demand,
+school-year or holiday timing), record the current local demand signal with
+its source and date, and let it shape the pricing direction and urgency.
+
 State a market competitiveness judgment: whether the observed range and
 listing quality leave room for a more credible or better-supported listing, or
 whether more listing work is unlikely to create meaningful upside. Explain the

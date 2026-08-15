@@ -25,6 +25,7 @@ The frontmatter uses these optional fields; use `null`, empty lists, and explici
 | `item.variant` | Color, SKU, generation, or other variant; may be `unknown`. |
 | `item.category` | Marketplace product category. |
 | `item.quantity` | Number of items offered. |
+| `item.units` | Optional list when one listing offers several distinct units (for example two models of the same product): per-unit id, model, and label facts. Keep one set of listing, approval, and publication fields for the shared listing. |
 | `condition.seller_assessment` | Seller's condition assessment; may be `unknown`. |
 | `condition.known_defects` | Known defects or limitations. |
 | `condition.included_items` | Accessories and items included in the sale. |

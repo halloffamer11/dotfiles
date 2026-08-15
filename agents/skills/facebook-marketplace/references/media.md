@@ -8,7 +8,8 @@ serial exposure, and coverage of visible defects. Record what each file
 supports; a still image does not establish cleanliness, functionality, or an
 unseen accessory. Before using or translating a visible numeric label claim,
 inspect it at sufficient or original detail and recheck the exact transcribed
-value against the image.
+value against the image. Apply the file's embedded orientation before cropping
+or measuring; a crop computed on un-oriented pixels lands on the wrong region.
 
 ## Derive
 

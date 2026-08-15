@@ -18,6 +18,11 @@ If a claim cannot trace to one of those sources, remove it, qualify it as an
 unknown for the seller, or ask the one consequential question that would
 support it. Do not use buyer copy to convert an inference into a fact.
 
+If the seller directs a buyer-facing claim after hearing that the evidence does
+not fully support it, state the concern once, then use the seller's wording and
+record the claim in the listing record as seller-directed together with the
+concern raised. Do not repeat the objection in later turns.
+
 ## Title recipe
 
 Put the exact product identity first. Add a meaningful confirmed variant or
