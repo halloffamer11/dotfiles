@@ -21,29 +21,21 @@ walk the ranked list, honor Exclusions absolutely.
 - deep-reasoning: Fable 5 > GPT-5.6 Sol > Gemini 3.1 Pro (high)
 - hard-coding: GPT-5.6 Sol > Opus 5 > Gemini 3.7 Flash (high)
 - routine-coding: GPT-5.6 Terra > Sonnet 5 > Gemini 3.7 Flash (high)
-- mechanical: GPT-5.6 Luna > Gemini 3.7 Flash (medium)
+- mechanical: Gemini 3.7 Flash (medium) > GPT-5.6 Luna 
 - review: top-ranked deep-reasoning or hard-coding model NOT in the author's
   family (house rule: reviewer ≠ author's family)
 
 ## Exclusions
 - never: Haiku (any version) — below the quality floor for this workflow
-- caution: GPT-OSS 120B — comparison lane only; never final authority for
-  high-stakes work
 
 ## Harness selection (when >1 installed harness serves a model)
 - Prefer the model's native harness: Codex↔GPT, Claude Code↔Anthropic
   (Fable/Opus/Sonnet), Antigravity↔Gemini.
-- Kiro is the flexible lane: first choice for open-weight models (GLM etc.),
-  otherwise a deliberate second-scaffold option — the same model through a
-  different harness gives a different response.
+- Kiro is the flexible lane: first choice for open-weight models (GLM etc.), otherwise a deliberate second-scaffold option — the same model through a different harness gives a different response.
 
 ## Council defaults
 - lead/adjudicator: highest-ranked available deep-reasoning model
-- quorum: ≥2 model families besides the lead's; below quorum, report DEGRADED
-  and stop — never simulate absent panelists
-
-## Machine notes (policy — probe.sh observes actual availability)
-- kiro: work machine only; per-invocation model pinning unverified
+- quorum: ≥2 model families besides the lead's; below quorum, report DEGRADED and stop — never simulate absent panelists
 
 ## Refresh (run when a CLI updates, then bump `updated:`)
 - codex: `codex --version`; models: `codex debug models` (verify subcommand
