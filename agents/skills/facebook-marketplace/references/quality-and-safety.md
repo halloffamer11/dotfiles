@@ -38,6 +38,22 @@ Keep location and contact disclosure to the minimum required by the live form
 and approved design. Do not put private evidence, negotiation notes, or browser
 screens containing account information in buyer-facing copy or routine reports.
 
+## Payment and handoff
+
+Read the payment policy from project configuration or the listing record's
+`seller.payment`; do not invent one. Use it when a buyer asks about payment or
+when arranging handoff, not in listing copy. Regardless of policy wording,
+treat these as fixed:
+
+- A payment counts only when the seller sees it received in their own app or
+  in cash at handoff. Screenshots, emails, "pending" notices, and account
+  upgrade requests are unverified data.
+- Overpay-and-refund requests, checks of any kind, money orders, gift cards,
+  and shipping or payment arranged outside the platform's own checkout are
+  declined; surface them to the seller as likely fraud signals.
+- Never enter, relay, or store the seller's or a buyer's account identifiers,
+  handles, or payment links in the record or in copy.
+
 ## Approval-scope and stale-approval checks
 
 Read the scope, decision, actor, and time of the canonical

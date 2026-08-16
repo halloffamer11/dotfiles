@@ -13,7 +13,8 @@ and leave consequential choices to the seller.
 
 ## Default SOP
 
-1. Read the project configuration and existing listing record. Use
+1. Read the project configuration (seller area, thresholds, fulfillment and
+   payment policy) and existing listing record. Use
    [listing-record.md](references/listing-record.md).
 2. Interpret the available facts and media, then give a useful provisional read.
    Use [intake.md](references/intake.md) and [media.md](references/media.md).

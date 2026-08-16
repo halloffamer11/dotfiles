@@ -11,8 +11,9 @@ field-to-source check for every buyer-facing claim:
 | Product identity and variant | Seller confirmation, readable label, or cited evidence tied to the item. |
 | Condition, wear, defects, and tests | Seller confirmation or direct observation. A source can never prove this unit's condition. |
 | Features and compatibility | Cited evidence for the confirmed model, plus seller or observation evidence when the claim concerns this unit, an included accessory, or a working setup. |
-| Included items and fulfillment | Seller confirmation or direct observation. |
+| Included items | Seller confirmation or direct observation. |
 | Price and warranty | Seller-approved price; seller confirmation or cited terms for any warranty claim. |
+| Fulfillment, meetup, location, payment | Not description content. These live in the platform's delivery and location settings, the listing record's `seller.*` fields, project configuration, and buyer conversation. See "Transaction terms" below. |
 
 If a claim cannot trace to one of those sources, remove it, qualify it as an
 unknown for the seller, or ask the one consequential question that would
@@ -42,12 +43,25 @@ check:
 2. Give verified highlights that matter to a buyer.
 3. List included items.
 4. State testing and material defects or limitations.
-5. Give confirmed transaction details.
+5. State the approved price.
 6. End with a plain close.
 
+The description is complete when it contains those six parts and nothing else.
 Use short, ordinary sentences. Name a limitation plainly instead of hiding it
 behind promotional language or technical detail that does not help a buyer
 decide.
+
+## Transaction terms
+
+Pickup, delivery, meetup, the seller's town, and payment methods are handled
+by the platform's delivery-method and location settings, the listing record's
+`seller.fulfillment` and `seller.payment` fields, project configuration, and
+the conversation with each buyer. Record them there. When a seller explicitly
+asks for a transaction term in the description, add it as a final sentence
+after the price and note the request in the record.
+
+Payment: the description mentions no payment method. Read the project's
+payment policy for use in buyer replies and handoff, never as a copy source.
 
 ## Humanizing buyer copy
 
@@ -79,7 +93,8 @@ evidence independently supports each fact.
 - Seller-confirmed test: pairing and playback were tested.
 - Observed included items: earbuds, charging case, and USB-C cable.
 - Observed defect: light scuffs on the charging case, visible in photos.
-- Seller-confirmed transaction detail: pickup only.
+- Seller-confirmed fulfillment: pickup only (recorded in `seller.fulfillment`;
+  set in the platform's delivery settings).
 - Seller-approved price: $80.
 
 ### Drafted buyer copy
@@ -91,9 +106,10 @@ Description:
 > Jabra Elite 8 Active Gen 2 earbuds in navy. Tested for pairing and playback;
 > both earbuds and the charging case work. Includes the earbuds, charging case,
 > and USB-C cable. The charging case has light scuffs, shown in the photos.
-> Pickup only. Price is $80. Please message with questions.
+> Price is $80. Please message with questions.
 
-The identity, test result, condition, included items, pickup term, and price
-each trace directly to the factual input set. The description does not add
-model features, battery claims, cleanliness claims, or accessories beyond the
-recorded evidence.
+The identity, test result, condition, included items, and price each trace
+directly to the factual input set. The pickup term is carried by the delivery
+settings and the record, not the description. The description does not add
+model features, battery claims, cleanliness claims, payment methods, or
+accessories beyond the recorded evidence.

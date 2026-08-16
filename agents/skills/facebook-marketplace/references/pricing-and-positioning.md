@@ -46,8 +46,8 @@ Choose a position that a buyer can verify. Prefer, in order of relevance:
   the confirmed item.
 - Clear evidence of this item's condition or a stated test result.
 - A precise list of included items, including material omissions.
-- A truthful convenience the seller can provide, such as an actual pickup,
-  delivery, or shipping option.
+- A truthful convenience the seller can provide, such as an actual delivery
+  or shipping option, expressed through platform settings rather than copy.
 - A competitive gap that the seller can close with better identification,
   photos, condition proof, testing evidence, or accessory clarity.
 

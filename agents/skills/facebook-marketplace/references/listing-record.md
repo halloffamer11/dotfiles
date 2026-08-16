@@ -31,7 +31,8 @@ The frontmatter uses these optional fields; use `null`, empty lists, and explici
 | `condition.included_items` | Accessories and items included in the sale. |
 | `condition.tested` | Whether the item has been tested; may be `unknown`. |
 | `seller.postal_code` | Seller's listing postal code. |
-| `seller.fulfillment` | Available pickup, delivery, or shipping options. |
+| `seller.fulfillment` | Available pickup, delivery, or shipping options; applied through platform settings, not description copy. |
+| `seller.payment` | Preferred and accepted payment methods and any never-accept list, usually inherited from project configuration; used in buyer replies and handoff, not description copy. |
 | `pricing.currency` | Currency for pricing values. |
 | `pricing.recommended` | Research-based price recommendation; not an approval. |
 | `pricing.approved` | User-approved price, or `null` until approved. |
@@ -50,7 +51,7 @@ The frontmatter uses these optional fields; use `null`, empty lists, and explici
 
 ## Module ownership
 
-- Intake owns seller-confirmed item, condition, fulfillment, and open questions.
+- Intake owns seller-confirmed item, condition, fulfillment, payment terms, and open questions.
 - Media owns source paths, derived paths, selected files, order, and rejection notes.
 - Research owns sources and evidence in the Markdown body.
 - Pricing owns recommendations; only the user supplies approved values.
