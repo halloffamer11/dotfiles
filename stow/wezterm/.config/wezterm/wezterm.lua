@@ -41,7 +41,7 @@ config.freetype_load_flags = "NO_HINTING"
 -- === Window ===
 -- Frosted-glass look: terminal at 85% opacity, macOS blurs the wallpaper
 -- behind it. Set opacity = 1.0 / blur = 0 to go solid again.
-config.window_background_opacity = 0.85
+config.window_background_opacity = 0.89
 config.macos_window_background_blur = 50
 config.window_decorations = "RESIZE"
 config.window_padding = { left = 10, right = 10, top = 10, bottom = 0 }
