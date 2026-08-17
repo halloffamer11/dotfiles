@@ -1,0 +1,82 @@
+[
+ {
+  "query": "can you get codex to do an independent review of the auth refactor on this branch? i want a non-anthropic opinion before i merge",
+  "should_trigger": true
+ },
+ {
+  "query": "CONSULT_BALANCE=1 here. i've got ~40 files in src/legacy that need the old logger import swapped for the new one, exact same change each time. my claude 5h is at 85%, gemini is barely touched",
+  "should_trigger": true
+ },
+ {
+  "query": "run this through gemini and gpt as well and tell me where they disagree with your take on the caching strategy in cache.py",
+  "should_trigger": true
+ },
+ {
+  "query": "im near my claude weekly cap (balance mode on) \u2014 push the test-writing for utils/*.py to whichever harness has quota, they're all straightforward pure functions",
+  "should_trigger": true
+ },
+ {
+  "query": "hand the docs regen in packages/api to codex in a worktree, i've authorized edits, i just want it out of my main session",
+  "should_trigger": true
+ },
+ {
+  "query": "second opinion from a different model family please: is my proposed retry/backoff design in RFC-12.md sound?",
+  "should_trigger": true
+ },
+ {
+  "query": "we're balancing quota today; before spawning subagents for the 6 module summaries figure out which harness has headroom and use that",
+  "should_trigger": true
+ },
+ {
+  "query": "let me watch codex work on this one in herdr \u2014 rename the Foo module to Bar across the repo",
+  "should_trigger": true
+ },
+ {
+  "query": "cross-check the sql migration in db/0043 with gpt-5.6, i've been burned by fk ordering before",
+  "should_trigger": true
+ },
+ {
+  "query": "how much quota do i have left across claude codex and antigravity right now?",
+  "should_trigger": true
+ },
+ {
+  "query": "fix the typo in the README heading, it says 'Instalation'",
+  "should_trigger": false
+ },
+ {
+  "query": "what does the -s read-only flag do in codex exec? just curious about the sandbox modes",
+  "should_trigger": false
+ },
+ {
+  "query": "spawn three explore subagents to map how config loading works across packages/",
+  "should_trigger": false
+ },
+ {
+  "query": "review my last commit for bugs",
+  "should_trigger": false
+ },
+ {
+  "query": "which claude model should i set as default for my main session, opus or fable?",
+  "should_trigger": false
+ },
+ {
+  "query": "convene a council on whether we migrate off postgres \u2014 this is a big call",
+  "should_trigger": false
+ },
+ {
+  "query": "add a statusline that shows my 5h usage percentage",
+  "should_trigger": false
+ },
+ {
+  "query": "im out of tokens on codex, when does it reset? i think it said aug 20",
+  "should_trigger": true
+ },
+ {
+  "query": "write a workflow that fans out 8 sonnet agents to audit each service dir for missing tests, then an opus synthesis pass",
+  "should_trigger": false
+ },
+ {
+  "query": "run agy models and tell me which gemini flash slugs are available",
+  "should_trigger": true
+ }
+]

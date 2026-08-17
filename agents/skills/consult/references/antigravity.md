@@ -1,6 +1,6 @@
 # Antigravity CLI (agy, Google) — invocation reference
 
-verified-against: 1.1.10 (2026-08-03)
+verified-against: 1.1.13 (2026-08-16) — flags re-checked; unchanged since 1.1.10. New: top-level `--effort low|medium|high` (cleaner than encoding effort in the slug; slugs still work)
 
 ## Read-only
 agy --model <slug> --mode plan --sandbox --print "$(cat <promptfile>)" </dev/null

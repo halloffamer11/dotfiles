@@ -2,6 +2,7 @@
 # probe.sh — read-only environment sensing for the consult/council skills.
 # Per known agent CLI: presence, version, model catalog. Never invokes a model.
 # Absence is data, not an error: always exits 0.
+exec </dev/null   # agy/codex block on an open stdin; the skill's own rule applies here too
 
 probe() {
   name=$1 bin=$2 models_cmd=$3
@@ -26,4 +27,8 @@ probe codex codex codex_slugs
 probe antigravity agy "agy models"
 probe claude claude ""
 probe kiro kiro-cli "kiro-cli chat --list-models"
+if [ "${CONSULT_BALANCE:-0}" = 1 ]; then
+  printf "## usage (CONSULT_BALANCE=1)\n"
+  python3 "$(dirname "$0")/usage.py" --pretty 2>/dev/null | sed "s/^/  /" || printf "  usage.py failed — treat all lanes as unknown\n"
+fi
 exit 0

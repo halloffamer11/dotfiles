@@ -1,6 +1,6 @@
 # Claude Code headless — invocation reference
 
-verified-against: 2.1.220 (Claude Code) (2026-08-03)
+verified-against: 2.1.233 (Claude Code) (2026-08-16) — flags re-checked; unchanged since 2.1.220
 
 ## Read-only / analysis
 claude -p --permission-mode plan --model <alias|id> --output-format json \

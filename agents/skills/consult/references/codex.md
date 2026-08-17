@@ -1,6 +1,6 @@
 # Codex CLI (OpenAI) — invocation reference
 
-verified-against: codex-cli 0.145.0 (2026-08-03)
+verified-against: codex-cli 0.147.0 (2026-08-16) — flags re-checked against `codex exec --help`; unchanged since 0.145.0
 
 ## Read-only
 codex exec --ignore-user-config --ephemeral --skip-git-repo-check \
