@@ -1,6 +1,6 @@
 # Claude Code headless — invocation reference
 
-verified-against: 2.1.233 (Claude Code) (2026-08-16) — flags re-checked; unchanged since 2.1.220
+verified-against: 2.1.240 (Claude Code) (2026-08-22) — base `-p` form exercised; Browser section added and live-tested
 
 ## Read-only / analysis
 claude -p --permission-mode plan --model <alias|id> --output-format json \
@@ -26,6 +26,26 @@ under `--bare` is strictly `ANTHROPIC_API_KEY` or `apiKeyHelper` (OAuth and
 keychain are never read) — it will fail with "Not logged in" on OAuth-only
 machines. Use it only when the child SHOULD be isolated from auto-discovered
 skills/project instructions, and say so in the consult record line.
+
+## Browser (authenticated, in the user's real browser)
+claude -p --chrome --model <alias|id> "$(cat <promptfile>)" \
+  --allowedTools "mcp__claude-in-chrome" </dev/null
+
+Verified 2026-08-22 (2.1.240): headless child attached to the running
+browser via the Claude extension, opened a tab in its Claude tab group,
+acted in the logged-in session, closed it. All three parts are load-bearing:
+- `--chrome` — integration is off by default in `-p`. OAuth login only:
+  API-key/`setup-token` auth silently disables it (docs, since 2.1.216).
+- Default permission mode, NOT `--permission-mode plan` — plan blocks the
+  browser tools (tab creation is a mutation). With only claude-in-chrome
+  allowlisted, every other un-allowlisted tool still auto-denies headlessly,
+  so the child stays effectively read-only on the filesystem.
+- Prompt BEFORE `--allowedTools` — the flag is variadic and swallows a
+  trailing positional prompt ("Input must be provided..." error).
+Scope-of-access differs from codex: the child cannot see existing tabs
+(tab-group privacy boundary) — it acts in tabs it opens itself, with the
+user's cookies. Concurrent with an interactive session holding its own
+connection (verified). Lane profile: evals/browser/_profile.md.
 
 ## Write-enabled (only when the user authorized implementation)
 Isolated worktree + `--permission-mode acceptEdits`.
