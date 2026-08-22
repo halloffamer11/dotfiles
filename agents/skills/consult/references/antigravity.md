@@ -38,6 +38,9 @@ browser work to codex/claude per evals/browser/_profile.md.
   the prompt and the real prompt is ignored. Always put `--print "<prompt>"`
   last, all other flags before it (observed 1.1.18, 2026-08-22).
 - Hard-fails on unknown `--model` — always pick from live `agy models` output.
+- Playwright MCP drops session artifacts (`.playwright-mcp/page-*.yml`) into
+  the child's cwd. For browser delegations, run agy from a scratch/temp dir —
+  never from inside a repo (they got committed once, 2026-08-22).
 - Display names ("Gemini 3.5 Flash (Medium)") are dead; slugs replaced them.
 - Serves non-Gemini models too: per routing.md Harness selection, prefer agy
   only for Gemini models (native pairing).

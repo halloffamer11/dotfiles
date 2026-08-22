@@ -44,3 +44,6 @@ a read-only sandbox on gpt-5.6-luna.
   trusted directory" (exit 1).
 - Reads extra stdin when piped — always close with `</dev/null`.
 - Reasoning effort only via `-c model_reasoning_effort="…"`.
+- A playwright MCP server is enabled in config.toml but its tools never
+  surfaced in any exec run (2026-08-22) — silent start failure? If that gets
+  fixed, codex gains a disposable-browser lane: re-run evals/browser/run.sh.

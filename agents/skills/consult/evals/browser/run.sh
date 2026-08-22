@@ -21,25 +21,28 @@ OUT=$(mktemp -d "${TMPDIR:-/tmp}/browser-eval.XXXXXX")
 TO=""
 command -v gtimeout >/dev/null 2>&1 && TO="gtimeout 240"
 
+# All lanes run with cwd in $OUT: Playwright MCP (and kin) drop session
+# artifacts (.playwright-mcp/page-*.yml) into cwd — they belong in the temp
+# dir, not the repo.
 run_codex() { # $1 prompt
   # Browser recipe from references/codex.md: NO --ignore-user-config (it
   # strips the MCP servers that carry the browser runtime).
-  $TO codex exec --ephemeral --skip-git-repo-check -C "$PWD" \
+  $TO codex exec --ephemeral --skip-git-repo-check -C "$OUT" \
     -m gpt-5.6-luna -c 'model_reasoning_effort="low"' \
     -s read-only "$1" </dev/null 2>&1
 }
 run_agy() { # $1 prompt
   # Flag order matters: --print "<prompt>" must come last.
-  $TO agy --model gemini-3.7-flash-low --mode plan --sandbox \
-    --print-timeout 200s --print "$1" </dev/null 2>&1
+  (cd "$OUT" && $TO agy --model gemini-3.7-flash-low --mode plan --sandbox \
+    --print-timeout 200s --print "$1" </dev/null 2>&1)
 }
 run_claude() { # $1 prompt
   # Browser recipe from references/claude.md: --chrome enables the extension
   # integration (off by default in -p); default permission mode, because
   # plan mode blocks the browser tools; prompt must precede the variadic
   # --allowedTools flag or it swallows the prompt.
-  $TO claude -p --chrome --model sonnet "$1" \
-    --allowedTools "mcp__claude-in-chrome" </dev/null 2>&1
+  (cd "$OUT" && $TO claude -p --chrome --model sonnet "$1" \
+    --allowedTools "mcp__claude-in-chrome" </dev/null 2>&1)
 }
 run_kiro() { # $1 prompt
   # references/kiro.md is an unverified stub; revisit when validated.
