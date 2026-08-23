@@ -1,6 +1,6 @@
 # Antigravity CLI (agy, Google) — invocation reference
 
-verified-against: 1.1.18 (2026-08-22) — flags re-checked; browser lane live-tested via Playwright MCP. Top-level `--effort low|medium|high` still present (slugs still work)
+verified-against: 1.1.18 (2026-08-22) — flags re-checked; browser lane live-tested via Playwright MCP. Top-level `--effort low|medium|high` still present (slugs still work). Browser recipe corrected 2026-08-22 PM after live failures (see Browser: no `--mode plan`, two mandatory prompt directives)
 
 ## Read-only
 agy --model <slug> --mode plan --sandbox --print "$(cat <promptfile>)" </dev/null
@@ -13,7 +13,22 @@ Slug IDs only, from live `agy models` (e.g. gemini-3.6-flash-medium,
 gemini-3.1-pro-high). Catalog also lists claude-* and gpt-oss-* lanes.
 
 ## Browser (unauthenticated only — disposable Chromium, no logins)
-Same read-only recipe; the child drives the Playwright MCP server already
+NOT the read-only recipe — drop `--mode plan` for browser delegations:
+
+agy --model <slug> --sandbox --print-timeout 9m --print "$(cat <promptfile>)" </dev/null
+
+In plan mode a multi-step browser task writes an implementation plan and waits
+for an interactive "Proceed" that never comes (observed 1.1.18, 2026-08-22;
+the eval passed only because its probe task was trivial). Read-only still
+holds without `--mode plan`: only the Playwright interaction set is granted,
+so edits and terminal auto-deny. The prompt MUST include two directives:
+(1) "Execute now with the browser tools; do not write a plan or ask for
+approval — non-interactive session, printed output is the deliverable."
+(2) "Use ONLY the Playwright browser tools; never run terminal commands —
+they are blocked and the attempt kills the session." (Observed: a child
+shelling out to python3 to decode a screenshot died on the sandbox denial,
+exit 1, empty output.)
+The child drives the Playwright MCP server already
 configured in agy (`agy mcp list` → playwright). Playwright launches its own
 fresh Chromium: no cookies, no logged-in sessions. Route authenticated
 browser work to codex/claude per evals/browser/_profile.md.
