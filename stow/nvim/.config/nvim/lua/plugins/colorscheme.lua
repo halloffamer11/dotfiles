@@ -1,5 +1,5 @@
 return {
-  -- Active theme: duskfox (a nightfox variant)
+  -- Active theme: catppuccin-latte (light). duskfox / gruvbox-material kept as alternates.
   { "EdenEast/nightfox.nvim", lazy = false, priority = 1000 },
 
   -- Installed alternates — preview/switch anytime via <leader>uC.
@@ -16,5 +16,5 @@ return {
     end,
   },
 
-  { "LazyVim/LazyVim", opts = { colorscheme = "duskfox" } },
+  { "LazyVim/LazyVim", opts = { colorscheme = "catppuccin-frappe" } },
 }
