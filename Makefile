@@ -45,7 +45,6 @@ skills:
 	ln -sfn "$$(brew --prefix hunk)/libexec/skills/hunk-review" $(HOME)/.claude/skills/hunk-review
 
 externals:
-	npx -y skills add kunchenguid/lavish-axi -g -y
 	npx -y skills add herdrdev/herdr --skill herdr -g -y
 	npx -y skills add blader/humanizer -g -y
 

@@ -45,3 +45,14 @@ stale pointers and anything now derivable from the code. Keep it well under
 Report in chat: what was kept and where its state now lives, what was
 deleted, and what changed in CLAUDE.md. No file summarizes the session — the
 next session starts from CLAUDE.md.
+
+## Restart prompt
+
+After the fresh context protocol is completed the user is expecting to clear 
+the context or start a new session. Assume this is the case and proactively
+provide a 1-line "restart prompt" that will pick up work where it left off.
+Use 1-line because the project itself is self-documenting. Most cases a simple
+statement like "resume" will be sufficient. If a custom workflow or execution
+plan is underway it may be necessary to trigger key words like "workflows" or 
+use specific skills like "implement" for mattpocock skills or something equivalent.
+Use your judgement to determine the correct restart prompt.
