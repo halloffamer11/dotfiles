@@ -12,6 +12,7 @@ brew "zsh-syntax-highlighting"
 brew "fzf"
 brew "zoxide"
 brew "eza"
+brew "terminal-notifier"
 
 # Editors & VCS
 brew "neovim"
