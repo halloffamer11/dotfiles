@@ -49,6 +49,7 @@ cask "wezterm"                          # primary
 # Apps
 cask "raycast"
 cask "helium-browser"
+cask "zed@preview"
 
 # Fonts
 cask "font-meslo-lg-nerd-font"
