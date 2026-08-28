@@ -40,6 +40,9 @@ brew "pipx"
 # macOS plumbing
 brew "duti"
 
+# Security and Passwords
+brew "bitwarden"
+
 # Terminals
 cask "wezterm"                          # primary
 
