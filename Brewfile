@@ -41,7 +41,7 @@ brew "pipx"
 brew "duti"
 
 # Security and Passwords
-brew "bitwarden"
+cask "bitwarden"
 
 # Terminals
 cask "wezterm"                          # primary
