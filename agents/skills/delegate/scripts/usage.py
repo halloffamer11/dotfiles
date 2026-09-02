@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 """usage.py — read subscription usage for each installed agent CLI, headlessly.
 
-Emits one JSON document of *lanes* (harness × meter) with an effective
-remaining fraction r = min(remaining_5h, remaining_weekly). Costs zero model
-tokens: every probe is a slash/status command, not a prompt.
+Emits one JSON document of *lanes* (harness × meter). Per lane:
+  r      = min(remaining_5h, remaining_weekly): the gate (availability).
+  pace   = remaining_weekly / fraction of the weekly cycle still to run.
+           1.0 = spending evenly; >1 = ahead (under-used, will expire unspent);
+           <1 = behind (over-spent). Cycle length is assumed 7 days.
+  score  = pace when the weekly meter and its reset are known, else r.
+           rank.py sorts on score. The 5h window is a rate cap, not a budget:
+           what expires unspent is the weekly allotment, so pace is the thing
+           to balance.
+Costs zero model tokens: every probe is a slash/status command, not a prompt.
 
   usage.py            serve cache if younger than TTL, else re-probe
   usage.py --refresh  force re-probe
@@ -19,6 +26,8 @@ from datetime import datetime, timezone
 
 TTL_MIN_DEFAULT = 10
 GATE = 0.10           # r below this → lane unavailable
+WEEK = 7 * 86400      # assumed weekly-cycle length for pace
+CYCLE_FLOOR = 0.02    # ~3.4h: pace denominator floor near a reset
 ROLLOVER_MIN = 30     # binding window resets within this → ask user whether to wait
 CACHE = os.environ.get("DELEGATE_CACHE") or os.environ.get("CONSULT_CACHE") or os.path.expanduser("~/.cache/delegate/usage.json")
 NOW = time.time()
@@ -41,9 +50,15 @@ def lane(harness, meter, five_h=None, weekly=None, reset_5h=None, reset_wk=None,
     reset = reset_wk if binding == "weekly" else reset_5h
     status = "unknown" if r is None else ("unavailable" if r < GATE else "ok")
     rollover = bool(reset and status == "unavailable" and (reset - NOW) <= ROLLOVER_MIN * 60)
+    cycle_left = pace = None
+    if weekly is not None and reset_wk:
+        cycle_left = min(1.0, max(CYCLE_FLOOR, (reset_wk - NOW) / WEEK))
+        pace = round(weekly / cycle_left, 3)
+    score = pace if pace is not None else r
     return {"lane": f"{harness}-{meter}" if meter else harness, "harness": harness, "meter": meter,
             "remaining_5h": five_h, "remaining_weekly": weekly, "r": r, "binding": binding,
             "reset_5h": reset_5h, "reset_weekly": reset_wk, "reset_binding": reset,
+            "cycle_left": cycle_left, "pace": pace, "score": score,
             "status": status, "rollover_soon": rollover, "note": note}
 
 # ---------------------------------------------------------------- codex
@@ -106,6 +121,22 @@ def probe_agy():
     return out or [lane("agy", None, note="no groups")]
 
 # ---------------------------------------------------------------- claude
+def claude_reset(text):
+    """'Sep 8 at 2:59pm (America/New_York)' -> epoch seconds, or None. The year is
+    not printed: assume the current one, roll forward if that lands in the past."""
+    if not text: return None
+    m = re.search(r"([A-Z][a-z]{2}) (\d{1,2}) at (\d{1,2}):(\d{2})(am|pm) \(([^)]+)\)", text)
+    if not m: return None
+    try:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo(m.group(6)); hour = int(m.group(3)) % 12 + (12 if m.group(5) == "pm" else 0)
+        year = datetime.now(tz).year
+        t = datetime.strptime(f"{m.group(1)} {m.group(2)} {year} {hour}:{m.group(4)}", "%b %d %Y %H:%M").replace(tzinfo=tz)
+        if t.timestamp() < NOW - 86400: t = t.replace(year=year + 1)
+        return t.timestamp()
+    except Exception:
+        return None
+
 def probe_claude():
     if not which("claude"): return [lane("claude", None, note="absent")]
     r = run(["claude", "-p", "--permission-mode", "plan", "--output-format", "json", "/usage"], timeout=60, stdin_data="")
@@ -116,14 +147,16 @@ def probe_claude():
         m = re.search(re.escape(label) + r":\s*(\d+)% used(?: · resets ([^\n]+))?", text)
         return (None, None) if not m else (1 - int(m.group(1)) / 100.0, m.group(2))
     f5, r5 = pct("Current session"); fw, rw = pct("Current week (all models)")
-    lanes = [lane("claude", "general", f5, fw, note=f"resets: 5h '{r5}', weekly '{rw}'")]
+    lanes = [lane("claude", "general", f5, fw, claude_reset(r5), claude_reset(rw),
+                  note=f"resets: 5h '{r5}', weekly '{rw}'")]
     # per-model weekly meters, e.g. "Current week (Fable): 86% used"
     for m in re.finditer(r"Current week \(([^)]+)\):\s*(\d+)% used(?: · resets ([^\n]+))?", text):
         name = m.group(1)
         if name.lower() == "all models": continue
         fm = 1 - int(m.group(2)) / 100.0
         wk = min(fw, fm) if fw is not None else fm
-        lanes.append(lane("claude", name.lower(), f5, wk, note=f"model-meter weekly {m.group(2)}% used; resets '{m.group(3)}'"))
+        lanes.append(lane("claude", name.lower(), f5, wk, claude_reset(r5), claude_reset(m.group(3) or rw),
+                          note=f"model-meter weekly {m.group(2)}% used; resets '{m.group(3)}'"))
     return lanes
 
 # ---------------------------------------------------------------- grok
@@ -202,7 +235,8 @@ def main():
             def f(x): return "  ?" if x is None else f"{int(round(x*100)):3d}%"
             rb = L.get("reset_binding")
             rb = datetime.fromtimestamp(rb).strftime("%b %d %H:%M") if rb else "-"
-            print(f"{L['lane']:<18} r={f(L['r'])}  5h={f(L['remaining_5h'])}  wk={f(L['remaining_weekly'])}  "
+            pace = "   ?" if L.get('pace') is None else f"{L['pace']:4.2f}"
+            print(f"{L['lane']:<18} pace={pace}  r={f(L['r'])}  5h={f(L['remaining_5h'])}  wk={f(L['remaining_weekly'])}  "
                   f"binding={L['binding'] or '-':<6} reset={rb:<12} {L['status']}"
                   f"{' ROLLOVER-SOON' if L['rollover_soon'] else ''}  {L.get('note') or ''}")
     else:

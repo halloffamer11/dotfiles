@@ -83,6 +83,13 @@ if [ -n "$write" ]; then
 else
   write_rule="Read-only: do not create, edit, or delete files."
 fi
+# agy plan mode auto-denies every terminal command and ENDS the run at the
+# first attempt (CANCELED at step 2, 2026-09-02: Opus ran `git diff` despite the
+# brief). Say it in the brief, where the model reads it, not only in the brief's
+# constraints line the caller wrote.
+if [ "$harness" = agy ] && [ -z "$write" ]; then
+  write_rule="$write_rule You have NO terminal: any command tool (git, grep, cat, tests) is auto-denied and terminates this session. Read files with the file-read tool only and reason statically; anything you would have run has been materialised as a file in the working directory or is out of scope."
+fi
 prompt_file=$(mktemp -t delegate-brief).md
 python3 "$SKILL/scripts/render-brief.py" "$TEMPLATE" "$prompt_file" \
   "$tool_budget" "$(field objective)" "$cwd" "$(field scope)" \
@@ -92,9 +99,17 @@ python3 "$SKILL/scripts/render-brief.py" "$TEMPLATE" "$prompt_file" \
 case $harness in
   agy)
     # Antigravity: --print must be LAST; --mode plan is the read-only guard.
+    # --print-timeout defaults to 5m, which killed a productive Opus review at
+    # step 51 (2026-09-02, KOL); size it to effort. high exceeds the 10-minute
+    # Bash ceiling: callers use run_in_background and poll --out.
     mode=plan
     if [ -n "$write" ]; then mode=accept-edits; fi
-    set -- agy --model "$slug" --mode "$mode" --sandbox \
+    case $effort in low) print_timeout=6m ;; high) print_timeout=25m ;; *) print_timeout=10m ;; esac
+    # No --effort on agy: Gemini slugs carry it (…-flash-medium, "conflicts with
+    # --effort") and Claude slugs reject it ("--effort is not supported for
+    # model claude-opus-4-6-thinking"), both verified live on 1.1.24, 2026-09-02.
+    # Effort reaches an agy child only through the slug and the print timeout.
+    set -- agy --model "$slug" --mode "$mode" --sandbox --print-timeout "$print_timeout" \
            --output-format json --json-schema "$SCHEMA"
     if [ -n "$resume" ]; then set -- "$@" --conversation "$resume"; fi
     set -- "$@" --print "$(cat "$prompt_file")"
@@ -116,6 +131,17 @@ case $harness in
     ;;
   grok)
     # Grok: --tools is the read-only guard (removes shell and edit tools entirely).
+    # NO --json-schema here: on grok 4.6 (1.0.13) the schema constraint applies to
+    # every message, and the model then ends turn 1 with a schema-shaped object
+    # ("placeholder", a fabricated "done", or a "partial" progress note) without
+    # a single tool call — 4 of 4 fresh runs, at medium and high effort, with and
+    # without a must-read-first line (2026-09-02). The same brief without the
+    # flag read every file and answered 5/5. The schema goes into the prompt
+    # instead; normalize.py takes the last JSON object out of the text.
+    {
+      printf '\n\n# Return schema\nYour final message is ONLY one JSON object matching this schema:\n'
+      cat "$SCHEMA"
+    } >> "$prompt_file"
     if [ -n "$write" ]; then
       set -- grok --prompt-file "$prompt_file" --permission-mode acceptEdits \
              --allow Write --allow Edit --sandbox workspace
@@ -125,7 +151,7 @@ case $harness in
     fi
     set -- "$@" --no-subagents --disable-web-search -m "$slug" \
            --reasoning-effort "$effort" --output-format json \
-           --json-schema "$(cat "$SCHEMA")" --max-turns $((tool_budget * 2)) --cwd "$cwd"
+           --max-turns $((tool_budget * 2)) --cwd "$cwd"
     if [ -n "$resume" ]; then set -- "$@" -r "$resume"; fi
     ;;
   claude)
@@ -179,11 +205,15 @@ session_id=$(python3 "$SKILL/scripts/normalize.py" "$source" "$out")
 retry_note=""
 if [ "$rc" -ne 0 ] && [ -z "$resume" ] && [ -z "${DELEGATE_EXCLUDE:-}" ]; then
   status=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('status',''))" "$out" 2>/dev/null)
+  # A timeout or a permission denial is not a model-version failure: do not
+  # burn a second run of the same brief on an older slug for it.
+  if grep -q -i -E "timeout|permission|denied|CANCELED" "$out" "$raw.err" 2>/dev/null; then status=""; fi
   if [ "$status" = "blocked" ] || [ "$status" = "partial" ]; then
     next_slug=$(DELEGATE_EXCLUDE="$slug" sh "$SKILL/scripts/resolve-model.sh" "$role")
     if [ -n "$next_slug" ] && [ "$next_slug" != "$slug" ]; then
       echo "delegate: $slug failed (rc=$rc); retrying once on $next_slug" >&2
-      DELEGATE_EXCLUDE="$slug" exec sh "$0" --harness "$harness" --role "$role" --brief "$brief" \
+      # $0 may be relative and we have cd'd into $cwd: use the resolved path.
+      DELEGATE_EXCLUDE="$slug" exec sh "$SKILL/scripts/dispatch.sh" --harness "$harness" --role "$role" --brief "$brief" \
         --cwd "$cwd" --out "$out" --effort "$effort" --tool-budget "$tool_budget" \
         ${write:+--write "$write"} ${keep_session:+$( [ "$keep_session" = 1 ] && echo --keep-session )}
     fi

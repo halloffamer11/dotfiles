@@ -18,12 +18,18 @@ HOW THE RANK WORKS (the whole algorithm, in order)
      the human's preference when quota is not a concern.
   2. If DELEGATE_BALANCE is not 1: print them in pin order and stop. Done.
   3. Otherwise read the live meters from usage.py (cached, zero model tokens).
-     r = remaining fraction of the lane's meter, 0.0 .. 1.0.
+     Each meter carries r = min(5h, weekly) remaining (the gate) and
+     pace = weekly remaining / fraction of the weekly cycle still to run.
+     pace 1.0 = spending evenly; above 1 = ahead (quota will expire unspent);
+     below 1 = behind (over-spent). The 5h window is a rate cap, not a budget:
+     what is lost at a reset is the unspent WEEKLY allotment, so pace is the
+     thing to balance. score = pace, or r when the weekly meter is unknown.
   4. Drop lanes whose meter says "unavailable" (r below the gate in lanes.json).
-  5. Sort the rest by r, highest first. The lane with the most quota left wins.
-     One exception: two lanes that are both ABOVE the rebalance line and within
-     tie_band of each other keep pin order (quality preference wins a near-tie).
-     Lower burn (list-price cost) breaks any remaining tie.
+  5. Sort the rest by score, highest first: the lane furthest ahead of its
+     spending pace wins. One exception: two lanes that are both ABOVE the
+     rebalance line (r) and within tie_band of each other on score keep pin
+     order (quality preference wins a near-tie). Lower burn (list-price cost)
+     breaks any remaining tie.
   6. A lane with an unknown meter is listed after every known one.
   7. A tier-1 class with no available lane prints STOP and the earliest reset,
      and exits 1. Never degrade tier-1 work.
@@ -93,6 +99,8 @@ def build_rows(registry, cls, meters, author_family, balanced):
             "tier": lane["tier"],
             "pin": pin_index,
             "r": meter.get("r"),
+            "pace": meter.get("pace"),
+            "score": meter.get("score", meter.get("r")),
             "status": meter.get("status", "unknown" if balanced else "pinned"),
             "burn": burn(lane),
             "courier": lane["courier"],
@@ -104,21 +112,21 @@ def build_rows(registry, cls, meters, author_family, balanced):
 
 def order_rows(rows, registry):
     """Steps 4-6 of the algorithm."""
-    known_ok = [row for row in rows if row["status"] == "ok" and row["r"] is not None]
-    unknown = [row for row in rows if row["r"] is None]
-    unavailable = [row for row in rows if row["r"] is not None and row["status"] != "ok"]
-    leader_r = max((row["r"] for row in known_ok), default=None)
+    known_ok = [row for row in rows if row["status"] == "ok" and row["score"] is not None]
+    unknown = [row for row in rows if row["score"] is None]
+    unavailable = [row for row in rows if row["score"] is not None and row["status"] != "ok"]
+    leader = max((row["score"] for row in known_ok), default=None)
 
     def sort_key(row):
         near_leader = (
-            leader_r is not None
-            and (leader_r - row["r"]) <= registry["tie_band"]
-            and row["r"] >= registry["rebalance"]
+            leader is not None
+            and (leader - row["score"]) <= registry["tie_band"]
+            and (row["r"] or 0) >= registry["rebalance"]
         )
         # Near the leader and healthy: sort as if tied with the leader, then by pin.
-        # Otherwise: strictly by remaining quota.
-        effective_r = leader_r if near_leader else row["r"]
-        return (-effective_r, row["pin"] if near_leader else 0, row["burn"])
+        # Otherwise: strictly by score (pace, or r when the weekly meter is unknown).
+        effective = leader if near_leader else row["score"]
+        return (-effective, row["pin"] if near_leader else 0, row["burn"])
 
     return sorted(known_ok, key=sort_key) + unknown + unavailable
 
@@ -132,8 +140,9 @@ def print_table(class_name, cls, rows, balanced, usage_doc):
     print(f"# {class_name} (tier {cls['tier']}; {mode})")
     for n, row in enumerate(rows, 1):
         r_text = "  ?" if row["r"] is None else f"{int(round(row['r'] * 100)):3d}%"
+        pace_text = "   ?" if row.get("pace") is None else f"{row['pace']:4.2f}"
         via = row["courier"] or f"Agent model:{row['model']}"
-        print(f"{n}. {row['lane']:<18} r={r_text}  burn=${row['burn']:<5} {row['status']:<11} via {via}")
+        print(f"{n}. {row['lane']:<18} pace={pace_text}  r={r_text}  burn=${row['burn']:<5} {row['status']:<11} via {via}")
 
 
 def main():

@@ -28,10 +28,11 @@ Prints the eligible lanes best first. Worker classes pin external lanes
 first and Claude lanes last, so an external lane wins whenever one is
 available: the balancing happens on every call, not only when Claude is
 low. With `DELEGATE_BALANCE=1` (personal machines, `~/.zshrc.local`) the
-live meters decide between eligible lanes: highest remaining r wins, pin
-order breaks near-ties only above the 40% line, unavailable lanes are
-skipped, a tier-1 class with no lane says STOP with the earliest reset.
-Without it, pin order is the answer. For `review` pass the author's family
+live meters decide between eligible lanes: the lane furthest ahead of its
+weekly spending pace wins (pace = weekly remaining ÷ cycle fraction
+remaining; the 5h window is only a gate), pin order breaks near-ties only
+above the 40% line, unavailable lanes are skipped, a tier-1 class with no
+lane says STOP with the earliest reset. Without it, pin order is the answer. For `review` pass the author's family
 so the reviewer is never the author's family. Take the top lane; a lower
 one needs a stated reason. Record one line:
 `delegate: <class> → <lane> (rank #n, r=NN%[, reason])`.
@@ -70,8 +71,15 @@ version fails.
   session id. `--resume <id>` continues that child for a follow-up that
   builds on its findings and is smaller than a cold spawn. A large or
   unrelated follow-up starts fresh. An option to right-size, not a rule.
-- **sol@codex at high effort** outruns the 10-minute Bash ceiling: run the
-  courier or the inline call with `run_in_background` and poll the out file.
+- **sol@codex and opus46@agy at high effort** outrun the 10-minute Bash
+  ceiling: run the courier or the inline call with `run_in_background` and
+  poll the out file. dispatch.sh sets agy's `--print-timeout` from effort
+  (6m/10m/25m); the default 5m ended a productive review mid-read.
+- **agy read-only children have no terminal.** dispatch.sh says so in the
+  brief; still pre-materialise anything the child would shell out for (a
+  diff, `git show`) as a file in its working directory. A whole-branch
+  review is too big for one agy dispatch: split by file or send it to
+  sol@codex.
 - **Herdr visibility lane:** only when the user asks to watch and
   `HERDR_ENV=1` (references/herdr.md). Never auto-select.
 

@@ -40,15 +40,30 @@ Pins that do not move with quota:
 - opus5@claude never exceeds one third of a workflow's agents.
 - agy's Claude-family lane (opus46@agy) takes verify/critic/revise stages —
   Claude-family judgement without spending claude-general (Q2, 2026-09-02).
+- flash-high@agy is in verify on trial (2026-09-02, Orin: Gemini 3.8 Flash
+  high is on par with Grok 4.6). Pinned last among the external lanes; the
+  next 3 real verify briefs go to it and grok46 in parallel, adjudicated by
+  the session. Move it up or drop it on that evidence. Brief 1 (2026-09-02,
+  five code claims over this skill, two planted false): Flash 5/5 with exact
+  lines in 1m57s; Grok 5/5 in 1m39s once the harness recipe was fixed
+  (references/grok.md, `--json-schema`). Two briefs remain.
 
 ## 3. Rank (`rank.py <class> [author-family]`) — balancing at every stage
 Pin order already puts external lanes first for every worker class, so the
 external default holds at any quota level. With DELEGATE_BALANCE=1 the live
 meters choose among the eligible lanes:
-- r = min(remaining_5h, remaining_weekly) per meter from usage.py.
-- status unavailable (r < gate 10%) is skipped; unknown never beats a known r.
-- Highest r wins. Within tie_band (15 pts) and above the rebalance line
-  (40%), pin order wins, then lower burn.
+- Two numbers per meter from usage.py. r = min(remaining_5h,
+  remaining_weekly) is the gate. pace = remaining_weekly ÷ fraction of the
+  weekly cycle still to run: 1.0 is even spending, above 1 is ahead (that
+  quota expires unspent at the reset), below 1 is behind. The 5h window is a
+  rate cap, not a budget — nothing is lost when it goes unused — so the
+  weekly allotment is what the rank spends evenly (adopted 2026-09-02, after
+  Codex was ranked last all week: its weekly was 75% spent by Sep 1 while
+  Antigravity was on course to lose half its cycle unspent).
+- status unavailable (r < gate 10%) is skipped; unknown never beats a known
+  score. score = pace, or r for a meter with no weekly reading.
+- Highest score wins. Within tie_band (0.15) on score and above the
+  rebalance line (r 40%), pin order wins, then lower burn.
 - Tier-1 class with no available lane → STOP and report the earliest reset.
 - With DELEGATE_BALANCE unset, pin order is the answer (optimal mode).
 The 40% line is not where balancing starts; it is where the hard stops start

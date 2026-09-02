@@ -2,7 +2,8 @@
   "updated": "2026-09-02",
   "notes": [
     "One lane = one model reached through one harness, drawing on one usage meter from scripts/usage.py.",
-    "burn = 0.75*input + 0.25*output USD per Mtok at API list price (agentic work is input-heavy). Subscription meters drain in proportion to list-price cost, so burn predicts meter drain per token; live remaining r decides between eligible lanes.",
+    "burn = 0.75*input + 0.25*output USD per Mtok at API list price (agentic work is input-heavy). Subscription meters drain in proportion to list-price cost, so burn predicts meter drain per token; live pace (weekly remaining / cycle fraction remaining, from usage.py) decides between eligible lanes; r = min(5h, weekly) is the gate and the rebalance line only.",
+    "tie_band is measured on score (pace); rebalance and gate on r. Weekly cycles are assumed 7 days (usage.py WEEK).",
     "Prices verified 2026-09-02: Anthropic (claude-api skill table, cached 2026-06-24), OpenAI developers.openai.com/api/docs/pricing, xAI docs.x.ai/docs/models, Google ai.google.dev/gemini-api/docs/pricing (through 2026-12-31).",
     "ASSUMPTION: agy meters Claude/GPT-OSS models at Anthropic list price; unverified against Google's own accounting.",
     "Each lane wins at least one class; each class lists its eligible lanes in pin order. A lane that wins nothing gets no row."
@@ -20,7 +21,7 @@
     {"lane": "grok46@grok",        "harness": "grok",   "role": "grok-code",           "meter": "grok",           "family": "xai",       "tier": 2, "input": 2.0,  "output": 6.0,  "worker": true,  "courier": "grok-runner",  "note": "weekly meter only"},
     {"lane": "opus46@agy",         "harness": "agy",    "role": "agy-claude-hard",     "meter": "agy-claude-gpt", "family": "anthropic", "tier": 2, "input": 5.0,  "output": 25.0, "worker": true,  "courier": "agy-runner",   "note": "Claude-family judgement without the session's context; Q2 admitted 2026-09-02"},
     {"lane": "sonnet5@claude",     "harness": "claude", "model": "sonnet",             "meter": "claude-general", "family": "anthropic", "tier": 2, "input": 2.0,  "output": 10.0, "worker": true,  "courier": null,           "note": "internal; only when the worker needs the Skill tool or live project context"},
-    {"lane": "flash-high@agy",     "harness": "agy",    "role": "gemini-routine",      "meter": "agy-gemini",     "family": "google",    "tier": 2, "input": 0.75, "output": 3.75, "worker": true,  "courier": "agy-runner",   "note": "routine overflow with a crisp definition of done"},
+    {"lane": "flash-high@agy",     "harness": "agy",    "role": "gemini-routine",      "meter": "agy-gemini",     "family": "google",    "tier": 2, "input": 0.75, "output": 3.75, "worker": true,  "courier": "agy-runner",   "note": "routine overflow with a crisp definition of done; verify admitted 2026-09-02 on trial (Orin: Flash 3.8 high ~ Grok 4.6), paired against grok46 on the next 3 verify briefs"},
     {"lane": "flash-medium@agy",   "harness": "agy",    "role": "gemini-mechanical",   "meter": "agy-gemini",     "family": "google",    "tier": 3, "input": 0.75, "output": 3.75, "worker": true,  "courier": "agy-runner",   "note": ""},
     {"lane": "luna@codex",         "harness": "codex",  "role": "codex-mechanical",    "meter": "codex",          "family": "openai",    "tier": 3, "input": 0.2,  "output": 1.2,  "worker": true,  "courier": "codex-runner", "note": "tier-3 fallback when agy is absent"},
     {"lane": "haiku@claude",       "harness": "claude", "model": "haiku",              "meter": "claude-general", "family": "anthropic", "tier": 0, "input": 1.0,  "output": 5.0,  "worker": false, "courier": null,           "note": "courier relay only, never work; no effort support"}
@@ -31,7 +32,7 @@
     "review":     {"tier": 1, "pins": ["sol@codex", "opus46@agy"],                                         "shape": "independent review of a diff. Rule: reviewer family != author family."},
     "hard-impl":  {"tier": 1, "pins": ["sol@codex", "opus5@claude"],                                       "shape": "security-sensitive or nonlocal invariants"},
     "impl":       {"tier": 2, "pins": ["terra@codex", "grok46@grok", "flash-high@agy", "sonnet5@claude"],  "shape": "self-contained implementation, tests, refactor with a clear spec"},
-    "verify":     {"tier": 2, "pins": ["opus46@agy", "grok46@grok", "sonnet5@claude"],                     "shape": "refute, verify, standards check, critic, revise"},
+    "verify":     {"tier": 2, "pins": ["opus46@agy", "grok46@grok", "flash-high@agy", "sonnet5@claude"],                     "shape": "refute, verify, standards check, critic, revise"},
     "scout":      {"tier": 3, "pins": ["flash-medium@agy", "flash-high@agy", "luna@codex"],                "shape": "finder, grounding, search and summarize, research legwork"},
     "mechanical": {"tier": 3, "pins": ["flash-medium@agy", "luna@codex"],                                  "shape": "renames, formatting, high-volume transforms, extraction, scaffolding"},
     "browser":    {"tier": 2, "pins": [],                                                                  "shape": "route by evals/browser/_profile.md, then classify the reasoning part as above"},

@@ -3,7 +3,14 @@
 verified-against: 1.1.24 (2026-09-01 browser eval; flags re-checked against --help on 1.1.23 the same day; new since 1.1.18: --agent, --json-schema, --disable-slash-commands) — earlier: 1.1.18 (2026-08-22) — flags re-checked; browser lane live-tested via Playwright MCP. Top-level `--effort low|medium|high` still present (slugs still work). Browser recipe corrected 2026-08-22 PM after live failures (see Browser: no `--mode plan`, two mandatory prompt directives)
 
 ## Read-only
-agy --model <slug> --mode plan --sandbox --print "$(cat <promptfile>)" </dev/null
+agy --model <slug> --mode plan --sandbox --print-timeout <6m|10m|25m> --print "$(cat <promptfile>)" </dev/null
+
+`--print-timeout` sized to effort (dispatch.sh does this); the 5m default is
+too short for Claude-family reviews (see Quirks). Do NOT pass `--effort`: the
+flag exists in `--help` but every catalog slug rejects it — Gemini slugs
+because they carry the effort suffix ("conflicts with --effort=low"), Claude
+slugs outright ("--effort is not supported for model claude-opus-4-6-thinking";
+both verified live on 1.1.24, 2026-09-02). Effort on this harness is the slug.
 
 ## Write-enabled (only when the user authorized implementation; isolated worktree)
 Same but `--mode accept-edits`.
@@ -48,6 +55,21 @@ browser work to codex/claude per evals/browser/_profile.md.
   authenticated probe, the profile flips it into the authenticated pool.
 
 ## Quirks
+- `--print-timeout` defaults to 5m and it is a hard stop: `printmode.go: Print
+  mode: timed out after N polls`, envelope `{"status":"ERROR","error":"timeout
+  waiting for response","response":""}`, the work so far is discarded.
+  Observed 2026-09-02 (1.1.24): an Opus 4.6 review of a 1758-line diff was at
+  step 51 / 29 file reads / 155k input tokens when the 5m fired. Set the flag
+  from effort; at high, run the caller in the background (10-minute Bash cap).
+- Plan mode ends the run on the FIRST command attempt: `tool_confirmation_
+  manager.go: Print mode: soft-denying tool confirmation "RunCommand"`, then
+  envelope `{"status":"CANCELED","response":""}` at ~10s, exit 0. Observed
+  2026-09-02: Opus ran `git diff main...HEAD` at step 2 despite a brief that
+  forbade commands. dispatch.sh now states "you have NO terminal" inside the
+  brief; still pre-materialise anything the child would shell out for.
+- Convergence budgets are advisory for Claude-family models here: the same
+  child made 29 tool calls against a stated budget of 12. Size the input, not
+  the budget.
 - Flag order: `--print` swallows the next token as its prompt. Any flag placed
   between `--print` and the prompt (e.g. `--print-timeout`) silently becomes
   the prompt and the real prompt is ignored. Always put `--print "<prompt>"`

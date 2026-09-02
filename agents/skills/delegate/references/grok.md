@@ -8,6 +8,9 @@ grok --prompt-file <promptfile> --permission-mode plan \
   -m <slug> --reasoning-effort <low|medium|high|xhigh> \
   --output-format json --max-turns <N> --cwd "<workdir>" </dev/null
 
+No `--json-schema` (see Quirks): the return schema is appended to the prompt
+text by dispatch.sh and normalize.py reads the last JSON object in `text`.
+
 `--tools` is the guard: it removes the shell and edit tools entirely, so a
 write request ends with a clean `BLOCKED` and `stopReason: end_turn`.
 `--permission-mode plan` alone is NOT enough — the model still reaches for
@@ -62,6 +65,16 @@ failure (HTTP 429/503/529 text in stderr) is a quota failure: refresh
 usage.py, mark the lane unavailable, re-resolve once.
 
 ## Quirks
+- `--json-schema` breaks the tool loop (grok-4.6, 1.0.13, 2026-09-02). The
+  constraint applies to every message, and the model ends turn 1 with a
+  schema-shaped object and no tool call: a fabricated `done` with invented
+  file:line evidence (worst case), a `partial` progress note, or `deliverable:
+  "placeholder"`. Reproduced 4 of 4 fresh runs at medium and high effort, with
+  and without a "call read_file before answering" line. The identical brief
+  without the flag read every file and answered 5/5 with exact lines. One
+  earlier run (KOL, 7 turns) succeeded with the flag, so it is intermittent
+  in the model's favour, never reliable. Treat any Grok result with
+  `usage.reasoning_tokens` below ~500 and no tool turns as a non-answer.
 - Grok imports Claude Code context: `~/.grok/config.toml` adds
   `~/.claude/skills` as an extra skill dir and `claude_import_state.json`
   records a CLAUDE.md import. Children have been seen acting on the global
