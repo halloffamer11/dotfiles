@@ -1,0 +1,49 @@
+{
+  "updated": "2026-09-02",
+  "notes": [
+    "One lane = one model reached through one harness, drawing on one usage meter from scripts/usage.py.",
+    "burn = 0.75*input + 0.25*output USD per Mtok at API list price (agentic work is input-heavy). Subscription meters drain in proportion to list-price cost, so burn predicts meter drain per token; live remaining r decides between eligible lanes.",
+    "Prices verified 2026-09-02: Anthropic (claude-api skill table, cached 2026-06-24), OpenAI developers.openai.com/api/docs/pricing, xAI docs.x.ai/docs/models, Google ai.google.dev/gemini-api/docs/pricing (through 2026-12-31).",
+    "ASSUMPTION: agy meters Claude/GPT-OSS models at Anthropic list price; unverified against Google's own accounting.",
+    "Each lane wins at least one class; each class lists its eligible lanes in pin order. A lane that wins nothing gets no row."
+  ],
+  "rebalance": 0.40,
+  "gate": 0.10,
+  "tie_band": 0.15,
+  "fanout_budget_above": 8,
+  "fanout_checkpoint_above": 12,
+  "lanes": [
+    {"lane": "fable@claude",       "harness": "claude", "model": "fable",              "meter": "claude-fable",   "family": "anthropic", "tier": 1, "input": 10.0, "output": 50.0, "worker": false, "courier": null,           "note": "the session only"},
+    {"lane": "sol@codex",          "harness": "codex",  "role": "codex-hard",          "meter": "codex",          "family": "openai",    "tier": 1, "input": 4.0,  "output": 20.0, "worker": true,  "courier": "codex-runner", "note": "codex review for Claude-authored diffs"},
+    {"lane": "opus5@claude",       "harness": "claude", "model": "opus",               "meter": "claude-general", "family": "anthropic", "tier": 1, "input": 5.0,  "output": 25.0, "worker": true,  "courier": null,           "note": "internal only; at most 1/3 of a workflow's agents"},
+    {"lane": "terra@codex",        "harness": "codex",  "role": "codex-routine",       "meter": "codex",          "family": "openai",    "tier": 2, "input": 2.0,  "output": 12.0, "worker": true,  "courier": "codex-runner", "note": ""},
+    {"lane": "grok46@grok",        "harness": "grok",   "role": "grok-code",           "meter": "grok",           "family": "xai",       "tier": 2, "input": 2.0,  "output": 6.0,  "worker": true,  "courier": "grok-runner",  "note": "weekly meter only"},
+    {"lane": "opus46@agy",         "harness": "agy",    "role": "agy-claude-hard",     "meter": "agy-claude-gpt", "family": "anthropic", "tier": 2, "input": 5.0,  "output": 25.0, "worker": true,  "courier": "agy-runner",   "note": "Claude-family judgement without the session's context; Q2 admitted 2026-09-02"},
+    {"lane": "sonnet5@claude",     "harness": "claude", "model": "sonnet",             "meter": "claude-general", "family": "anthropic", "tier": 2, "input": 2.0,  "output": 10.0, "worker": true,  "courier": null,           "note": "internal; only when the worker needs the Skill tool or live project context"},
+    {"lane": "flash-high@agy",     "harness": "agy",    "role": "gemini-routine",      "meter": "agy-gemini",     "family": "google",    "tier": 2, "input": 0.75, "output": 3.75, "worker": true,  "courier": "agy-runner",   "note": "routine overflow with a crisp definition of done"},
+    {"lane": "flash-medium@agy",   "harness": "agy",    "role": "gemini-mechanical",   "meter": "agy-gemini",     "family": "google",    "tier": 3, "input": 0.75, "output": 3.75, "worker": true,  "courier": "agy-runner",   "note": ""},
+    {"lane": "luna@codex",         "harness": "codex",  "role": "codex-mechanical",    "meter": "codex",          "family": "openai",    "tier": 3, "input": 0.2,  "output": 1.2,  "worker": true,  "courier": "codex-runner", "note": "tier-3 fallback when agy is absent"},
+    {"lane": "haiku@claude",       "harness": "claude", "model": "haiku",              "meter": "claude-general", "family": "anthropic", "tier": 0, "input": 1.0,  "output": 5.0,  "worker": false, "courier": null,           "note": "courier relay only, never work; no effort support"}
+  ],
+  "classes": {
+    "lead":       {"tier": 1, "pins": ["fable@claude"],                                                    "shape": "plan, live-context debugging, adjudication, final synthesis. The session; never delegated."},
+    "design":     {"tier": 1, "pins": ["opus5@claude", "sol@codex"],                                       "shape": "spec amendment, splitting a large plan, synthesis over large inputs"},
+    "review":     {"tier": 1, "pins": ["sol@codex", "opus46@agy"],                                         "shape": "independent review of a diff. Rule: reviewer family != author family."},
+    "hard-impl":  {"tier": 1, "pins": ["sol@codex", "opus5@claude"],                                       "shape": "security-sensitive or nonlocal invariants"},
+    "impl":       {"tier": 2, "pins": ["terra@codex", "grok46@grok", "flash-high@agy", "sonnet5@claude"],  "shape": "self-contained implementation, tests, refactor with a clear spec"},
+    "verify":     {"tier": 2, "pins": ["opus46@agy", "grok46@grok", "sonnet5@claude"],                     "shape": "refute, verify, standards check, critic, revise"},
+    "scout":      {"tier": 3, "pins": ["flash-medium@agy", "flash-high@agy", "luna@codex"],                "shape": "finder, grounding, search and summarize, research legwork"},
+    "mechanical": {"tier": 3, "pins": ["flash-medium@agy", "luna@codex"],                                  "shape": "renames, formatting, high-volume transforms, extraction, scaffolding"},
+    "browser":    {"tier": 2, "pins": [],                                                                  "shape": "route by evals/browser/_profile.md, then classify the reasoning part as above"},
+    "council":    {"tier": 1, "pins": [],                                                                  "shape": "the council skill; quorum >= 2 families besides the lead"}
+  },
+  "stages": {
+    "finder|scout|grounding|recon|survey":       "scout",
+    "sweep|rename|format|extract|scaffold":      "mechanical",
+    "refute|verify|check|critic|revise|lens":    "verify",
+    "implement|build|fix|test":                  "impl",
+    "review":                                    "review",
+    "design|split|amend|spec":                   "design",
+    "judge|synthesize|adjudicate":               "lead"
+  }
+}

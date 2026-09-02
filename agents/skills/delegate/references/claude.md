@@ -7,7 +7,7 @@ claude -p --permission-mode plan --model <alias|id> --output-format json \
   "$(cat <promptfile>)" </dev/null
 
 This is the primary form: the child inherits skills/CLAUDE.md context
-(fine for most consult delegations), and it's the form that works on
+(fine for most delegations), and it's the form that works on
 subscription/OAuth auth — Orin's machines. `--permission-mode plan`
 mechanically pins read-only, matching codex's `-s read-only` / agy's
 `--mode plan` (verified 2.1.220, 2026-08-03: succeeds with a normal
@@ -25,7 +25,7 @@ isolated children. Skills still resolve via explicit `/skill-name`; auth
 under `--bare` is strictly `ANTHROPIC_API_KEY` or `apiKeyHelper` (OAuth and
 keychain are never read) — it will fail with "Not logged in" on OAuth-only
 machines. Use it only when the child SHOULD be isolated from auto-discovered
-skills/project instructions, and say so in the consult record line.
+skills/project instructions, and say so in the delegate record line.
 
 ## Browser (authenticated, in the user's real browser)
 claude -p --chrome --model <alias|id> "$(cat <promptfile>)" \

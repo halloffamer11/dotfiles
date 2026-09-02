@@ -4,7 +4,7 @@
   "should_trigger": true
  },
  {
-  "query": "CONSULT_BALANCE=1 here. i've got ~40 files in src/legacy that need the old logger import swapped for the new one, exact same change each time. my claude 5h is at 85%, gemini is barely touched",
+  "query": "DELEGATE_BALANCE=1 here. i've got ~40 files in src/legacy that need the old logger import swapped for the new one, exact same change each time. my claude 5h is at 85%, gemini is barely touched",
   "should_trigger": true
  },
  {

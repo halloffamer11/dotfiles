@@ -1,5 +1,5 @@
 #!/bin/sh
-# probe.sh — read-only environment sensing for the consult/council skills.
+# probe.sh — read-only environment sensing for the delegate/council skills.
 # Per known agent CLI: presence, version, model catalog. Never invokes a model.
 # Absence is data, not an error: always exits 0.
 exec </dev/null   # agy/codex block on an open stdin; the skill's own rule applies here too
@@ -28,8 +28,8 @@ probe antigravity agy "agy models"
 probe claude claude ""
 probe grok grok "grok models"
 probe kiro kiro-cli "kiro-cli chat --list-models"
-if [ "${CONSULT_BALANCE:-0}" = 1 ]; then
-  printf "## usage (CONSULT_BALANCE=1)\n"
+if [ "${DELEGATE_BALANCE:-${CONSULT_BALANCE:-0}}" = 1 ]; then   # CONSULT_BALANCE: deprecated alias
+  printf "## usage (DELEGATE_BALANCE=1)\n"
   python3 "$(dirname "$0")/usage.py" --pretty 2>/dev/null | sed "s/^/  /" || printf "  usage.py failed — treat all lanes as unknown\n"
 fi
 exit 0

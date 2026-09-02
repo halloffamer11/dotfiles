@@ -11,6 +11,9 @@ case "$role" in
   gemini-mechanical) cli=agy;   pat='^gemini-[0-9.]+-flash-medium$' ;;
   gemini-routine)    cli=agy;   pat='^gemini-[0-9.]+-flash-high$' ;;
   gemini-reasoning)  cli=agy;   pat='^gemini-[0-9.]+-pro-high$' ;;
+  # Anthropic via agy (Q2, 2026-09-02): the agy-claude-gpt meter, Claude-family judgement
+  agy-claude-hard)   cli=agy;   pat='^claude-opus-[0-9-]+-thinking$' ;;
+  agy-claude-routine) cli=agy;  pat='^claude-sonnet-[0-9-]+$' ;;
   # OpenAI via codex: slug shape gpt-<ver>-<tier>
   codex-deep|codex-review|codex-hard) cli=codex; pat='^gpt-[0-9.]+-sol$' ;;
   codex-routine|codex-value)          cli=codex; pat='^gpt-[0-9.]+-terra$' ;;
@@ -28,6 +31,9 @@ case "$cli" in
   codex) slugs=$(codex debug models 2>/dev/null | grep -o '"slug":"[^"]*"' | sed 's/"slug":"//;s/"$//') ;;
   grok)  slugs=$(grok models 2>/dev/null | awk '/^ *[*-] grok-/ {print $2}') ;;
 esac
+# DELEGATE_EXCLUDE: space-separated slugs to skip (dispatch.sh sets it to retry
+# once on the next-newest version after a model-level failure).
+for x in ${DELEGATE_EXCLUDE:-}; do slugs=$(printf '%s\n' "$slugs" | grep -v -x "$x"); done
 printf '%s\n' "$slugs" | grep -E "$pat" | python3 -c '
 import re,sys
 c=[l.strip() for l in sys.stdin if l.strip()]

@@ -10,7 +10,7 @@ tokens: every probe is a slash/status command, not a prompt.
   usage.py --max-age-min N   override TTL (default 10)
   usage.py --pretty   human table instead of JSON
 
-Cache: $CONSULT_CACHE (default ~/.cache/consult/usage.json).
+Cache: $DELEGATE_CACHE (default ~/.cache/delegate/usage.json).
 Absence of a CLI, auth failure, or a probe timeout marks that lane
 "unknown" — never a crash. Exit 0 always.
 """
@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 TTL_MIN_DEFAULT = 10
 GATE = 0.10           # r below this → lane unavailable
 ROLLOVER_MIN = 30     # binding window resets within this → ask user whether to wait
-CACHE = os.environ.get("CONSULT_CACHE") or os.path.expanduser("~/.cache/consult/usage.json")
+CACHE = os.environ.get("DELEGATE_CACHE") or os.environ.get("CONSULT_CACHE") or os.path.expanduser("~/.cache/delegate/usage.json")
 NOW = time.time()
 
 def which(b): return subprocess.run(["command", "-v", b], shell=False, capture_output=True, text=True).returncode == 0 if False else any(os.access(os.path.join(p, b), os.X_OK) for p in os.environ.get("PATH", "").split(os.pathsep))
@@ -62,7 +62,7 @@ def probe_codex():
                 except ValueError: continue
                 if m.get("id") == i: return m
             return None
-        send({"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "consult-usage", "version": "0.1"}}})
+        send({"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "delegate-usage", "version": "0.1"}}})
         if not recv(1): raise RuntimeError("no initialize response")
         send({"method": "initialized"}); time.sleep(0.5)
         send({"id": 2, "method": "account/rateLimits/read", "params": {}})
@@ -150,7 +150,7 @@ def probe_grok():
                 if m.get("id") == i: return m
             return None
         send(1, "initialize", {"protocolVersion": 1, "clientCapabilities": {"fs": {"readTextFile": False, "writeTextFile": False}, "terminal": False},
-                                "_meta": {"clientType": "consult-usage", "clientVersion": "0.1"}})
+                                "_meta": {"clientType": "delegate-usage", "clientVersion": "0.1"}})
         if not recv(1): raise RuntimeError("no initialize response")
         send(2, "_x.ai/billing", {})
         m = recv(2)

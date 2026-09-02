@@ -1,5 +1,5 @@
 #!/bin/bash
-# Browser-capability eval runner for the consult skill.
+# Browser-capability eval runner for the delegate skill.
 #
 # Runs the authenticated and unauthenticated browser probes on every
 # installed harness (codex, agy, claude, grok, kiro) and regenerates _profile.md —
