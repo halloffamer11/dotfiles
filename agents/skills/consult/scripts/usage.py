@@ -128,12 +128,49 @@ def probe_claude():
 
 # ---------------------------------------------------------------- grok
 def probe_grok():
-    """No headless quota probe exists (1.0.13): /usage is TUI-only and
-    `grok -p /usage` is treated as a prompt. Report presence, status unknown."""
+    """Weekly meter via the Agent Client Protocol: `grok agent stdio`, then the
+    `_x.ai/billing` extension method (what the TUI's /usage dialog calls). Zero
+    model tokens. Payload fields (serde list in the binary, 1.0.13):
+    creditUsagePercent, currentPeriod{type,start,end}, includedUsed, totalUsed,
+    monthlyLimit, onDemandCap/Used, prepaidBalance, subscription_tier. Zero-valued
+    fields are omitted, so a missing creditUsagePercent means 0% used."""
     if not which("grok"): return [lane("grok", None, note="absent")]
-    v = run(["grok", "--version"], timeout=15, stdin_data="")
-    ver = (v.stdout.split()[1] if v and v.stdout.split() else "?")
-    return [lane("grok", None, note=f"v{ver}; no headless quota probe — eligible by pin/capability, never balanced")]
+    try:
+        p = subprocess.Popen(["grok", "agent", "stdio"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, text=True)
+        def send(i, method, params):
+            p.stdin.write(json.dumps({"jsonrpc": "2.0", "id": i, "method": method, "params": params}) + "\n"); p.stdin.flush()
+        def recv(i, timeout=25):
+            t0 = time.time()
+            while time.time() - t0 < timeout:
+                line = p.stdout.readline()
+                if not line: break
+                try: m = json.loads(line)
+                except ValueError: continue
+                if m.get("id") == i: return m
+            return None
+        send(1, "initialize", {"protocolVersion": 1, "clientCapabilities": {"fs": {"readTextFile": False, "writeTextFile": False}, "terminal": False},
+                                "_meta": {"clientType": "consult-usage", "clientVersion": "0.1"}})
+        if not recv(1): raise RuntimeError("no initialize response")
+        send(2, "_x.ai/billing", {})
+        m = recv(2)
+        p.terminate()
+        if not m or "result" not in m: raise RuntimeError(f"billing: {(m or {}).get('error')}")
+        res = m["result"]; cfg = res.get("config") or {}
+        pct = cfg.get("creditUsagePercent")
+        if isinstance(pct, dict): pct = pct.get("val")
+        pct = float(pct or 0)
+        period = cfg.get("currentPeriod") or {}
+        end = iso(period.get("end") or cfg.get("billingPeriodEnd") or "")
+        ptype = (period.get("type") or "").replace("USAGE_PERIOD_TYPE_", "").lower() or "weekly"
+        tier = res.get("subscription_tier")
+        # single rolling meter (weekly on SuperGrok); no 5h window exists
+        return [lane("grok", None, None, 1 - pct / 100.0, None, end,
+                     note=f"tier={tier}; {ptype} meter only ({pct:g}% used); via _x.ai/billing")]
+    except Exception as e:  # noqa
+        try: p.terminate()
+        except Exception: pass
+        return [lane("grok", None, note=f"probe failed: {e}")]
 
 # ---------------------------------------------------------------- main
 def load_cache(max_age_min):

@@ -41,13 +41,25 @@ max_turn_requests | refusal), `sessionId`, `usage`, `total_cost_usd`,
 `modelUsage`. `--json-schema <schema>` forces structured output.
 `-r <sessionId>` resumes a headless session.
 
-## Quota
-No headless quota probe exists: `/usage` is a TUI billing view only, and
-`grok -p "/usage"` is treated as a prompt (the model starts investigating).
-usage.py therefore reports the grok lane as `unknown`; per routing.md §3 an
-unknown lane is eligible by pin or capability but never wins a balancing
-choice. A `rate_limit` failure (HTTP 429/503/529 text in stderr) is a quota
-failure: mark the lane unavailable for the session and re-resolve once.
+## Quota (weekly meter, zero-token probe)
+`/usage` is a TUI dialog, but it is fed by an Agent Client Protocol
+extension method that is callable headlessly:
+
+  grok agent stdio            # JSON-RPC over stdio
+  → initialize {protocolVersion:1, clientCapabilities:{…}}
+  → _x.ai/billing {}          # note the leading underscore (ACP extension)
+
+Response: `config.currentPeriod{type,start,end}` (USAGE_PERIOD_TYPE_WEEKLY
+on SuperGrok), `subscription_tier`, and — only when non-zero —
+`creditUsagePercent`, `includedUsed`, `totalUsed`, `monthlyLimit`,
+`onDemandCap/Used`, `prepaidBalance` (field list from the binary's serde
+table, 1.0.13; the HTTP path behind it is `/billing?format=credits`).
+A missing `creditUsagePercent` means 0% used. There is no 5-hour window.
+scripts/usage.py implements this as `probe_grok()`; verified 2026-09-01
+against the TUI dialog (0% used, resets Sep 8 22:35 local — identical).
+`grok -p "/usage"` does NOT work (treated as a prompt). A `rate_limit`
+failure (HTTP 429/503/529 text in stderr) is a quota failure: refresh
+usage.py, mark the lane unavailable, re-resolve once.
 
 ## Quirks
 - Grok imports Claude Code context: `~/.grok/config.toml` adds
@@ -64,8 +76,13 @@ failure: mark the lane unavailable for the session and re-resolve once.
   scratch dir for probes so they do not pile up under a repo path.
 
 ## Browser
-Evaluated 2026-09-01 (1.0.13): FAIL on both probes. Grok has no browser
-tool — `grok mcp list` shows only context7 — and the probe output stops
-after the model's first sentence, the headless-cancel signature. Not a
-browser lane. If a Playwright MCP server is ever added (`grok mcp add`),
-re-run evals/browser/run.sh; run_grok is already wired.
+Not a browser lane (evaluated 2026-09-01, 1.0.13). `grok mcp list` shows
+only context7, but a session can also carry a `playwright` MCP server
+imported from Claude/Codex project config (seen in `_x.ai/mcp/servers_updated`),
+so tool availability is cwd-dependent. Even with
+`--allow "MCPTool(playwright__*)"` the headless probe ended after one turn
+with `stopReason: cancelled` — the MCP call still hit the permission prompt.
+Route browser work to codex/claude/agy per evals/browser/_profile.md. To
+re-test: add playwright with `grok mcp add`, find the rule form that
+auto-approves it headlessly, then re-run evals/browser/run.sh (run_grok is
+wired).

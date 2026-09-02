@@ -44,9 +44,9 @@ r = min(remaining_5h, remaining_weekly) from scripts/usage.py. r < 10% →
 unavailable; reset ≤ 30 min → ask. Pins in §2 apply first; balancing chooses
 among what the pins leave open, highest r wins, within 15 points prefer the
 pin's first choice. Tier-1 work never degrades below tier 1; if no tier-1 lane is available,
-stop and report the earliest reset. A lane whose usage is `unknown` (grok:
-no headless quota probe) is eligible by pin or capability but never wins a
-balancing choice over a lane with a known r.
+stop and report the earliest reset. A lane whose usage is `unknown` (probe failed) is eligible by pin or
+capability but never wins a balancing choice over a lane with a known r.
+grok has a weekly meter only (no 5h window), so its r is its weekly r.
 
 ## 4. Council (unchanged)
 Lead = claude-deep. Quorum ≥ 2 families besides the lead's; below quorum
