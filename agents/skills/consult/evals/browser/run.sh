@@ -2,7 +2,7 @@
 # Browser-capability eval runner for the consult skill.
 #
 # Runs the authenticated and unauthenticated browser probes on every
-# installed harness (codex, agy, claude, kiro) and regenerates _profile.md —
+# installed harness (codex, agy, claude, grok, kiro) and regenerates _profile.md —
 # the routing source for browser-automation lanes. Rerun after any harness
 # CLI, extension, or permission-grant change; if a lane newly passes a probe
 # (e.g. agy gaining an authenticated path), the profile flips it into that
@@ -44,6 +44,14 @@ run_claude() { # $1 prompt
   (cd "$OUT" && $TO claude -p --chrome --model sonnet "$1" \
     --allowedTools "mcp__claude-in-chrome" </dev/null 2>&1)
 }
+run_grok() { # $1 prompt
+  # references/grok.md: read-only via tool allowlist is too strict for a
+  # browser probe, so run plan mode with web tools left on and no shell;
+  # a lane without browser tools reports the FAIL marker itself.
+  (cd "$OUT" && $TO grok -p "$1" --permission-mode plan --no-subagents \
+    --disallowed-tools run_terminal_command,search_replace \
+    -m grok-4.5 --reasoning-effort low --max-turns 8 --cwd "$OUT" </dev/null 2>&1)
+}
 run_kiro() { # $1 prompt
   # references/kiro.md is an unverified stub; revisit when validated.
   echo "KIRO-STUB: non-interactive invocation not yet validated (references/kiro.md)"
@@ -76,7 +84,7 @@ evidence() { # $1 file, $2 pass marker, $3 fail marker
 }
 
 LANES=""
-for lane in codex agy claude kiro; do
+for lane in codex agy claude grok kiro; do
   cli="$lane"; [ "$lane" = kiro ] && cli="kiro-cli"
   if command -v "$cli" >/dev/null 2>&1; then
     LANES="$LANES $lane"
@@ -94,11 +102,11 @@ wait
   echo "CLI, browser-extension, or permission-grant change."
   echo
   echo "generated: $(date '+%Y-%m-%d %H:%M %Z')"
-  echo "versions: codex $(codex --version 2>/dev/null | awk '{print $2}') · agy $(agy --version 2>/dev/null) · claude $(claude --version 2>/dev/null | awk '{print $1}')"
+  echo "versions: codex $(codex --version 2>/dev/null | awk '{print $2}') · agy $(agy --version 2>/dev/null) · claude $(claude --version 2>/dev/null | awk '{print $1}') · grok $(grok --version 2>/dev/null | awk '{print $2}')"
   echo
   echo "| lane | authenticated (user's live browser) | unauthenticated (disposable browser) |"
   echo "|------|-------------------------------------|--------------------------------------|"
-  for lane in codex agy claude kiro; do
+  for lane in codex agy claude grok kiro; do
     if [ -f "$OUT/${lane}.skip" ]; then
       echo "| $lane | — not installed | — not installed |"
       continue

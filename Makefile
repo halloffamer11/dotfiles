@@ -43,6 +43,7 @@ configs:
 skills:
 	for t in $(HARNESS_SKILL_DIRS); do mkdir -p $$t && (cd $(CURDIR)/agents && stow -t $$t -R skills); done
 	ln -sfn "$$(brew --prefix hunk)/libexec/skills/hunk-review" $(HOME)/.claude/skills/hunk-review
+	ln -sfn $(CURDIR)/agents/agents $(HOME)/.claude/agents
 
 externals:
 	npx -y skills add herdrdev/herdr --skill herdr -g -y

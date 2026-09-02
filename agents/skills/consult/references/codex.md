@@ -1,6 +1,6 @@
 # Codex CLI (OpenAI) — invocation reference
 
-verified-against: codex-cli 0.149.0 (2026-08-22) — exec flags re-checked; browser lane live-tested (extension attach from headless exec confirmed)
+verified-against: codex-cli 0.152.0 (2026-09-01) — exec and review flags re-checked against --help; browser lanes re-evaluated 2026-09-01 (both PASS)
 
 ## Read-only
 codex exec --ignore-user-config --ephemeral --skip-git-repo-check \
@@ -9,6 +9,19 @@ codex exec --ignore-user-config --ephemeral --skip-git-repo-check \
 
 ## Write-enabled (only when the user authorized implementation; isolated worktree)
 Same as read-only but `-s workspace-write`, `-C` pointing at the worktree.
+
+## Review (native reviewer — the codex-review role)
+codex review --uncommitted -c model="<slug>" -c 'model_reasoning_effort="high"' \
+  "$(cat <promptfile>)" </dev/null
+`--base <branch>` or `--commit <sha>` instead of `--uncommitted` as the brief
+specifies. Read-only by construction; the prompt is optional custom review
+instructions. Also reachable as `codex exec review`. Prefer this over a
+hand-rolled exec prompt for reviewing Claude-authored diffs.
+
+## Structured output (both forms)
+`--output-schema <file>` forces the final message to a JSON Schema;
+`-o <file>` writes the last message to a file so the caller reads the
+deliverable instead of scraping JSONL.
 
 ## Models
 gpt-5.6-sol (hard/deep) · gpt-5.6-terra (routine) · gpt-5.6-luna (mechanical).
@@ -44,6 +57,7 @@ a read-only sandbox on gpt-5.6-luna.
   trusted directory" (exit 1).
 - Reads extra stdin when piped — always close with `</dev/null`.
 - Reasoning effort only via `-c model_reasoning_effort="…"`.
-- A playwright MCP server is enabled in config.toml but its tools never
-  surfaced in any exec run (2026-08-22) — silent start failure? If that gets
-  fixed, codex gains a disposable-browser lane: re-run evals/browser/run.sh.
+- The playwright MCP server in config.toml now surfaces in exec runs:
+  the unauthenticated probe PASSED on 2026-09-01 (0.152.0), so codex has a
+  disposable-browser lane as well as the authenticated one. It did not on
+  0.149.0 (2026-08-22).

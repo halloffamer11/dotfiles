@@ -126,6 +126,15 @@ def probe_claude():
         lanes.append(lane("claude", name.lower(), f5, wk, note=f"model-meter weekly {m.group(2)}% used; resets '{m.group(3)}'"))
     return lanes
 
+# ---------------------------------------------------------------- grok
+def probe_grok():
+    """No headless quota probe exists (1.0.13): /usage is TUI-only and
+    `grok -p /usage` is treated as a prompt. Report presence, status unknown."""
+    if not which("grok"): return [lane("grok", None, note="absent")]
+    v = run(["grok", "--version"], timeout=15, stdin_data="")
+    ver = (v.stdout.split()[1] if v and v.stdout.split() else "?")
+    return [lane("grok", None, note=f"v{ver}; no headless quota probe — eligible by pin/capability, never balanced")]
+
 # ---------------------------------------------------------------- main
 def load_cache(max_age_min):
     try:
@@ -141,7 +150,7 @@ def main():
     if "--max-age-min" in args: ttl = float(args[args.index("--max-age-min") + 1])
     d = None if refresh else load_cache(ttl)
     if d is None:
-        lanes = probe_codex() + probe_agy() + probe_claude()
+        lanes = probe_codex() + probe_agy() + probe_claude() + probe_grok()
         d = {"probed_at": NOW, "probed_at_iso": datetime.fromtimestamp(NOW, timezone.utc).isoformat(),
              "gate": GATE, "rollover_min": ROLLOVER_MIN, "lanes": lanes}
         os.makedirs(os.path.dirname(CACHE), exist_ok=True)

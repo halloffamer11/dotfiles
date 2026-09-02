@@ -1,6 +1,6 @@
 # Antigravity CLI (agy, Google) — invocation reference
 
-verified-against: 1.1.18 (2026-08-22) — flags re-checked; browser lane live-tested via Playwright MCP. Top-level `--effort low|medium|high` still present (slugs still work). Browser recipe corrected 2026-08-22 PM after live failures (see Browser: no `--mode plan`, two mandatory prompt directives)
+verified-against: 1.1.24 (2026-09-01 browser eval; flags re-checked against --help on 1.1.23 the same day; new since 1.1.18: --agent, --json-schema, --disable-slash-commands) — earlier: 1.1.18 (2026-08-22) — flags re-checked; browser lane live-tested via Playwright MCP. Top-level `--effort low|medium|high` still present (slugs still work). Browser recipe corrected 2026-08-22 PM after live failures (see Browser: no `--mode plan`, two mandatory prompt directives)
 
 ## Read-only
 agy --model <slug> --mode plan --sandbox --print "$(cat <promptfile>)" </dev/null

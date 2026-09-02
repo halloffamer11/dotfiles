@@ -1,6 +1,6 @@
 ---
 name: consult
-description: Route work to the right model through the right harness — a second opinion, an independent review, a cross-check from a different model family, or a well-scoped lane of work handed to another agent CLI (Codex, Antigravity, Kiro, headless Claude). Also use when CONSULT_BALANCE=1 and the primary harness's subscription window is running low: self-contained routine or mechanical work that would normally be done inline (or by an internal subagent) should be pushed to an external harness with quota to spare. Also use to answer questions about remaining subscription usage or reset times, or which models each installed agent CLI serves (scripts/usage.py, scripts/probe.sh). Not for trivial single-file work that is faster done inline when quota is not a concern.
+description: Route work to the right model through the right harness — a second opinion, an independent review, a cross-check from a different model family, or a well-scoped lane of work handed to another agent CLI (Codex, Antigravity, Grok, Kiro, headless Claude). Also use when CONSULT_BALANCE=1 and the primary harness's subscription window is running low: self-contained routine or mechanical work that would normally be done inline (or by an internal subagent) should be pushed to an external harness with quota to spare. Also use to answer questions about remaining subscription usage or reset times, or which models each installed agent CLI serves (scripts/usage.py, scripts/probe.sh). Not for trivial single-file work that is faster done inline when quota is not a concern.
 ---
 
 # Consult — route work to the right model, harness, and quota
@@ -30,9 +30,9 @@ on, the bar drops for *self-contained* routine/mechanical work when the
 primary lane is low; it never drops for work that needs your live context.
 
 ## Resolve: which model, which harness, which lane
-1. Classify the task into a tier via references/routing.md "Task tiers".
-2. Walk that tier's ranked list in "Preferences"; drop anything in
-   "Exclusions".
+1. Classify the work into a model tier via references/routing.md §1.
+2. Apply the purpose pins in routing.md §2 to pick the role and harness;
+   resolve the role to a slug with scripts/resolve-model.sh.
 3. Run scripts/probe.sh — which CLIs are installed, what they serve, and
    (when `CONSULT_BALANCE=1`) the `## usage` block: one line per lane with
    effective remaining `r`, binding window, reset time, and status.
@@ -53,6 +53,34 @@ primary lane is low; it never drops for work that needs your live context.
 6. Load references/<harness>.md for the recipe. Record one line:
    `consult: <tier> → <model> via <harness> (<reason>[; balanced: r=NN%, skipped X (why)])`.
 
+## Delegation surface: inline, lane agent, or workflow stage
+The recipe is the same everywhere; what changes is where the child's output
+lands.
+- **Inline (this context runs the CLI):** only when the expected output is
+  short (a verdict, a diff summary, a small file) — the whole result enters
+  the caller's context. Never inline from a Fable session for a lane whose
+  output will exceed a few hundred lines.
+- **Lane agent (`agy-runner`, `codex-runner`, `grok-runner` in ~/.claude/agents):** the
+  default from a Claude Code session. A Sonnet wrapper with `effort: medium`,
+  `maxTurns: 4`, tools Bash+Read makes exactly one CLI call and returns the
+  deliverable, so verbose child output stays out of the caller's context.
+  The wrapper reads references/<harness>.md at spawn time — it never carries
+  its own copy of the recipe. Invoke with the Agent tool
+  (`subagent_type: agy-runner`) and pass a complete brief in the prompt.
+- **Workflow stage:** in a dynamic workflow, route a stage to a lane agent
+  with `agent(brief, {agentType: 'agy-runner', effort: 'medium', label: ...})`.
+  Tier-3 fan-outs (one file per agent) go to agy-runner; the verify or judge
+  stage stays on the session model. A workflow's `budget` directive
+  ("+300k") is a hard ceiling — set one for any fan-out over 10 agents.
+- **Teammate:** a lane agent also works as an agent-team teammate ("spawn a
+  teammate using the agy-runner agent type"); its `tools` and `model` apply,
+  its `skills:` field is ignored — another reason the wrapper reads the
+  recipe from disk instead of preloading the skill.
+
+The caller always verifies: read the files the child says it changed, run
+the checks you would run for your own work, and keep the one-line
+`consult:` trail the wrapper returns.
+
 ## Invoke: non-negotiable rules
 - Headless/exec mode only by default; interactive modes hang in this
   environment. Exception — herdr visibility: when the user asks to watch
@@ -70,6 +98,8 @@ primary lane is low; it never drops for work that needs your live context.
   constraints, definition of done, expected return format — and tells the
   child: do not delegate further; no external side effects.
 - Never use permission-bypass or full-access flags.
+- Resolve models by role (`scripts/resolve-model.sh <role>`), never from a
+  remembered slug. Empty output means the lane is unavailable — stop.
 
 ## Browser-automation lanes
 Authenticated (the user's live, logged-in browser via an extension/native

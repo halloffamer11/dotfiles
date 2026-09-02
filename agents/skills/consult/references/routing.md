@@ -1,71 +1,59 @@
-# Model routing preferences
+# Model routing (three tiers, roles not versions)
 
-updated: 2026-08-16
-status: rankings seeded from global CLAUDE.md 2026-08-03; balancing policy added 2026-08-16. Orin corrects, agents never edit.
+updated: 2026-09-01
 
-Consumers: any agent choosing a model for a subagent, workflow stage, agent-team
-teammate, or external CLI delegation. Classify the task with the tier rubric,
-walk the ranked list, honor Exclusions absolutely.
+Consumers: anything choosing a model for a subagent, workflow stage, teammate,
+or external CLI. Three steps: (1) classify the work, (2) pick the harness for
+that class, (3) resolve the role to a live slug with scripts/resolve-model.sh.
 
-## Task tiers
-- deep-reasoning — architecture/design, ambiguous root-cause debugging,
-  adjudication, final synthesis across many findings, high-stakes review
-- hard-coding — multi-file behavioral change, nonlocal invariants,
-  security-sensitive work, complex debugging
-- routine-coding — well-scoped implementation, tests, refactors with a clear spec
-- mechanical — repeatable transforms, renames, formatting, high-volume
-  file-by-file work
-- review — independent verification of finished work
+## 1. Three model tiers
+| tier | roles (family) | give it |
+|---|---|---|
+| 1 — frontier | claude-deep (Fable) first; then claude-hard (Opus), codex-hard (Sol) | the plan, live-context work, ambiguous debugging, architecture, adjudication, final synthesis, review of anything tier-2 produced |
+| 2 — capable workers | codex-routine (Terra), claude-routine (Sonnet), grok-code (Grok) | well-scoped implementation, tests, refactors with a clear spec, self-contained lanes, first-pass review |
+| 3 — utility workers | gemini-* (Flash, free), codex-mechanical (Luna), claude-utility (Haiku) | bounded work with a checkable definition of done: renames, formatting, high-volume file-by-file transforms, scaffolding, extraction, search and summarization |
 
-## Preferences (ranked, harness-agnostic)
-- deep-reasoning: Fable 5 > GPT-5.6 Sol > Gemini 3.1 Pro (high)
-- hard-coding: GPT-5.6 Sol > Opus 5 > Gemini 3.7 Flash (high)
-- routine-coding: GPT-5.6 Terra > Sonnet 5 > Gemini 3.7 Flash (high)
-- mechanical: Gemini 3.7 Flash (medium) > GPT-5.6 Luna 
-- review: top-ranked deep-reasoning or hard-coding model NOT in the author's
-  family (house rule: reviewer ≠ author's family)
+Tier rule: work never goes DOWN a tier from where it belongs. Sending work
+UP a tier is a quota decision, not a quality one (§3). Within tier 3, Flash
+is always first because agy is effectively free; Luna and Haiku are
+fallbacks when agy is absent or unavailable.
 
-## Exclusions
-- never: Haiku (any version) — below the quality floor for this workflow
+## 2. Harness by purpose (stable pins, independent of quota)
+- **Lead / deep reasoning:** claude-deep (Fable). Owns the plan, the live
+  context, final synthesis, and all verification of delegated work.
+- **Independent review of Claude-authored work:** codex-hard (Sol) via the
+  native reviewer (`codex review`); tier-2 output is reviewed by a tier-1
+  model of another family. House rule: reviewer ≠ author's family.
+- **Self-contained implementation lanes:** codex-routine (Terra) first;
+  claude-routine (Sonnet) when the lane needs Claude-side context or codex is
+  unavailable. codex-hard only for security-sensitive or nonlocal invariants.
+- **All tier-3 work:** gemini-mechanical via agy. The agy subscription is
+  effectively free at our volumes, so tier-3 work never spends Claude or Codex
+  quota while agy is present. Fallbacks in order: codex-mechanical, then
+  claude-utility (Haiku) only when both external lanes are absent.
+- **Routine overflow:** gemini-routine (flash-high) takes routine-coding
+  when codex r < 40% and the brief has a crisp definition of done.
+- **Second scaffold / third family:** grok-code is the tier-2 worker of a
+  fourth family — use it for an independent second implementation or a
+  review when both Codex and Claude have already touched the work, and as
+  a council panelist. agy also serves claude-* and gpt-oss slugs; use those
+  only deliberately for a different-scaffold opinion, never for balancing.
 
-## Harness selection (when >1 installed harness serves a model)
-- Prefer the model's native harness: Codex↔GPT, Claude Code↔Anthropic
-  (Fable/Opus/Sonnet), Antigravity↔Gemini.
-- Kiro is the flexible lane: first choice for open-weight models (GLM etc.), otherwise a deliberate second-scaffold option — the same model through a different harness gives a different response.
+## 3. Balancing (CONSULT_BALANCE=1) — unchanged arithmetic
+r = min(remaining_5h, remaining_weekly) from scripts/usage.py. r < 10% →
+unavailable; reset ≤ 30 min → ask. Pins in §2 apply first; balancing chooses
+among what the pins leave open, highest r wins, within 15 points prefer the
+pin's first choice. Tier-1 work never degrades below tier 1; if no tier-1 lane is available,
+stop and report the earliest reset. A lane whose usage is `unknown` (grok:
+no headless quota probe) is eligible by pin or capability but never wins a
+balancing choice over a lane with a known r.
 
-## Council defaults
-- lead/adjudicator: highest-ranked available deep-reasoning model
-- quorum: ≥2 model families besides the lead's; below quorum, report DEGRADED and stop — never simulate absent panelists
+## 4. Council (unchanged)
+Lead = claude-deep. Quorum ≥ 2 families besides the lead's; below quorum
+report DEGRADED and stop. Never simulate absent panelists.
 
-## Balancing policy (only when CONSULT_BALANCE=1)
-Inputs come from scripts/usage.py (cached; probe.sh prints them). Arithmetic
-only — no judgement calls.
-- Lanes: codex · agy-gemini · agy-claude-gpt · claude-general · claude-fable
-  (Fable has its own weekly meter, so it is a separate lane).
-- Effective remaining r = min(remaining_5h, remaining_weekly). Weekly only
-  bites when it is the smaller.
-- Gate: r < 10% → lane unavailable until its binding window resets.
-- Rollover: if an unavailable lane's binding window resets within 30 min,
-  surface the reset time and ask the user whether to wait rather than degrade.
-- Eligible ranks: rank 1, or rank 2 in the tier list; never Exclusions.
-  deep-reasoning: rank 1 only.
-- Choose the eligible lane with the highest r; if the top two are within 15
-  points, quality rank wins.
-- Frontier lanes: Opus 5, Fable 5, GPT-5.6 Sol/Terra. Antigravity/Gemini is
-  an overflow lane for routine-coding and mechanical only. If a hard-coding
-  or deep-reasoning task has no frontier lane available → stop and report
-  the earliest reset; do not fall to agy.
-- Internal subagents follow the same rule: never Fable when claude-fable is
-  low; when claude-general is low, Agent-tool-shaped work goes to consult.
-- Refresh: usage.py serves cache ≤10 min old; a SessionStart hook primes it;
-  any quota error forces --refresh. Do not poll more often than that.
-
-## Refresh (run when a CLI updates, then bump `updated:`)
-- codex: `codex --version`; models: `codex debug models` (verify subcommand
-  still exists via `codex debug --help`)
-- antigravity: `agy --version`; models: `agy models` (slug IDs)
-- claude: `claude --version`; aliases sonnet/opus/fable or full IDs — no list
-  command; check Claude Code release notes
-- kiro: `kiro-cli --version`; models: `kiro-cli chat --list-models`
-- herdr: visibility lane only — references/herdr.md; re-check `herdr agent` help on herdr updates
-- usage: `scripts/usage.py --refresh --pretty` — if a lane goes `unknown` after a CLI update, its /usage output shape drifted
+## 5. Refresh
+- Slug patterns: scripts/resolve-model.sh (the only version-aware file).
+- Recipes and their `verified-against` stamps: references/<harness>.md.
+- Adding a harness: references/<name>.md + a probe line in probe.sh + a
+  usage probe in usage.py + a row in §1 + rerun evals/browser/run.sh.

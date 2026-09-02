@@ -26,6 +26,7 @@ codex_slugs() {
 probe codex codex codex_slugs
 probe antigravity agy "agy models"
 probe claude claude ""
+probe grok grok "grok models"
 probe kiro kiro-cli "kiro-cli chat --list-models"
 if [ "${CONSULT_BALANCE:-0}" = 1 ]; then
   printf "## usage (CONSULT_BALANCE=1)\n"
