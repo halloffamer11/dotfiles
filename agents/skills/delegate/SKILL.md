@@ -18,11 +18,11 @@ Eligible lanes, best first: highest pace wins (weekly remaining divided by the f
 A Markdown file with two headings, nothing else: `# Objective` and `# Definition of done`. Name every file the child must read. Put the gate commands the child must run (tests, build) in the definition of done. Save it under the session scratchpad with an absolute path.
 
 ## 3. Dispatch
-Through the courier, so the child's output never enters this context:
+Through the courier, so the child's output never enters this context. Never pass `model`; the courier is Haiku and only relays.
 
     Agent subagent_type=courier: lane <lane>, brief </abs/path/brief.md>, cwd </abs/dir>[, write </abs/worktree>][, effort high]
 
-Or inline for a short answer: `sh ~/.claude/skills/delegate/dispatch.sh <lane> <brief> <out.json> --cwd <dir> [--write <worktree>] [--effort low|medium|high]`. Slow lanes (sol@codex, opus46@agy at high) run with `run_in_background`.
+Or inline for a short answer: `sh ~/.claude/skills/delegate/dispatch.sh <lane> <brief> <out.json> --cwd <dir> [--write <worktree>] [--effort low|medium|high]`. Slow lanes (sol@codex at high) run with `run_in_background`.
 
 Read-only lanes have file tools and no shell. Write lanes run full-auto (edits, shell, gate commands) inside the git worktree named by `--write`, and only when the user authorized implementation. The worktree is the blast radius: never point `--write` at a primary checkout.
 

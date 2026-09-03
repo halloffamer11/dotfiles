@@ -1,7 +1,6 @@
 # lane	harness	slug	classes (comma)	note
-flash-high@agy	agy	gemini-3.8-flash-high	impl,verify,scout	routine overflow
+flash-high@agy	agy	gemini-3.8-flash-high	impl,verify,review,scout	preferred agy lane; top Flash tier, own meter
 flash-medium@agy	agy	gemini-3.8-flash-medium	scout,mechanical	cheapest
-opus46@agy	agy	claude-opus-4-6-thinking	verify,review	Claude judgement off the Claude meter
 grok46@grok	grok	grok-4.6	impl,verify	weekly meter only
 terra@codex	codex	gpt-5.6-terra	impl	
 sol@codex	codex	gpt-5.6-sol	review,hard-impl	slow at high effort
