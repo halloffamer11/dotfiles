@@ -1,0 +1,1 @@
+{"status":"done","deliverable":"The defect is in function add in calc.py line 2; replace the one token `-` with `+`.","evidence":[{"file":"calc.py","line":2,"claim":"add returns a - b instead of a + b."}],"open_questions":[],"changed_files":[]}
