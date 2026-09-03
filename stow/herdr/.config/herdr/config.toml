@@ -13,6 +13,7 @@ agent_panel_sort = "priority"
 show_agent_labels_on_pane_borders = true
 hide_tab_bar_when_single_tab = true
 
+status_indicators = "symbols"
 [keys]
 prefix = "ctrl+b"
 focus_pane_left = ["prefix+h", "cmd+alt+h"]
