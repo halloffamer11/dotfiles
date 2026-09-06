@@ -18,8 +18,8 @@ Analysis and review are read-only by default. Enable edits only when the user's 
 
 ## Model routing & external delegation
 
-- Before choosing a model for any subagent, workflow stage, agent-team teammate, or external CLI delegation, read `~/.claude/skills/consult/references/routing.md` — task tiers, ranked model preferences, hard exclusions, harness selection. That file is the single source of truth; do not route from memory.
-- To delegate to an external agent CLI, use the `consult` skill. For multi-model deliberation on a critical decision, I invoke `/council`.
+- Before choosing a model for any subagent, workflow stage, agent-team teammate, or external CLI delegation, read `~/.claude/skills/delegate/references/routing.md` (classes and tiers, lanes, pins) and run `python3 ~/.claude/skills/delegate/scripts/rank.py <class>` — `lanes.json` is the registry, `rank.py` the arithmetic, `routing.md` the rules; do not route from memory.
+- To delegate to an external agent CLI, use the `delegate` skill. For multi-model deliberation on a critical decision, I invoke `/council`.
 - Durable rules: analysis/review delegations are read-only by default — enable edits only when my request authorizes implementation. Never use permission-bypass or full-access flags. Prefer a reviewer from a different model family than the author; never ask an agent to approve its own work. External agents must not delegate further. Verify delegation outcomes independently. Do not set CLAUDE_CODE_SUBAGENT_MODEL.
 
 ## CLI discovery
