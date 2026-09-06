@@ -15,22 +15,33 @@ hide_tab_bar_when_single_tab = true
 
 [keys]
 prefix = "ctrl+b"
+
+# Cycling lives on [ and ], all on cmd: Super has no legacy encoding, so these
+# never collapse into C0 bytes the way ctrl+alt+h/j/[ do (== backspace/enter/esc).
+#   cmd+[ ]              agents
+#   cmd+shift+[ ]        workspaces
+#   cmd+ctrl+[ ]         tabs      (needs the goto_split unbind in ghostty/config)
+#   cmd+ctrl+shift+[ ]   panes
+# Avoid: cmd+alt+[ ] and cmd+1..9 (Hyprland), plain ctrl+alt+<letter> (C0 collisions).
+# Verify any new chord against:
+#   hyprctl binds  |  ghostty +list-keybinds --default
 focus_pane_left = ["prefix+h", "cmd+alt+h"]
 focus_pane_down = ["prefix+j", "cmd+alt+j"]
-focus_pane_up = ["prefix+k", "cmd+alt+k"]
+# No direct chord: cmd+alt+k is Hyprland's (omarchy tmux keybindings menu)
+focus_pane_up = "prefix+k"
 focus_pane_right = ["prefix+l", "cmd+alt+l"]
 
-previous_tab = ["prefix+p", "cmd+alt+["]
-next_tab = ["prefix+n", "cmd+alt+]"]
+previous_tab = ["prefix+p", "cmd+ctrl+["]
+next_tab = ["prefix+n", "cmd+ctrl+]"]
 
 zoom = ["prefix+z", "cmd+alt+backslash"]
 
-cycle_pane_previous = "ctrl+cmd+["
-cycle_pane_next = "ctrl+cmd+]"
+cycle_pane_previous = "cmd+ctrl+shift+["
+cycle_pane_next = "cmd+ctrl+shift+]"
 
 previous_agent = ["prefix+comma", "cmd+["]
 next_agent = ["prefix+period", "cmd+]"]
-focus_agent = "cmd+1..9"
+focus_agent = "prefix+alt+1..9"
 
 previous_workspace = "cmd+shift+["
 next_workspace = "cmd+shift+]"
