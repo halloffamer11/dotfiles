@@ -23,20 +23,22 @@ $time\
 [ ](fg:color_bg1)\
 $line_break$cmd_duration$status$character"""
 
-palette = 'everforest_dark_hard'
+palette = 'terminal'
 
-[palettes.everforest_dark_hard]
-color_fg0 = '#d3c6aa'
-color_fg_dark = '#272e33'
-color_bg1 = '#2e383c'
-color_bg3 = '#414b50'
-color_blue = '#7fbbb3'
-color_aqua = '#83c092'
-color_green = '#a7c080'
-color_orange = '#e69875'
-color_purple = '#d699b6'
-color_red = '#e67e80'
-color_yellow = '#dbbc7f'
+# Named ANSI colours only, so the terminal theme (Omarchy on Linux, the
+# WezTerm scheme on macOS) drives the prompt palette.
+[palettes.terminal]
+color_fg0 = 'white'
+color_fg_dark = 'black'
+color_bg1 = 'bright-black'
+color_bg3 = 'bright-black'
+color_blue = 'blue'
+color_aqua = 'cyan'
+color_green = 'green'
+color_orange = 'red'
+color_purple = 'purple'
+color_red = 'red'
+color_yellow = 'yellow'
 
 [os]
 disabled = false

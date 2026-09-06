@@ -6,9 +6,15 @@ HISTSIZE=50000
 SAVEHIST=50000
 setopt share_history hist_ignore_all_dups hist_reduce_blanks
 
-# --- Plugins (brew-installed, sourced directly) ---
-source "$(brew --prefix)/share/zsh-autosuggestions/zsh-autosuggestions.zsh"
-source "$(brew --prefix)/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
+# --- Plugins (package-manager installed, sourced directly) ---
+# Homebrew: <prefix>/share/<plugin>/<plugin>.zsh   Arch: /usr/share/zsh/plugins/<plugin>/<plugin>.zsh
+if command -v brew >/dev/null 2>&1; then
+  ZSH_PLUGIN_DIR="$(brew --prefix)/share"
+else
+  ZSH_PLUGIN_DIR="/usr/share/zsh/plugins"
+fi
+source "$ZSH_PLUGIN_DIR/zsh-autosuggestions/zsh-autosuggestions.zsh"
+source "$ZSH_PLUGIN_DIR/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
 
 # --- Environment ---
 export EDITOR="nvim"
