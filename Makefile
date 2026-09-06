@@ -4,7 +4,7 @@
 #   make bootstrap   # fresh machine: brew packages + config symlinks + agent skills + externals + audiotee/mictee builds
 #   make brew        # install/verify Brewfile packages only
 #   make configs     # restow home-target config packages (what `dots` does, minus git pull)
-#   make skills      # restow authored skills into each harness dir + brew-provided skill links
+#   make skills      # restow authored skills into each harness dir + brew-provided skill links + per-file agent links
 #   make externals   # (re)install externally-managed skills via the skills CLI
 #   make update      # upgrade brew packages and externally-managed skills
 #   make audiotee    # build the audiotee system-audio capture binary into ~/.local/bin (Swift 5.9+, macOS 14.2+)
@@ -21,6 +21,8 @@
 #   - `skills` runs stow from agents/ (not repo root) so .stowrc's --no-folding is not read:
 #     each skill stays ONE whole-directory symlink, so files added later appear without a restow.
 #     Codex reads ~/.agents/skills (follows dir symlinks); ~/.codex/skills is deprecated upstream.
+#   - agents are stowed per FILE into ~/.claude/agents (the package is flat, so folding is moot) so
+#     machine-local agents can sit alongside; an agent added by a pull appears after the next `make skills`
 #   - Recipes must be indented with a literal TAB (make syntax rule)
 #   - Idempotency lives in the tools: `brew bundle` no-ops when satisfied; `stow -R` re-syncs
 -include local.mk
@@ -46,7 +48,8 @@ configs:
 skills:
 	for t in $(HARNESS_SKILL_DIRS); do mkdir -p $$t && (cd $(CURDIR)/agents && stow -t $$t -R skills); done
 	ln -sfn "$$(brew --prefix hunk)/libexec/skills/hunk-review" $(HOME)/.claude/skills/hunk-review
-	ln -sfn $(CURDIR)/agents/agents $(HOME)/.claude/agents
+	@[ -L $(HOME)/.claude/agents ] && rm $(HOME)/.claude/agents || true
+	mkdir -p $(HOME)/.claude/agents && (cd $(CURDIR)/agents && stow -t $(HOME)/.claude/agents -R agents)
 
 externals:
 	npx -y skills add herdrdev/herdr --skill herdr -g -y
