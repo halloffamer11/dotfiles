@@ -39,6 +39,8 @@ brew "pipx"
 
 # macOS plumbing
 brew "duti"
+tap "FelixKratz/formulae", trusted: true # JankyBorders lives in the author's personal tap
+brew "borders", restart_service: :changed # focused-window highlight; config: stow/borders
 
 # Security and Passwords
 cask "bitwarden"
