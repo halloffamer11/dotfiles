@@ -1,12 +1,15 @@
 # ~/dotfiles/Makefile — machine provisioning entry points.
 #
 # Usage:
-#   make bootstrap   # fresh machine: brew packages + config symlinks + agent skills + externals
+#   make bootstrap   # fresh machine: brew packages + config symlinks + agent skills + externals + audiotee/mictee builds
 #   make brew        # install/verify Brewfile packages only
 #   make configs     # restow home-target config packages (what `dots` does, minus git pull)
 #   make skills      # restow authored skills into each harness dir + brew-provided skill links
 #   make externals   # (re)install externally-managed skills via the skills CLI
 #   make update      # upgrade brew packages and externally-managed skills
+#   make audiotee    # build the audiotee system-audio capture binary into ~/.local/bin (Swift 5.9+, macOS 14.2+)
+#   make mictee      # build the mictee mic capture binary into ~/.local/bin (Swift)
+#   make test-recorder  # regression harness for the record-meeting rig
 #
 # Editing:
 #   - CONFIG_PACKAGES: config packages under stow/, targeted at ~
@@ -26,9 +29,9 @@ CONFIG_PACKAGES ?= git herdr nvim starship wezterm yazi zsh
 HARNESS_SKILL_DIRS ?= $(HOME)/.claude/skills $(HOME)/.agents/skills $(HOME)/.kiro/skills
 EXTRA_BREWFILES ?= 
 
-.PHONY: bootstrap brew configs skills externals update
+.PHONY: bootstrap brew configs skills externals update audiotee mictee test-recorder
 
-bootstrap: brew configs skills externals
+bootstrap: brew configs skills externals audiotee mictee
 
 brew:
 	brew bundle --file=$(CURDIR)/Brewfile
