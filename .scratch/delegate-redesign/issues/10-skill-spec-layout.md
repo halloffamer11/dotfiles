@@ -32,7 +32,7 @@ Spec §9.6 asks that every file the hook or docs name exists. Ticket 09 marked i
 - [ ] The nine scripts plus `setup_tui.py` live in `scripts/` and every test still passes from the new location
 - [ ] `tui-research.md` and `tui-mockup.md` live in `references/`; the `.txt` extension is gone
 - [ ] `preamble.md`, `schemas/`, and `samples/` live in `assets/`, and the code that reads them is updated
-- [ ] `monitor/` is out of the skill at `tools/delegate-mon/` and its spec and plan documents name the new path
+- [ ] `monitor/` is out of the skill at `tools/delegate-mon/`; `monitor/CLAUDE.md` travels with it and names the new location, and the monitor design spec gains a one-line moved-on note at the top. The 2026-09-02 implementation plan is a completed execution record and is left as written — rewriting its file list would falsify what was actually done
 - [ ] No path anywhere still names a script at the skill root: `grep -rn "skills/delegate/[a-z_]*\.\(py\|sh\)" ~/.claude ~/dotfiles` returns nothing outside `scripts/`
 - [ ] `delegate/CLAUDE.md` holds no dated status section
 - [ ] The four wrapper skills are untouched by this ticket
