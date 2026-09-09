@@ -1,6 +1,6 @@
 # Council evals — genres single agents typically get wrong
 
-Run at build time and after each routing.md refresh. A council whose output
+Run at build time and after each catalog change (`~/.config/delegate/lanes.json`). A council whose output
 misses the named trap fails the eval; routing rankings that have never passed
 an eval stay labeled heuristic.
 

@@ -12,7 +12,7 @@ Deterministic rendering, so every report has the same shape:
   report.py cost DIR          token-cost breakdown for one run.
 
 Two ledgers exist and they are not the same file:
-  ledger.jsonl  machine events from dispatch.sh / usage.py, for the monitor TUI.
+  ledger.jsonl  machine events from delegate.py / usage.py, for the monitor TUI.
   runs.jsonl    what the LEAD concluded after verifying a dispatch — the work
                 label and whether the definition of done was met. Only the lead
                 knows this, so only the lead writes it.
@@ -403,7 +403,7 @@ def main():
     log.add_argument("--class", dest="klass", default=None)
     log.add_argument("--rc", type=int, default=0)
     log.add_argument("--status", default=None, help="status field of the out file")
-    log.add_argument("--thread", default=None, help="thread_id, once dispatch.sh emits one")
+    log.add_argument("--thread", default=None, help="thread_id from the delegate-metrics: line")
     log.add_argument("--batch", default=None, help="tag grouping one fan-out")
     log.add_argument("--run", dest="run_dir", default=None,
                      help="run directory; read lane, usage, secs, status, thread_id from dispatch.json")
