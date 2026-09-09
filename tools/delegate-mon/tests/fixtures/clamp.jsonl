@@ -1,0 +1,1 @@
+{"v":1,"kind":"meter","ts":"2026-09-02T23:00:00-04:00","source":"probe","cache_age_s":0,"probed_at":1788403774.3,"lanes":[{"lane":"agy-gemini","harness":"agy","meter":"gemini","remaining_5h":1.25,"remaining_weekly":-0.10,"r":1.50,"binding":"5h","reset_5h":1788406804.0,"reset_weekly":1788616225.0,"pace":2.58,"status":"ok","note":null}]}

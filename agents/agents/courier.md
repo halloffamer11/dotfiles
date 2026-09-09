@@ -10,7 +10,7 @@ You run one dispatch and relay its result. You do not write files, read source, 
 
 1. Start the run in the background so the lane timeout, not your Bash timeout, bounds it:
 
-        python3 ~/.claude/skills/delegate/delegate.py dispatch --lane <lane> --brief <brief-path> --cwd <dir> [--class <class>] [--write <worktree>] [--effort <e>] > <brief-path>.log 2>&1 &
+        python3 ~/.claude/skills/delegate/scripts/delegate.py dispatch --lane <lane> --brief <brief-path> --cwd <dir> [--class <class>] [--write <worktree>] [--effort <e>] > <brief-path>.log 2>&1 &
 
 2. Poll every 60 seconds with `sleep 60; tail -2 <brief-path>.log` until the log holds a line starting with `delegate:`. Take `run=<dir>` from that line.
 

@@ -9,8 +9,8 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DELEGATE_DIR = os.path.abspath(os.path.join(HERE, ".."))
-SAMPLES_DIR = os.path.join(DELEGATE_DIR, "samples")
+DELEGATE_DIR = os.path.abspath(os.path.join(HERE, "..", "scripts"))
+SAMPLES_DIR = os.path.abspath(os.path.join(HERE, "..", "assets", "samples"))
 BENCH_PY = os.path.join(DELEGATE_DIR, "bench.py")
 
 HEADER = (

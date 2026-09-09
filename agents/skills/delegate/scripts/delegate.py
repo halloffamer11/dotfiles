@@ -246,8 +246,8 @@ def resolve(lane_name, class_name, brief_path, cwd_dir, write_dir, effort_arg, c
 
 
 def build_prompt(child_cwd, harness, write_dir, brief_path, run_dir=None):
-    preamble_path = os.path.join(HERE, "preamble.md")
-    schema_path = os.path.join(HERE, "schemas", "return.json")
+    preamble_path = os.path.abspath(os.path.join(HERE, "..", "assets", "preamble.md"))
+    schema_path = os.path.abspath(os.path.join(HERE, "..", "assets", "schemas", "return.json"))
 
     with open(preamble_path, "rb") as f:
         preamble_bytes = f.read()

@@ -23,7 +23,7 @@ One brief, received identically by every panelist:
   hint of your own current lean.
 
 ## 2. Compose the panel
-- Run `python3 ~/.claude/skills/delegate/usage.py --pretty` for real availability and `python3 ~/.claude/skills/delegate/catalog.py show` for the lanes.
+- Run `python3 ~/.claude/skills/delegate/scripts/usage.py --pretty` for real availability and `python3 ~/.claude/skills/delegate/scripts/catalog.py show` for the lanes.
 - Panelists: available harnesses serving models from different families.
   Exclude your own model family — no agent grades its own work.
 - Quorum: ≥2 model families besides the lead's.

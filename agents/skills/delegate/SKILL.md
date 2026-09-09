@@ -21,7 +21,7 @@ The session plans, adjudicates, and synthesizes. Worker-shaped work goes out on 
 
 - `~/.config/delegate/lanes.json`: meters and lanes (harness, model, effort, meter, meter weight, timeout, price, tier, trust, basis). Global only.
 - `~/.config/delegate/routing.json`: `classTier` (class to tier), `margin`, `gate`. A project overrides any key at `<git-root>/.delegate/routing.json`; `classTier` merges per class.
-- Both are strict JSON, validated on read with a plain-language message naming the field and the rule, formatted on write, and accept `note` fields anywhere. `python3 ~/.claude/skills/delegate/catalog.py show` prints the effective catalog for the current directory; `catalog.py check <file>` validates one file. The starting catalog ships in `samples/`; `/delegate setup` is the wizard that builds or revises it.
+- Both are strict JSON, validated on read with a plain-language message naming the field and the rule, formatted on write, and accept `note` fields anywhere. `python3 ~/.claude/skills/delegate/scripts/catalog.py show` prints the effective catalog for the current directory; `scripts/catalog.py check <file>` validates one file. The starting catalog ships in `assets/samples/`; `/delegate setup` is the wizard that builds or revises it.
 
 ## 1. Classify and write the brief
 
@@ -29,7 +29,7 @@ Pick the class. Write a Markdown brief with two headings, nothing else: `# Objec
 
 ## 2. Run
 
-    python3 ~/.claude/skills/delegate/delegate.py run <class> --brief </abs/brief.md> --cwd </abs/project> [--write </abs/worktree>] [--effort low|medium|high|xhigh] [--dry-run]
+    python3 ~/.claude/skills/delegate/scripts/delegate.py run <class> --brief </abs/brief.md> --cwd </abs/project> [--write </abs/worktree>] [--effort low|medium|high|xhigh] [--dry-run]
 
 Run it with `run_in_background` so the session keeps working; the notification carries the `delegate:` line with `run=<dir>`, and `<dir>/return.json` is the result. The command prints the ordered lanes with one reason each, then dispatches the pick. `--dry-run` stops after the print. `--effort` overrides the lane's effort dial for this job only; the lane's tier is unchanged. `--write` is the only way a worker gets a shell and edits; the worktree is the blast radius, never a primary checkout.
 
@@ -41,7 +41,7 @@ To run a specific lane without ranking, type one of the wrappers yourself, for e
 
 `return.json` is a claim. `status` other than `done` is not a success; `blocked` carries its reason in `deliverable`. Read the evidence, diff `changed_files`, run the checks yourself. Then log the adjudication with the thread from the `delegate-metrics:` line:
 
-    python3 ~/.claude/skills/delegate/report.py log --work "<2-4 words>" --run <run-dir> --verdict clean|findings|partial|failed [--outcome "<phrase>"] --class <class>
+    python3 ~/.claude/skills/delegate/scripts/report.py log --work "<2-4 words>" --run <run-dir> --verdict clean|findings|partial|failed [--outcome "<phrase>"] --class <class>
 
 `--run` takes lane, seconds, status, thread, and the token cost from the run directory; `report.py cost <run-dir>` prints one run's cost breakdown, or `unmeasured` when the relay reported no tokens (Codex today).
 
@@ -53,4 +53,4 @@ A Workflow script has no shell primitive. The `courier` agent is an optional wra
 
 ## Health
 
-`python3 tests/test_catalog.py`, `tests/test_rank.py`, `tests/test_dispatch.py`, `tests/test_events.py`, `tests/test_report.py`, `tests/test_usage_reset.py` after touching the matching file. `sh ads.sh check` confirms the pinned relays; `sh ads.sh install` restores them. A model slug that stops resolving is edited in `lanes.json`; `agy models`, `codex debug models`, `grok models` list the current ones.
+`python3 tests/test_catalog.py`, `tests/test_rank.py`, `tests/test_dispatch.py`, `tests/test_events.py`, `tests/test_report.py`, `tests/test_usage_reset.py`, `tests/test_bench.py`, `tests/test_setup.py`, `tests/test_setup_tui.py` after touching the matching file. `sh scripts/ads.sh check` confirms the pinned relays; `sh scripts/ads.sh install` restores them. A model slug that stops resolving is edited in `lanes.json`; `agy models`, `codex debug models`, `grok models` list the current ones.

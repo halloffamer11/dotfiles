@@ -13,7 +13,7 @@ import termios
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DELEGATE_DIR = os.path.abspath(os.path.join(HERE, ".."))
+DELEGATE_DIR = os.path.abspath(os.path.join(HERE, "..", "scripts"))
 FIXTURE = os.path.join(HERE, "fixture", "bench-epoch.csv")
 sys.path.insert(0, DELEGATE_DIR)
 
@@ -21,8 +21,8 @@ import bench
 import catalog
 from setup_tui import Wizard
 
-LANES = catalog.load_json(os.path.join(DELEGATE_DIR, "samples", "lanes.json"))
-ROUTING = catalog.load_json(os.path.join(DELEGATE_DIR, "samples", "routing.json"))
+LANES = catalog.load_json(os.path.abspath(os.path.join(HERE, "..", "assets", "samples", "lanes.json")))
+ROUTING = catalog.load_json(os.path.abspath(os.path.join(HERE, "..", "assets", "samples", "routing.json")))
 DISCOVERED = set(catalog.HARNESSES)
 fails = 0
 

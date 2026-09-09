@@ -3,7 +3,7 @@
 import json, os, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, ".."))
+sys.path.insert(0, os.path.abspath(os.path.join(HERE, "..", "scripts")))
 from usage import claude_reset, write_cache, load_cache
 
 

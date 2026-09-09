@@ -4,8 +4,8 @@ import json, os, subprocess, sys, tempfile
 from datetime import datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-EVENTS_PY = os.path.join(HERE, "..", "events.py")
-sys.path.insert(0, os.path.join(HERE, ".."))
+EVENTS_PY = os.path.abspath(os.path.join(HERE, "..", "scripts", "events.py"))
+sys.path.insert(0, os.path.abspath(os.path.join(HERE, "..", "scripts")))
 import events
 
 

@@ -6,8 +6,8 @@ from decimal import Decimal, ROUND_HALF_UP
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL = os.path.dirname(HERE)
-REPORT = os.path.join(SKILL, "report.py")
-SAMPLES = os.path.join(SKILL, "samples")
+REPORT = os.path.abspath(os.path.join(SKILL, "scripts", "report.py"))
+SAMPLES = os.path.abspath(os.path.join(SKILL, "assets", "samples"))
 fails = []
 
 

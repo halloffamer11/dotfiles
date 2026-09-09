@@ -76,7 +76,7 @@ def load_or_propose(config_dir, discovered):
         validate_lanes(lanes_doc, lanes_path)
         validate_routing(routing_doc, routing_path)
     else:
-        samples_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "samples")
+        samples_dir = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "samples"))
         sample_lanes = load_json(os.path.join(samples_dir, "lanes.json"))
         lanes_doc = copy.deepcopy(sample_lanes)
         lanes_doc["lanes"] = {

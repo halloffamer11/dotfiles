@@ -1,0 +1,2 @@
+{"v":1,"kind":"dispatch.start","ts":"2026-09-02T23:01:00-04:00","thread_id":"550e8400-e29b-41d4-a716-446655440002","lane":"flash-high@agy","class":"verify","effort":"medium","timeout_s":600,"cwd":"/abs/dir","brief":"/abs/brief.md","out":"/abs/out.json","write":null}
+{"v":1,"kind":"dispatch.finish","ts":"2026-09-02T23:02:44-04:00","thread_id":"550e8400-e29b-41d4-a716-446655440002","lane":"flash-high@agy","class":"verify","secs":104,"rc":0,"status":"done","child_session":"ffecc85b-084d-47f9-ad14-2e0d44307989","out":"/abs/out.json"}

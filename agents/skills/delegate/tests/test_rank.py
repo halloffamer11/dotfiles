@@ -9,8 +9,8 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DELEGATE_DIR = os.path.abspath(os.path.join(HERE, ".."))
-SAMPLES_DIR = os.path.join(DELEGATE_DIR, "samples")
+DELEGATE_DIR = os.path.abspath(os.path.join(HERE, "..", "scripts"))
+SAMPLES_DIR = os.path.abspath(os.path.join(HERE, "..", "assets", "samples"))
 RANK_PY = os.path.join(DELEGATE_DIR, "rank.py")
 
 sys.path.insert(0, DELEGATE_DIR)

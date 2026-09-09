@@ -11,8 +11,8 @@ import tempfile
 import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DELEGATE_DIR = os.path.abspath(os.path.join(HERE, ".."))
-SAMPLES_DIR = os.path.join(DELEGATE_DIR, "samples")
+DELEGATE_DIR = os.path.abspath(os.path.join(HERE, "..", "scripts"))
+SAMPLES_DIR = os.path.abspath(os.path.join(HERE, "..", "assets", "samples"))
 DELEGATE_PY = os.path.join(DELEGATE_DIR, "delegate.py")
 FAKE_RELAY_SRC = os.path.join(HERE, "fake-ads", "relay.mjs")
 
