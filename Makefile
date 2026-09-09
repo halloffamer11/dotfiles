@@ -27,7 +27,7 @@
 #   - Idempotency lives in the tools: `brew bundle` no-ops when satisfied; `stow -R` re-syncs
 -include local.mk
 
-CONFIG_PACKAGES ?= borders ghostty git herdr nvim starship wezterm yazi zsh
+CONFIG_PACKAGES ?= borders claude ghostty git herdr nvim starship wezterm yazi zsh
 HARNESS_SKILL_DIRS ?= $(HOME)/.claude/skills $(HOME)/.agents/skills $(HOME)/.kiro/skills
 EXTRA_BREWFILES ?= 
 
