@@ -3,6 +3,7 @@
 brew "stow"    # symlink manager — everything in Makefile's configs/skills targets depends on it
 brew "hunk"    # diff viewer; ships the hunk-review skill (linked by `make skills`)
 brew "herdr"   # agent multiplexer; installs its own agent-state hooks on first launch
+brew "jq"      # the Claude Code statusline (stow/claude) parses its stdin JSON with it
 cask "hammerspoon" # hotkey/menubar orchestrator for the record-meeting rig
 
 # Shell & prompt - .zshrc sources/evals all of these
