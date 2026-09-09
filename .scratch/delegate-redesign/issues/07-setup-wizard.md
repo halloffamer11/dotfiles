@@ -4,7 +4,7 @@
 
 **Blocked by:** 03 One run through an ADS relay; 06 Benchmark ranking report.
 
-**Status:** landed 2026-09-09 in the working tree (uncommitted); items left unticked are Orin's
+**Status:** plain-prompt wizard landed 2026-09-09 (commit 7c76843); Orin asked for a selectable TUI (best tier first, benchmarks beside each row, placed lanes de-emphasized below): rebuild in flight on sol-high@codex, brief in the session scratchpad as brief-ticket-07b.md
 
 - [x] With no catalog present, the wizard proposes lanes for every installed harness and writes a valid catalog after yes
 - [x] With a catalog present, existing tier and trust are the defaults and a plain enter keeps them

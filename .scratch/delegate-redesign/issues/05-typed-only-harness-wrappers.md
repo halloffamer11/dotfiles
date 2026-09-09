@@ -4,10 +4,10 @@
 
 **Blocked by:** 03 One run through an ADS relay.
 
-**Status:** landed 2026-09-09 in the working tree (uncommitted); items left unticked are Orin's
+**Status:** landed 2026-09-09 (commit 7c76843); wrappers stowed by `make skills`
 
 - [x] Each wrapper has model invocation disabled in its frontmatter and does not appear in the model's skill list
 - [x] `/delegate-codex --lane terra-high@codex <brief>` runs the named lane without a meter probe
 - [x] `/delegate-grok --model grok-4.6 <brief>` resolves the model to its lane; an unknown model fails with a message listing the lanes on that harness
 - [x] A wrapper for a harness whose CLI is absent fails before dispatch with a plain message
-- [ ] One typed smoke run on each wrapper leaves a run directory
+- [x] One typed smoke run on each wrapper leaves a run directory (code path smoked 2026-09-09 on all four harnesses; run dirs 20260909T1800*)

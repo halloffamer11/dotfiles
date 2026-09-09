@@ -6,12 +6,12 @@ Orin runs the spec acceptance list as the final assessment before this ticket cl
 
 **Blocked by:** 04 The `/delegate` skill; 05 Typed-only harness wrappers.
 
-**Status:** ready-for-agent
+**Status:** landed 2026-09-09 (commits 7c76843, 9545e6f; tag delegate-v1-last); unticked items wait on Orin: the one-line Delegation section in ~/.claude/CLAUDE.md and the DELEGATE_BALANCE export in ~/.zshrc.local (both blocked for the session), and the §9 walk
 
-- [ ] Spawning a Claude worker without a reason is no longer denied; the hook only adds context
+- [x] Spawning a Claude worker without a reason is no longer denied; the hook only adds context
 - [ ] No environment-variable switch remains anywhere in the skill, hooks, or docs; `mode` and `balance` do not exist as settings
-- [ ] Every file the hook, the skill, and the context files name exists
-- [ ] The old lane table and shell dispatcher are gone and nothing references them
+- [x] Every file the hook, the skill, and the context files name exists
+- [x] The old lane table and shell dispatcher are gone and nothing references them
 - [ ] The global CLAUDE.md Delegation section is one line
-- [ ] Existing tests and the TUI build pass after the deletions
+- [x] Existing tests and the TUI build pass after the deletions
 - [ ] Orin walks the eight acceptance items in spec section 9 and signs each off
