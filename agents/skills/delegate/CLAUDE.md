@@ -15,4 +15,8 @@ External worker routing lives in this directory. Read `SKILL.md` first, then use
 - `tests/`: one test file per script, stdlib only, no network; `tests/fake-ads/relay.mjs` stands in for the relays.
 - Sibling skills `../delegate-claude`, `../delegate-codex`, `../delegate-agy`, `../delegate-grok`: typed-only wrappers, about twenty lines each.
 
+`--read-only` is not one thing. The pinned relays map it per harness: codex and claude get a real read-only sandbox and their tools work; **grok gets `--permission-mode plan`, which cancels tool calls, and agy gets `--mode plan`, which auto-denies every permission in a headless run**. A read-only dispatch to grok or agy therefore dies at its first tool call and burns the quota anyway. Ticket 14 carries the fix; until it lands, send tool-needing read-only work to codex or claude.
+
+Open work is tracked in `.scratch/delegate-redesign/issues/`; the design is `docs/superpowers/specs/2026-09-08-delegate-redesign.md`.
+
 Constraints for workers: the lane comes from `rank.py`; a lower lane needs a one-line reason. Unrelated working-tree files stay untouched.
