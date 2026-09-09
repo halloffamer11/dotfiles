@@ -15,3 +15,18 @@ Orin runs the spec acceptance list as the final assessment before this ticket cl
 - [ ] The global CLAUDE.md Delegation section is one line
 - [x] Existing tests and the TUI build pass after the deletions
 - [ ] Orin walks the eight acceptance items in spec section 9 and signs each off
+
+## §9 walk, 2026-09-09
+
+| # | Item | State |
+|---|---|---|
+| 1 | Grok timeout, partial kept | **Signed off.** Spec amended: the item asked for status `timeout`, which contradicts §6.5 mapping timeout to `blocked`. Evidence is `tests/test_dispatch.py`, which proves the partial `final.txt` survives; no live grok run has ever timed out |
+| 2 | No tool-call bound | **Open, decided.** The harness cap is gone but `preamble.md` asks every worker to stop after 40 tool calls. Leash kept for `scout` and `mechanical`, dropped for `impl` and `hard-impl`, plus a per-dispatch override. Ticket 11 |
+| 3 | agy empty → `blocked` with a reason | **Signed off.** `tests/test_dispatch.py` cases 2c and 5 |
+| 4 | Run directories outlive the session | **Signed off.** 14 directories under `~/.cache/delegate/runs/`, spanning three sessions |
+| 5 | Brief reaches the CLI byte for byte | **Signed off.** Verified on run `20260909T181534Z`: a 9,762-byte brief sits verbatim inside the 12,049-byte prompt the relay reads |
+| 6 | Every named file exists | **Open.** Re-opened after three dead references were found; ticket 10 |
+| 7 | No env var switch | **Open.** `export DELEGATE_BALANCE=1` at `~/.zshrc.local:1`; nothing live reads it |
+| 8 | Claude lane read-only smoke run | **Signed off.** Two `fable-xhigh@claude` runs, `sandbox: null`, `status: completed` |
+
+Five of eight signed off. The checkbox above closes when 2, 6 and 7 do.
