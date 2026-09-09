@@ -14,6 +14,8 @@ The wrapper reads `$ARGUMENTS` as prose constraints, not flags. It resolves the 
 
 **Setup has no working entry point.** `SKILL.md` claims "`/delegate setup` is the wizard that builds or revises it". That command does not exist. Typing it passes the word `setup` as `$ARGUMENTS` to `/delegate`, and the body has no instruction that does anything with it, so it silently does nothing. Fix both halves: document the direct command `python3 ~/.claude/skills/delegate/scripts/setup.py`, and teach the `/delegate` body to run the wizard when the arguments ask for setup, so the documented command becomes true rather than deleted.
 
+**The tool-call leash does not scale with the job.** `preamble.md` is prepended to every brief and says "Stop exploring after 40 tool calls and write the answer." Nothing enforces it — it is a request to the worker, not a harness cap — but it goes out unchanged whether the job is a two-file lookup or a five-file implementation with ten test cases. Unbounded exploration is the failure mode for `scout` and `mechanical`, so those keep the leash. For `impl` and `hard-impl` the real limit is the lane timeout, so the sentence is dropped. This lives in this ticket because it is the same question as the rest of it: how a job's intent reaches the worker intact. It resolves spec §9.2, which is otherwise unpassable as written.
+
 **Blocked by:** 10 (the script paths move; writing them twice is waste). 07b for `setup_tui.py` to exist behind the setup entry.
 
 **Status:** open, raised by Orin 2026-09-09.
@@ -25,4 +27,6 @@ The wrapper reads `$ARGUMENTS` as prose constraints, not flags. It resolves the 
 - [ ] `/delegate` applies the same prose constraints when the agent routes on its own judgement
 - [ ] `/delegate` run with setup arguments starts the wizard
 - [ ] `SKILL.md` names the direct `setup.py` path and no longer claims anything untrue about `/delegate setup`
+- [ ] `preamble.md` is assembled per class: the 40-tool-call sentence appears for `scout` and `mechanical` and is absent for `impl` and `hard-impl`
+- [ ] A dispatched `hard-impl` prompt contains no tool-call sentence, verified by reading `<run>/prompt.md`
 - [ ] Orin types each of the four wrappers once with a plain-language constraint and gets the lane he expected

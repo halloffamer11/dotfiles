@@ -128,7 +128,7 @@ Sources: Epoch AI CSV `https://epoch.ai/data/eci_benchmarks.csv` (no key, CC-BY,
 ## 9. Acceptance
 
 1. A Grok run that would take 47 minutes ends at the lane timeout as `blocked` with reason `timeout after <lane timeout>`, partial output kept in the run directory. (Amended 2026-09-09: the original wording asked for status `timeout`, which contradicts §6.5 mapping `timeout` to `blocked`. The implementation follows §6.5; `tests/test_dispatch.py` proves the partial `final.txt` survives.)
-2. No run is bounded by a tool-call limit.
+2. No implementation run is bounded by a tool-call limit. (Amended 2026-09-09: the harness cap is gone, but `preamble.md` asks every worker to stop after 40 tool calls, which is a bound of a softer kind. Decision: the leash is kept for `scout` and `mechanical`, where unbounded exploration is the failure mode, and dropped for `impl` and `hard-impl`, where the lane timeout is the real limit. Ticket 11 carries it.)
 3. An agy empty response is `blocked` with a reason, never `done`.
 4. Every run leaves a directory under `~/.cache/delegate/runs/` that outlives the session.
 5. The brief reaches the CLI byte for byte (relay reads the file we wrote; no LLM in between).
