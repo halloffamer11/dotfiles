@@ -23,13 +23,19 @@ Absence of a CLI, auth failure, or a probe timeout marks that lane
 """
 import json, os, re, subprocess, sys, time
 from datetime import datetime, timezone
+try:
+    from events import append, meter_event
+except ImportError:
+    from .events import append, meter_event
 
 TTL_MIN_DEFAULT = 10
 GATE = 0.10           # r below this → lane unavailable
 WEEK = 7 * 86400      # assumed weekly-cycle length for pace
 CYCLE_FLOOR = 0.02    # ~3.4h: pace denominator floor near a reset
 ROLLOVER_MIN = 30     # binding window resets within this → ask user whether to wait
-CACHE = os.environ.get("DELEGATE_CACHE") or os.environ.get("CONSULT_CACHE") or os.path.expanduser("~/.cache/delegate/usage.json")
+def get_cache_path():
+    return os.environ.get("DELEGATE_CACHE") or os.environ.get("CONSULT_CACHE") or os.path.expanduser("~/.cache/delegate/usage.json")
+CACHE = get_cache_path()
 NOW = time.time()
 
 def which(b): return subprocess.run(["command", "-v", b], shell=False, capture_output=True, text=True).returncode == 0 if False else any(os.access(os.path.join(p, b), os.X_OK) for p in os.environ.get("PATH", "").split(os.pathsep))
@@ -125,13 +131,14 @@ def claude_reset(text):
     """'Sep 8 at 2:59pm (America/New_York)' -> epoch seconds, or None. The year is
     not printed: assume the current one, roll forward if that lands in the past."""
     if not text: return None
-    m = re.search(r"([A-Z][a-z]{2}) (\d{1,2}) at (\d{1,2}):(\d{2})(am|pm) \(([^)]+)\)", text)
+    m = re.search(r"([A-Z][a-z]{2}) (\d{1,2}) at (\d{1,2})(?::(\d{2}))?(am|pm) \(([^)]+)\)", text)
     if not m: return None
     try:
         from zoneinfo import ZoneInfo
         tz = ZoneInfo(m.group(6)); hour = int(m.group(3)) % 12 + (12 if m.group(5) == "pm" else 0)
+        minute = m.group(4) or "00"
         year = datetime.now(tz).year
-        t = datetime.strptime(f"{m.group(1)} {m.group(2)} {year} {hour}:{m.group(4)}", "%b %d %Y %H:%M").replace(tzinfo=tz)
+        t = datetime.strptime(f"{m.group(1)} {m.group(2)} {year} {hour}:{minute}", "%b %d %Y %H:%M").replace(tzinfo=tz)
         if t.timestamp() < NOW - 86400: t = t.replace(year=year + 1)
         return t.timestamp()
     except Exception:
@@ -206,12 +213,22 @@ def probe_grok():
         return [lane("grok", None, note=f"probe failed: {e}")]
 
 # ---------------------------------------------------------------- main
-def load_cache(max_age_min):
+def load_cache(max_age_min, cache_path=None):
+    p = cache_path or get_cache_path()
     try:
-        with open(CACHE) as f: d = json.load(f)
+        with open(p) as f: d = json.load(f)
         if NOW - d.get("probed_at", 0) <= max_age_min * 60: return d
     except Exception: pass
     return None
+
+def write_cache(d, cache_path=None):
+    p = cache_path or get_cache_path()
+    parent = os.path.dirname(p)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with open(p, "w") as f:
+        json.dump(d, f, indent=1)
+    append(meter_event(d))
 
 def main():
     args = sys.argv[1:]
@@ -223,8 +240,7 @@ def main():
         lanes = probe_codex() + probe_agy() + probe_claude() + probe_grok()
         d = {"probed_at": NOW, "probed_at_iso": datetime.fromtimestamp(NOW, timezone.utc).isoformat(),
              "gate": GATE, "rollover_min": ROLLOVER_MIN, "lanes": lanes}
-        os.makedirs(os.path.dirname(CACHE), exist_ok=True)
-        with open(CACHE, "w") as f: json.dump(d, f, indent=1)
+        write_cache(d)
         d["from_cache"] = False
     else:
         d["from_cache"] = True

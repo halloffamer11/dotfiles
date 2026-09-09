@@ -2,34 +2,24 @@
 
 External worker routing lives in this directory. Read `SKILL.md` first, then use these files as the implementation authority:
 
-- `lanes.tsv`: eligible lanes and work classes.
-- `rank.py`: quota-aware deterministic lane ranking.
-- `usage.py`: cached subscription-meter probes.
-- `dispatch.sh`: the single child-harness entry point.
-- `schemas/return.json`: normalized child return contract.
-- `tests/`: dispatcher and envelope verification.
+- `catalog.py`: the two configuration files (`~/.config/delegate/lanes.json`, `routing.json`, project override `.delegate/routing.json`), validators, `show`/`check`/`fmt`. `samples/`: the starting catalog from the spec.
+- `rank.py`: the selection rule over the catalog and the live meters (tier ceiling, trust, pace margin).
+- `delegate.py`: one run through a pinned ADS relay (`dispatch`), and rank-then-dispatch (`run`). Run directories under `~/.cache/delegate/runs/`, never reused.
+- `ads.sh`: installs and checks the relay layer, amElnagdy/delegate-skills at commit `b781ee2e23089630e2fbee1cfd6174afe4edeb76`, in `~/.local/share/delegate/ads`. `ads.sh install` is reproducible from that constant.
+- `usage.py`: cached subscription-meter probes. `events.py`: the monitor ledger encoder (schema unchanged).
+- `report.py`: limits, runs, and the lead's run ledger. `bench.py`: the human-only benchmark ranking under `~/.cache/delegate/bench/`; no routing code reads it.
+- `schemas/return.json`: the child return contract, requested in every prompt and parsed out of the relay's final message.
+- `tests/`: one test file per script, stdlib only, no network; `tests/fake-ads/relay.mjs` stands in for the relays.
+- Sibling skills `../delegate-claude`, `../delegate-codex`, `../delegate-agy`, `../delegate-grok`: typed-only wrappers, about twenty lines each.
 
-## Active sub-project: monitoring TUI
+## Redesign status (spec `docs/superpowers/specs/2026-09-08-delegate-redesign.md`, tickets `.scratch/delegate-redesign/issues/01..09`)
 
-Build a local, read-mostly monitoring cockpit as a separate Rust sub-project. The design is not yet approved and no implementation has started.
+Landed in the working tree on 2026-09-09, uncommitted: 01 catalog, 02 rank, 03 dispatch through ADS, 04/05 (`delegate.py run`, `--model`, `--harness`, the five skill files), 06 bench, 07 setup wizard, 08 cost in the report. Real runs through the new dispatcher on all four harnesses (agy and Claude read-only smokes, grok and codex write runs) left run directories under `~/.cache/delegate/runs/`. Pending: 09 advise-only hook and migration (hooks and the global CLAUDE.md live in `~/.claude`, not here; the council skill still points at `references/routing.md` and `probe.sh`). Until 09 lands, `lanes.tsv`, `dispatch.sh`, `extract.py`, `probe.sh`, `references/routing.md` and the old smoke scripts remain as the old path; `preamble.md` and `schemas/return.json` are still used by `delegate.py`. New wrapper skill directories need `make skills` to appear under `~/.claude/skills`.
 
-Accepted requirements:
+Research (cited, dated): `docs/superpowers/research/2026-09-08-lane-cost.md`, `2026-09-08-lane-benchmarks.md`. Prototype of the selection rule (throwaway): `prototype-lane-selection.html`. Tier and trust stay human-set; acceptance §9 is signed off by Orin in ticket 09.
 
-- Use Rust. Ratatui is the current framework candidate.
-- Take visual inspiration from `btop` and `macmon`: dense but aligned panels, exact percentages beside progress bars, sparklines or time-series graphs, and clear color thresholds.
-- Show remaining quota for every meter, including 5-hour and weekly windows, binding window, reset time, pace, and cache freshness.
-- Show open delegate threads with lane, class when known, elapsed time, and lifecycle state.
-- Show burn rate over selectable time windows, initially 1 hour, 24 hours, and 7 days.
-- Keep JSONL as the initial durable event store. Watch files for updates.
-- Permit manual usage refresh and lane reranking. Do not add dispatch, resume, stop, or Herdr-wide agent controls.
-- Treat the TUI as a consumer of a versioned state/event contract, not as the owner of routing logic.
+## Monitoring TUI (landed 2026-09-03, uncommitted)
 
-Known data gap: the current ledger samples Claude hook events and meter state, but `dispatch.sh` does not emit a complete start/finish lifecycle with lane, class, duration, result, and child session. Design the event contract before polishing the UI.
+Spec `docs/superpowers/specs/2026-09-02-delegate-monitor-design.md`, plan `docs/superpowers/plans/2026-09-02-delegate-monitor.md` (complete). Crate `monitor/` (package `delegate-mon`, Ratatui): display-only reader of the versioned JSONL ledger (`$DELEGATE_LEDGER` else `~/.cache/delegate/ledger.jsonl`). `events.py` encodes events; `report.py` writes the lead's `runs.jsonl`, a different file. Manual check: `cd monitor && cargo run`.
 
-References:
-
-- <https://github.com/aristocratos/btop>
-- <https://github.com/vladkens/macmon>
-- <https://ratatui.rs/>
-
-Next session: finish the reference and Ratatui research, propose 2–3 architecture approaches, revise the visual mockup around percentage bars, open threads, and time-series burn, then get explicit design approval. After approval, write the architectural spec and implementation plan before coding.
+Constraints for workers: the lane comes from `rank.py`; a lower lane needs a one-line reason. Unrelated working-tree files stay untouched.

@@ -1,15 +1,30 @@
 #!/bin/sh
-# dispatch.sh <lane> <brief.md> <out.json> [--cwd DIR] [--write DIR] [--effort low|medium|high]
+# dispatch.sh <lane> <brief.md> <out.json> [--cwd DIR] [--write DIR] [--effort low|medium|high] [--class CLASS]
 # One lane, one command, one file out. Lanes are rows in lanes.tsv; the command
 # per harness is fixed below. Prints: delegate: <lane> rc=<n> secs=<n> out=<file>
 # Read-only (default): file tools only, no shell. --write DIR: full-auto inside that
 # git worktree (codex workspace-write sandbox, grok auto + workspace sandbox, agy
 # skip-permissions). Both forms verified live on every lane 2026-09-02 (tests/).
 exec </dev/null; set -u
+class=""; thread_id=""; rc=1; secs=0; status=blocked; session=""
 HERE=$(cd "$(dirname "$0")" && pwd); SCHEMA=$HERE/schemas/return.json
+
+finish() {
+  trap_rc=$?
+  trap - EXIT
+  if [ -n "$thread_id" ]; then
+    t_id=$thread_id
+    thread_id=""
+    [ "$secs" -eq 0 ] && [ -n "${t0:-}" ] && secs=$(( $(date +%s) - t0 ))
+    [ "$rc" -eq 1 ] && [ "$trap_rc" -ne 0 ] && rc=$trap_rc
+    python3 "$HERE/events.py" finish "$t_id" "$lane" "${class:--}" "$secs" "$rc" "$status" "${session:--}" "$out" || true
+  fi
+}
+trap finish EXIT
+
 lane=${1:?lane}; brief=${2:?brief}; out=${3:?out}; shift 3
 cwd=$PWD; write=""; effort=medium
-while [ $# -gt 0 ]; do case $1 in --cwd) cwd=$2; shift;; --write) write=$2; shift;; --effort) effort=$2; shift;; *) echo "bad arg $1" >&2; exit 2;; esac; shift; done
+while [ $# -gt 0 ]; do case $1 in --cwd) cwd=$2; shift;; --write) write=$2; shift;; --effort) effort=$2; shift;; --class) class=$2; shift;; *) echo "bad arg $1" >&2; exit 2;; esac; shift; done
 case $brief in /*) ;; *) brief=$PWD/$brief;; esac
 case $out   in /*) ;; *) out=$PWD/$out;;     esac
 [ -n "$write" ] && cwd=$write
@@ -18,6 +33,9 @@ case $out   in /*) ;; *) out=$PWD/$out;;     esac
 row=$(grep -v '^#' "$HERE/lanes.tsv" | awk -F'\t' -v l="$lane" '$1==l {print $2"\t"$3}')
 [ -n "$row" ] || { echo "dispatch: unknown lane $lane" >&2; exit 2; }
 harness=${row%%	*}; slug=${row#*	}
+thread_id=$(python3 -c "import uuid; print(uuid.uuid4())")
+case $effort in low) timeout_s=360;; high) timeout_s=1500;; *) timeout_s=600;; esac
+python3 "$HERE/events.py" start "$thread_id" "$lane" "${class:--}" "$effort" "$timeout_s" "$cwd" "$brief" "$out" "${write:--}" || true
 prompt=$(mktemp -t brief).md
 { cat "$HERE/preamble.md"
   if [ -n "$write" ]; then echo "Writes are authorized inside $write only. Do not commit."
@@ -40,6 +58,9 @@ case $harness in
          grok --prompt-file "$prompt" "$@" --no-subagents --disable-web-search -m "$slug" --reasoning-effort "$effort" --output-format json --max-turns 40 --cwd "$cwd" >"$raw" 2>"$raw.err" ;;
 esac
 rc=$?
+secs=$(( $(date +%s) - t0 ))
 session=$(python3 "$HERE/extract.py" "$harness" "$raw" "$out")
-echo "delegate: $lane rc=$rc secs=$(( $(date +%s)-t0 )) out=$out session=${session:-?} err=$raw.err"
+status=$(python3 -c 'import json, sys; s = json.load(open(sys.argv[1])).get("status", "blocked") if sys.argv[1] else "blocked"; print(s if s in ("done", "partial", "blocked") else "blocked")' "$out" 2>/dev/null || echo blocked)
+echo "delegate: $lane rc=$rc secs=$secs out=$out session=${session:-?} err=$raw.err"
+echo "delegate-metrics: thread=$thread_id status=$status class=${class:--} secs=$secs rc=$rc"
 exit $rc
