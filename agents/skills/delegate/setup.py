@@ -8,7 +8,9 @@ import subprocess
 import sys
 import tempfile
 
+import bench
 import catalog
+import setup_tui
 from catalog import CatalogError, CLASSES, HARNESSES, load_json, validate_lanes, validate_routing, write_json
 
 
@@ -227,6 +229,7 @@ def main(argv=None):
     parser.add_argument("--config-dir", default=catalog.CONFIG_DIR, help="directory for lanes.json and routing.json")
     parser.add_argument("--ads-dir", default=None, help="ADS checkout containing discover.mjs")
     parser.add_argument("--discover-json", default=None, help="saved discovery JSON instead of node discovery")
+    parser.add_argument("--plain", action="store_true", help="use the prompt-driven interface")
     bench_group = parser.add_mutually_exclusive_group()
     bench_group.add_argument("--bench-report", default=None, help="existing benchmark report to display")
     bench_group.add_argument("--no-bench", action="store_true", help="skip benchmark display")
@@ -238,10 +241,42 @@ def main(argv=None):
         config_dir = os.path.abspath(os.path.expanduser(args.config_dir))
         discovered = read_discovery(args)
         lanes_doc, routing_doc, lanes_path, routing_path = load_or_propose(config_dir, discovered)
-        show_bench(args, lanes_doc, routing_doc)
-        ask_lanes(lanes_doc)
-        ask_routing(routing_doc)
-        confirm_and_write(lanes_doc, routing_doc, lanes_path, routing_path)
+        plain = args.plain or not sys.stdin.isatty() or not sys.stdout.isatty()
+        if plain:
+            show_bench(args, lanes_doc, routing_doc)
+            ask_lanes(lanes_doc)
+            ask_routing(routing_doc)
+            confirm_and_write(lanes_doc, routing_doc, lanes_path, routing_path)
+        else:
+            if args.bench_report:
+                print("note: --bench-report is ignored in TUI mode")
+            bench_data = None
+            initial_message = ""
+            if not args.no_bench:
+                try:
+                    bench_data = bench.collect(
+                        lanes_doc,
+                        epoch_csv=args.epoch_csv,
+                        aa_json=args.aa_json,
+                        key_file=os.path.join(config_dir, "aa-key"),
+                    )
+                except bench.BenchError as e:
+                    initial_message = f"bench: {e}"
+            wizard = setup_tui.Wizard(
+                lanes_doc, routing_doc, bench_data, discovered,
+                lanes_path, routing_path, initial_message,
+            )
+            result = setup_tui.run_curses(wizard)
+            if result is None:
+                print("nothing written")
+            else:
+                result_lanes, result_routing = result
+                validate_lanes(result_lanes, lanes_path)
+                validate_routing(result_routing, routing_path)
+                write_json(lanes_path, result_lanes)
+                write_json(routing_path, result_routing)
+                print(f"wrote {lanes_path}")
+                print(f"wrote {routing_path}")
     except SetupAbort:
         return 130
     except CatalogError as e:

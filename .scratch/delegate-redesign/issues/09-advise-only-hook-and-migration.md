@@ -10,7 +10,7 @@ Orin runs the spec acceptance list as the final assessment before this ticket cl
 
 - [x] Spawning a Claude worker without a reason is no longer denied; the hook only adds context
 - [ ] No environment-variable switch remains anywhere in the skill, hooks, or docs; `mode` and `balance` do not exist as settings
-- [x] Every file the hook, the skill, and the context files name exists
+- [ ] Every file the hook, the skill, and the context files name exists (re-opened 2026-09-09: three dead references found — see ticket 10)
 - [x] The old lane table and shell dispatcher are gone and nothing references them
 - [ ] The global CLAUDE.md Delegation section is one line
 - [x] Existing tests and the TUI build pass after the deletions

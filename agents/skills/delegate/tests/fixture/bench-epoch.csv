@@ -1,0 +1,26 @@
+model_id,benchmark_id,performance,benchmark,benchmark_release_date,model,model_version,Model,date,source
+claude-fable-5-1,deepswe,0.98,DeepSWE,2026-01-01,Claude Fable 5.1,claude-fable-5-1_max,Claude Fable 5.1,2026-09-01,fixture
+claude-fable-5-1,frontiercode,0.97,FrontierCode,2026-01-01,Claude Fable 5.1,claude-fable-5-1_max,Claude Fable 5.1,2026-09-01,fixture
+claude-fable-5-1,apex-agents,0.96,APEX-Agents,2026-01-01,Claude Fable 5.1,claude-fable-5-1_max,Claude Fable 5.1,2026-09-01,fixture
+claude-fable-5-1,terminal-bench,0.95,Terminal Bench,2026-01-01,Claude Fable 5.1,claude-fable-5-1_max,Claude Fable 5.1,2026-09-01,fixture
+claude-fable-5-1,swe-bench-verified,0.94,SWE-Bench verified,2026-01-01,Claude Fable 5.1,claude-fable-5-1_max,Claude Fable 5.1,2026-09-01,fixture
+gpt-5.6-sol,deepswe,0.90,DeepSWE,2026-01-01,GPT-5.6 Sol,gpt-5.6-sol_high,GPT-5.6 Sol,2026-09-01,fixture
+gpt-5.6-sol,frontiercode,0.89,FrontierCode,2026-01-01,GPT-5.6 Sol,gpt-5.6-sol_high,GPT-5.6 Sol,2026-09-01,fixture
+gpt-5.6-sol,apex-agents,0.88,APEX-Agents,2026-01-01,GPT-5.6 Sol,gpt-5.6-sol_high,GPT-5.6 Sol,2026-09-01,fixture
+gpt-5.6-sol,terminal-bench,0.87,Terminal Bench,2026-01-01,GPT-5.6 Sol,gpt-5.6-sol_high,GPT-5.6 Sol,2026-09-01,fixture
+gpt-5.6-sol,swe-bench-verified,0.86,SWE-Bench verified,2026-01-01,GPT-5.6 Sol,gpt-5.6-sol_high,GPT-5.6 Sol,2026-09-01,fixture
+gpt-5.6-terra,deepswe,0.80,DeepSWE,2026-01-01,GPT-5.6 Terra,gpt-5.6-terra_high,GPT-5.6 Terra,2026-09-01,fixture
+gpt-5.6-terra,frontiercode,0.79,FrontierCode,2026-01-01,GPT-5.6 Terra,gpt-5.6-terra_high,GPT-5.6 Terra,2026-09-01,fixture
+gpt-5.6-terra,apex-agents,0.78,APEX-Agents,2026-01-01,GPT-5.6 Terra,gpt-5.6-terra_high,GPT-5.6 Terra,2026-09-01,fixture
+gpt-5.6-terra,terminal-bench,0.77,Terminal Bench,2026-01-01,GPT-5.6 Terra,gpt-5.6-terra_high,GPT-5.6 Terra,2026-09-01,fixture
+gpt-5.6-terra,swe-bench-verified,0.76,SWE-Bench verified,2026-01-01,GPT-5.6 Terra,gpt-5.6-terra_high,GPT-5.6 Terra,2026-09-01,fixture
+grok-4.6,deepswe,0.70,DeepSWE,2026-01-01,Grok 4.6,grok-4.6_high,Grok 4.6,2026-09-01,fixture
+grok-4.6,frontiercode,0.69,FrontierCode,2026-01-01,Grok 4.6,grok-4.6_high,Grok 4.6,2026-09-01,fixture
+grok-4.6,apex-agents,0.68,APEX-Agents,2026-01-01,Grok 4.6,grok-4.6_high,Grok 4.6,2026-09-01,fixture
+grok-4.6,terminal-bench,0.67,Terminal Bench,2026-01-01,Grok 4.6,grok-4.6_high,Grok 4.6,2026-09-01,fixture
+grok-4.6,swe-bench-verified,0.66,SWE-Bench verified,2026-01-01,Grok 4.6,grok-4.6_high,Grok 4.6,2026-09-01,fixture
+gpt-5.6-luna,deepswe,0.60,DeepSWE,2026-01-01,GPT-5.6 Luna,gpt-5.6-luna_low,GPT-5.6 Luna,2026-09-01,fixture
+gpt-5.6-luna,frontiercode,0.59,FrontierCode,2026-01-01,GPT-5.6 Luna,gpt-5.6-luna_low,GPT-5.6 Luna,2026-09-01,fixture
+gpt-5.6-luna,apex-agents,0.58,APEX-Agents,2026-01-01,GPT-5.6 Luna,gpt-5.6-luna_low,GPT-5.6 Luna,2026-09-01,fixture
+gpt-5.6-luna,terminal-bench,0.57,Terminal Bench,2026-01-01,GPT-5.6 Luna,gpt-5.6-luna_low,GPT-5.6 Luna,2026-09-01,fixture
+gpt-5.6-luna,swe-bench-verified,0.56,SWE-Bench verified,2026-01-01,GPT-5.6 Luna,gpt-5.6-luna_low,GPT-5.6 Luna,2026-09-01,fixture

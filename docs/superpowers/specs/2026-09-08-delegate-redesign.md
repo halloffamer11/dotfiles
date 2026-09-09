@@ -127,7 +127,7 @@ Sources: Epoch AI CSV `https://epoch.ai/data/eci_benchmarks.csv` (no key, CC-BY,
 
 ## 9. Acceptance
 
-1. A Grok run that would take 47 minutes ends at the lane timeout with status `timeout`, partial output kept in the run directory.
+1. A Grok run that would take 47 minutes ends at the lane timeout as `blocked` with reason `timeout after <lane timeout>`, partial output kept in the run directory. (Amended 2026-09-09: the original wording asked for status `timeout`, which contradicts §6.5 mapping `timeout` to `blocked`. The implementation follows §6.5; `tests/test_dispatch.py` proves the partial `final.txt` survives.)
 2. No run is bounded by a tool-call limit.
 3. An agy empty response is `blocked` with a reason, never `done`.
 4. Every run leaves a directory under `~/.cache/delegate/runs/` that outlives the session.

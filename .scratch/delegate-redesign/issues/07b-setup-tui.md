@@ -4,9 +4,9 @@
 
 **Blocked by:** 07 (landed).
 
-**Status:** in flight 2026-09-09 on sol-high@codex through `delegate.py run hard-impl`; run directory `~/.cache/delegate/runs/20260909T180000Z-sol-high@codex-11e45c28/` (read `return.json` there); worktree `~/.cache/delegate/wt-ticket-07b` (diff against `HEAD` for the five files named below). Next session: review the diff, run the six gate commands, copy the files into `agents/skills/delegate/`, rerun every test file, commit, then Orin runs `python3 ~/.claude/skills/delegate/setup.py` on this machine.
+**Status:** landed 2026-09-09. The first dispatch was killed by SIGTERM after 6m50s having finished section 1 only; the resume dispatch (run `20260909T181534Z-sol-high@codex-3f047c42`, 876s, status `done`) completed cases 1-10. Review found one defect — the five Epoch benchmark names were hardcoded twice in `setup_tui.py`, duplicating `bench.EPOCH_BENCHMARKS` — fixed in the worktree before landing. All nine test files pass in place: 180 PASS, 0 FAIL. Open: Orin runs the wizard once.
 
-- [ ] Worker result reviewed and landed
+- [x] Worker result reviewed and landed
 - [ ] Orin runs the TUI wizard once and confirms the catalog (closes ticket 07)
 
 ## Brief as dispatched

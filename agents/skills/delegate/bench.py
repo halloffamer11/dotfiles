@@ -380,6 +380,8 @@ def build_epoch_section(models, matched):
 
 
 def load_key(key_file):
+    if not key_file:
+        return None, "key file missing"
     path = os.path.abspath(os.path.expanduser(key_file))
     if not os.path.isfile(path):
         return None, "key file missing"
@@ -601,6 +603,111 @@ def render_report(
     return "\n".join(lines)
 
 
+def collect(lanes_doc, epoch_csv=None, aa_json=None, key_file=None):
+    """Collect benchmark data for the report and interactive consumers."""
+    models = catalog_models(lanes_doc["lanes"])
+    epoch_rows = load_epoch(epoch_csv)
+    matched = match_epoch_rows(epoch_rows, models)
+    epoch_items, _epoch_table = build_epoch_section(models, matched)
+
+    aa_doc, aa_skipped = load_aa(aa_json, key_file)
+    aa_items = None
+    aa_keys_used = []
+    aa_first_keys = []
+    if aa_skipped is None:
+        aa_items, _aa_table, aa_keys_used, aa_first_keys = build_aa_section(
+            models, aa_doc
+        )
+
+    notes = build_notes(
+        models, epoch_items, aa_items, aa_skipped, aa_keys_used, aa_first_keys
+    )
+    epoch_by_model = {item["model"]: item for item in epoch_items}
+    aa_by_model = {
+        item["model"]: item for item in (aa_items or [])
+    }
+    collected_models = {}
+    for model, rec in models.items():
+        epoch = epoch_by_model[model]
+        aa = aa_by_model.get(model)
+        collected_models[model] = {
+            "lanes": sorted(rec["lanes"]),
+            "lane_effort": epoch["lane_effort"],
+            "epoch": {
+                "cells": epoch["cells"],
+                "mean": epoch["mean"],
+                "mean_s": epoch["mean_s"],
+            },
+            "aa": None
+            if aa is None
+            else {
+                "cols": aa["cols"],
+                "mean": aa["mean"],
+                "mean_s": aa["mean_s"],
+            },
+        }
+    return {
+        "models": collected_models,
+        "epoch_benchmarks": list(EPOCH_BENCHMARKS),
+        "aa_columns": [name for name, _needles in AA_COLUMNS],
+        "aa_skipped": aa_skipped,
+        "notes": notes,
+    }
+
+
+def epoch_table_from_collection(data):
+    headers = [
+        "Lane(s)",
+        "Model",
+        "Effort used",
+        *data["epoch_benchmarks"],
+        "Mean rank",
+    ]
+    items = []
+    for model, rec in data["models"].items():
+        items.append({"model": model, "mean": rec["epoch"]["mean"], "rec": rec})
+    rows = []
+    for item in sort_report_rows(items):
+        model = item["model"]
+        rec = item["rec"]
+        cells = rec["epoch"]["cells"]
+        rows.append(
+            [
+                ", ".join(rec["lanes"]),
+                model,
+                effort_used_label(cells, rec["lane_effort"]),
+                *[
+                    fmt_pct(cells[b]["performance"] if b in cells else None)
+                    for b in data["epoch_benchmarks"]
+                ],
+                rec["epoch"]["mean_s"],
+            ]
+        )
+    return md_table(headers, rows)
+
+
+def aa_table_from_collection(data):
+    headers = ["Lane(s)", "Model", *data["aa_columns"], "Mean rank"]
+    items = []
+    for model, rec in data["models"].items():
+        aa = rec["aa"]
+        items.append({"model": model, "mean": aa["mean"], "rec": rec})
+    rows = []
+    for item in sort_report_rows(items):
+        model = item["model"]
+        rec = item["rec"]
+        aa = rec["aa"]
+        rows.append(
+            [
+                ", ".join(rec["lanes"]),
+                model,
+                *[fmt_aa_value(aa["cols"].get(c)) for c in data["aa_columns"]],
+                aa["mean_s"],
+            ]
+        )
+    return md_table(headers, rows)
+
+
 def run(args):
     config_dir = os.path.expanduser(args.config_dir or catalog.CONFIG_DIR)
     out_dir = os.path.expanduser(args.out_dir or DEFAULT_OUT_DIR)
@@ -608,23 +715,19 @@ def run(args):
     key_file = args.key_file or os.path.join(config_dir, "aa-key")
 
     cat = catalog.load_catalog(config_dir=config_dir)
-    models = catalog_models(cat["lanes"])
-    epoch_rows = load_epoch(args.epoch_csv)
-    matched = match_epoch_rows(epoch_rows, models)
-    epoch_items, epoch_table = build_epoch_section(models, matched)
-
-    aa_doc, aa_skipped = load_aa(args.aa_json, key_file)
-    aa_items = None
-    aa_table = None
-    aa_keys_used = []
-    aa_first_keys = []
-    if aa_skipped is None:
-        aa_items, aa_table, aa_keys_used, aa_first_keys = build_aa_section(models, aa_doc)
-
-    notes = build_notes(
-        models, epoch_items, aa_items, aa_skipped, aa_keys_used, aa_first_keys
+    data = collect(
+        {"lanes": cat["lanes"]},
+        epoch_csv=args.epoch_csv,
+        aa_json=args.aa_json,
+        key_file=key_file,
     )
-    text = render_report(date, epoch_table, aa_table, aa_skipped, notes)
+    epoch_table = epoch_table_from_collection(data)
+    aa_table = (
+        aa_table_from_collection(data) if data["aa_skipped"] is None else None
+    )
+    text = render_report(
+        date, epoch_table, aa_table, data["aa_skipped"], data["notes"]
+    )
 
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(os.path.abspath(out_dir), f"{date}.md")
