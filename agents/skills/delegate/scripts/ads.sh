@@ -1,8 +1,13 @@
 #!/bin/sh
 set -eu
 
-ADS_REPO=https://github.com/amElnagdy/delegate-skills.git
-ADS_COMMIT=b781ee2e23089630e2fbee1cfd6174afe4edeb76
+# Pinned to our fork, not upstream. Upstream's grok relay pairs its read-only
+# sandbox with `--permission-mode plan`, which gates every tool call in a
+# headless pipe, so a --read-only grok run returns no work at all. The fix is on
+# the fork's fix/grok-read-only-plan-mode branch. When it lands upstream, point
+# ADS_REPO back at amElnagdy and pin the merge commit.
+ADS_REPO=https://github.com/halloffamer11/delegate-skills.git
+ADS_COMMIT=f14dc1eeb27ae8c6282830566950f832ce366d02
 ADS_DIR=${ADS_DIR:-$HOME/.local/share/delegate/ads}
 
 HARNESSES="claude codex agy grok"

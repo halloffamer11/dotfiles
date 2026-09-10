@@ -29,6 +29,38 @@ Also worth recording: grok's advertised tool list in that run was `run_terminal_
 
 - [ ] A cancelled-at-the-gate run returns `blocked` with a reason naming the permission gate, not `partial`
 - [ ] A read-only dispatch to a lane with no working read-only mode is refused before the relay starts, with the reason
-- [ ] The relay's meaning of `--read-only` per harness is written down in the skill's own context file, since it differs and the difference is load-bearing
-- [ ] An upstream issue or PR against amElnagdy/delegate-skills asks for a middle permission setting, linked from this ticket
+- [x] The relay's meaning of `--read-only` per harness is written down in the skill's own context file, since it differs and the difference is load-bearing (commit 31154e5)
+- [x] An upstream issue or PR against amElnagdy/delegate-skills asks for a middle permission setting, linked from this ticket
 - [ ] A regression test drives the cancelled-tool-call event shape through `map_result` from a fixture
+
+## Grok is fixed at the source, 2026-09-09
+
+Item 3 is done for grok, and it turned out to need no middle setting — the enforcement was already
+there and plan mode was smothering it.
+
+**PR:** [amElnagdy/delegate-skills#119](https://github.com/amElnagdy/delegate-skills/pull/119),
+from our fork `halloffamer11/delegate-skills`, branch `fix/grok-read-only-plan-mode`, commit
+`f14dc1e`. `ads.sh` is pinned to that commit until it merges; the pin carries a comment saying how
+to unwind it.
+
+**The fix:** `--sandbox read-only --always-approve`, replacing
+`--sandbox read-only --permission-mode plan`. On grok **1.0.25** the read-only sandbox is
+kernel-enforced (Seatbelt on macOS, Landlock on Linux): grok's `write` and `search_replace` tools
+and shell redirects all fail with `EPERM`. Verified against a throwaway repo **outside the temp
+dirs** — three write attempts, all denied, tree clean. The relay's own header claimed the sandbox
+did not cover grok's edit tool; that was true on 0.2.101 and is false now, so the comment was
+corrected too. This also makes grok match `codex-delegate`, which leans on its sandbox alone.
+
+**Evidence the lane is open:** the review brief that died at 17s now returns in 267s, `status: done`,
+29 tool calls, `stopReason=end_turn`, with `touchedFiles: []` and `readOnlyViolation: false`.
+
+### Still open
+
+- **agy is untouched.** `--mode plan` still auto-denies every permission headless. Unlike grok, agy
+  exposes no sandbox flag to lean on instead, so this is a real fix rather than a flag swap, and
+  `delegate.py` still papers over it by telling agy in the prompt that it has no terminal.
+  **This matters more than it looks: `agy` is the only worker CLI installed on omarchy.**
+- The three legibility items above — `blocked` instead of `partial` at the gate, refusing a
+  read-only dispatch to a lane with no working read-only mode, and the `map_result` fixture test —
+  are unaffected by the upstream fix and still want doing. They are what makes the *next* failure of
+  this shape legible.
