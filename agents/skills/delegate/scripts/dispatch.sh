@@ -90,7 +90,7 @@ fi
 if [ "$harness" = agy ] && [ -z "$write" ]; then
   write_rule="$write_rule You have NO terminal: any command tool (git, grep, cat, tests) is auto-denied and terminates this session. Read files with the file-read tool only and reason statically; anything you would have run has been materialised as a file in the working directory or is out of scope."
 fi
-prompt_file=$(mktemp -t delegate-brief).md
+prompt_file=$(mktemp -t delegate-brief.XXXXXX).md
 python3 "$SKILL/scripts/render-brief.py" "$TEMPLATE" "$prompt_file" \
   "$tool_budget" "$(field objective)" "$cwd" "$(field scope)" \
   "$(field constraints)" "$write_rule" "$(field done)" "$(field return)"
@@ -120,11 +120,13 @@ case $harness in
     if [ -n "$write" ]; then sandbox=workspace-write; fi
     if [ -n "$resume" ]; then
       set -- codex exec resume "$resume" --skip-git-repo-check -C "$cwd" \
-             --output-schema "$SCHEMA" -o "$out" "$(cat "$prompt_file")"
+             --output-schema "$SKILL/schemas/return.codex.json" -o "$out" "$(cat "$prompt_file")"
     else
+      # codex-cli 0.153.4 (2026-09-08): the API rejects a schema whose required
+      # list omits any property, so codex gets the strict variant (line nullable).
       set -- codex exec --ignore-user-config --skip-git-repo-check -C "$cwd" \
              -m "$slug" -c "model_reasoning_effort=\"$effort\"" -s "$sandbox" \
-             --output-schema "$SCHEMA" -o "$out"
+             --output-schema "$SKILL/schemas/return.codex.json" -o "$out"
       if [ "$keep_session" = 0 ]; then set -- "$@" --ephemeral; fi
       set -- "$@" "$(cat "$prompt_file")"
     fi
@@ -183,7 +185,7 @@ fi
 
 # ---- 5. run ------------------------------------------------------------------
 cd "$cwd" || exit 2
-raw=$(mktemp -t delegate-raw)
+raw=$(mktemp -t delegate-raw.XXXXXX)
 "$@" >"$raw" 2>"$raw.err"
 rc=$?
 
