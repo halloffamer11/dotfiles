@@ -1,0 +1,57 @@
+{
+  "version": "delegate-effort-sources.v1",
+  "note": "Sources approved 2026-09-09 for per-effort score-and-cost extraction. Provenance and reliability rationale: .scratch/delegate-redesign/research/2026-09-09-effort-data-sources.md",
+  "sources": {
+    "swerb": {
+      "name": "SWE Refactor Bench",
+      "url": "https://lab.einsia.ai/swe-refactor-bench/leaderboard/",
+      "reaches": "labels",
+      "models": [
+        "gpt-5.6-sol",
+        "gpt-5.6-luna"
+      ],
+      "efforts": "none..max (API enum; no ultra row)",
+      "cost": "usd_per_task",
+      "caution": "20 tasks per configuration; execution provenance undocumented - nobody states who ran the 520 runs. Scaffold is pinned to exact CLI versions, which is why it stays in despite that."
+    },
+    "aa": {
+      "name": "Artificial Analysis",
+      "url": "https://artificialanalysis.ai/models/releases/gpt-5-6-sol",
+      "reaches": "tables",
+      "models": [
+        "all seven catalog models"
+      ],
+      "efforts": "none..max",
+      "cost": "usd_per_task",
+      "caution": "Runs models in house. Use component scores, not the composite Intelligence Index, whose weighting is not published. One URL per model release page. Use the /models/releases/ pages, NOT /models/<slug>: the release page packs to ~480 lines and carries the effort sweep with $/task, while the model overview page packs to ~2960 lines and carries almost no cost data.",
+      "url_pattern": "https://artificialanalysis.ai/models/releases/<model-slug>"
+    },
+    "tbench": {
+      "name": "Terminal-Bench 4.0",
+      "url": "https://www.tbench.ai/leaderboard/terminal-bench/4-0-0",
+      "reaches": "embedded-json",
+      "models": [
+        "gpt-6-astra",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna"
+      ],
+      "efforts": "astra low..max; others at max only",
+      "cost": "display_cost plus total/output tokens",
+      "caution": "Scores an AGENT-MODEL PAIR, never a model alone. Public, internet-accessible task set with documented reward-hacking incidents. Rows live in the Next.js streaming payload, not the DOM - pack reaches them via the embedded extractor. The /2.1 path serves the same 4.0 payload; use the 4-0-0 URL. Earlier research citing 'Terminal-Bench 2.1' was reading a board that no longer serves its own data."
+    }
+  },
+  "cross_check_only": {
+    "arc": {
+      "name": "ARC Prize (Verified board only)",
+      "url": "https://arcprize.org/leaderboard",
+      "note": "Not scraped. Read by hand for gpt-6-astra only, as a contamination cross-check: it is the one semi-private eval set among these. Community rows are vendor self-reports and must never be used."
+    }
+  },
+  "rejected": {
+    "cursorbench": "Cursor grades its own Composer models on a proprietary harness tuned per model; no runner, tasks, licence or raw artifacts published.",
+    "databench": "Hex, proprietary end to end, LLM-judged with acknowledged noise, no raw evidence released.",
+    "deepswe": "Client-rendered with no data in the HTML; would need an API call, not a scrape.",
+    "swebench": "Submission-based, no reasoning-effort field, no cost column, no catalog model by exact name.",
+    "vista": "One selected effort per row; its own leaderboard states the ladders are not comparable."
+  }
+}
