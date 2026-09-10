@@ -29,11 +29,31 @@ Spec §9.6 asks that every file the hook or docs name exists. Ticket 09 marked i
 
 **Status:** open, raised by Orin 2026-09-09 after a spec review of the five delegate skills.
 
-- [ ] The nine scripts plus `setup_tui.py` live in `scripts/` and every test still passes from the new location
-- [ ] `tui-research.md` and `tui-mockup.md` live in `references/`; the `.txt` extension is gone
-- [ ] `preamble.md`, `schemas/`, and `samples/` live in `assets/`, and the code that reads them is updated
-- [ ] `monitor/` is out of the skill at `tools/delegate-mon/`; `monitor/CLAUDE.md` travels with it and names the new location, and the monitor design spec gains a one-line moved-on note at the top. The 2026-09-02 implementation plan is a completed execution record and is left as written — rewriting its file list would falsify what was actually done
-- [ ] No path anywhere still names a script at the skill root: `grep -rn "skills/delegate/[a-z_]*\.\(py\|sh\)" ~/.claude ~/dotfiles` returns nothing outside `scripts/`
-- [ ] `delegate/CLAUDE.md` holds no dated status section
-- [ ] The four wrapper skills are untouched by this ticket
-- [ ] The three dead references above are fixed and ticket 09 item 6 is re-ticked
+- [x] The nine scripts plus `setup_tui.py` live in `scripts/` and every test still passes from the new location
+- [x] `tui-research.md` and `tui-mockup.md` live in `references/`; the `.txt` extension is gone
+- [x] `preamble.md`, `schemas/`, and `samples/` live in `assets/`, and the code that reads them is updated
+- [x] `monitor/` is out of the skill at `tools/delegate-mon/`; `monitor/CLAUDE.md` travels with it and names the new location, and the monitor design spec gains a one-line moved-on note at the top. The 2026-09-02 implementation plan is a completed execution record and is left as written — rewriting its file list would falsify what was actually done
+- [x] No path anywhere still names a script at the skill root: `grep -rn "skills/delegate/[a-z_]*\.\(py\|sh\)" ~/.claude ~/dotfiles` returns nothing outside `scripts/`
+- [x] `delegate/CLAUDE.md` holds no dated status section
+- [x] The four wrapper skills are untouched by this ticket
+- [x] The three dead references above are fixed and ticket 09 item 6 is re-ticked
+
+## Verified closed 2026-09-10
+
+Every box was substantively done but left unticked. Checked rather than assumed:
+`scripts/` holds twelve `.py`; `references/` holds `kiro.md`, `tui-mockup.md` and
+`tui-research.md` with no `.txt`; `assets/` holds `samples/`, `schemas/`,
+`preamble.md` and `preamble-leash.md`; `tools/delegate-mon/` exists outside the
+skill; `agents/skills/delegate/CLAUDE.md` carries no dated status section.
+
+The root-script grep is clean apart from `docs/superpowers/plans/2026-09-02-delegate-monitor.md`,
+which names `delegate/events.py`, `dispatch.sh` and `usage.py` at the old paths.
+That is the completed execution record this ticket says to leave as written, so it
+is not a dead reference to fix.
+
+The three dead references ticket 09 item 6 re-opened are down to one, and it is
+outside this repo: `~/.claude/hooks/delegate-gate.py` still names
+`{SKILL_DIR}/delegate.py` instead of `scripts/delegate.py`. The other two —
+`references/CLAUDE.md` naming a deleted `routing.md`, and
+`agents/skills/delegate/CLAUDE.md` claiming agy read-only is broken — were fixed
+in `61f2dd2`.
