@@ -12,16 +12,29 @@ TIER_ONELINER = "Tier: capability 1-4, a ceiling — needing 3 means tier 3 or 4
 PACE_LEGEND = "pace = unspent quota vs time left in the week. Above 1.0 it will expire unused."
 CLASSTIER_LEGEND = "classTier: a class needing N uses a lane of tier N or higher, never lower."
 TIER_FOOTER = "↑/↓/j/k: move  space: mark  x: on/off  enter: next  b: back  o: bench  q: quit"
-TIER_OFF_LEGEND = "dim: assigned a higher tier.  tag off: switched off (still takes a tier)."
+TIER_OFF_LEGEND = "dim [n]: already assigned to tier n.  off: switched off, still takes a tier."
 PRESCREEN_FOOTER = "↑/↓ or j/k: move  x: flip  enter: continue  b: back  q: quit"
-PRESCREEN_LEGEND = "ultra: always off.  Dominated: same model, ≥ score at ≤ cost.  Else on."
-PRESCREEN_NODATA_LEGEND = "ultra is always off.  Absence of data is not evidence against a lane."
 NO_DATA_MESSAGE = "No per-effort data was supplied, so nothing else could be judged."
 CONFIRM_OFF_LEGEND = "off: written with enabled: false.  On lanes omit the key."
-RECORDED_REASON = "as recorded in the catalog; the pre-screen does not undo your decision"
-ULTRA_REASON = (
-    "unscoreable (no source reports ultra); auto-delegation breaks worker preamble"
-)
+
+# A reason has to fit the `why` column, and the column has to fit beside the
+# lane, the model and the effort in 80 places. So each reason is a phrase that
+# is whole at about twenty characters, and the sentence it used to be is a
+# legend line that appears only on the screens where that phrase appears. A
+# reason cut mid-word explains no more than a legend cut mid-sentence does.
+DOMINATED_LEGEND = "Dominated: another effort of the same model scores ≥ at ≤ cost."
+ABSENCE_LEGEND = "Absence of data is not evidence against a lane, so those stay on."
+RECORDED_LEGEND = '"in the catalog": you recorded that already; the pre-screen leaves it.'
+ULTRA_LEGEND = "ultra: no source scores it, and auto-delegation breaks the worker preamble."
+NO_ROWS_REASON = "no rows for this lane"
+NO_DATA_REASON = "no per-effort data"
+NOT_DOMINATED_REASON = "not dominated"
+ULTRA_REASON = "ultra, never carried"
+
+
+def recorded_reason(enabled):
+    """The reason shown for a lane whose `enabled` the human already wrote."""
+    return f"{'on' if enabled else 'off'} in the catalog"
 
 
 def resolve_effort_rows(lanes_doc, effort_rows):
@@ -76,7 +89,7 @@ def unmatched_message(unmatched, width=79):
     return head + ", ".join(shown) + (f" +{more} more" if more else "")
 
 
-def _certain_effort_rows(effort_rows):
+def certain_effort_rows(effort_rows):
     """Rows that may dominate. Uncertain rows inform nothing: they must not
     dominate another lane, and they are not evidence against the lane they name.
 
@@ -104,29 +117,45 @@ def _certain_effort_rows(effort_rows):
     return certain
 
 
-def _dominating_effort(lane, certain):
-    """Return another effort of the same model that weakly Pareto-dominates this
-    one (score >=, cost <=, strict in at least one), else None. Compared only
-    within the same source and benchmark.
+def dominating_row(row, certain):
+    """The row that weakly Pareto-dominates this one, or None.
+
+    Another effort of the same model, at least the score for no more money and
+    strictly better in one of the two, inside one source and benchmark.
+
+    Public because the benchmark page draws this rule: a point it shows hollow
+    has to be a point the pre-screen switched a lane off over, and two
+    implementations of one rule would eventually disagree in front of a human
+    trying to check the wizard's arithmetic.
     """
-    model, effort = lane["model"], lane["effort"]
-    mine = [r for r in certain if r.get("model") == model and r.get("effort") == effort]
-    others = [r for r in certain if r.get("model") == model and r.get("effort") != effort]
-    for a in mine:
-        scope = (a.get("source"), a.get("benchmark"))
-        for b in others:
-            if (b.get("source"), b.get("benchmark")) != scope:
-                continue
-            if b["score"] >= a["score"] and b["cost_usd"] <= a["cost_usd"]:
-                if b["score"] > a["score"] or b["cost_usd"] < a["cost_usd"]:
-                    return b["effort"]
+    model, effort = row.get("model"), row.get("effort")
+    scope = (row.get("source"), row.get("benchmark"))
+    for other in certain:
+        if other.get("model") != model or other.get("effort") == effort:
+            continue
+        if (other.get("source"), other.get("benchmark")) != scope:
+            continue
+        if other["score"] >= row["score"] and other["cost_usd"] <= row["cost_usd"]:
+            if other["score"] > row["score"] or other["cost_usd"] < row["cost_usd"]:
+                return other
+    return None
+
+
+def _dominating_effort(lane, certain):
+    """The effort of the row that dominates this lane's own rows, else None."""
+    for row in certain:
+        if row.get("model") != lane["model"] or row.get("effort") != lane["effort"]:
+            continue
+        other = dominating_row(row, certain)
+        if other is not None:
+            return other["effort"]
     return None
 
 
 def propose_enabled(lanes_doc, effort_rows):
     """Ticket-15 pre-screen rule. Returns {name: (enabled, reason)}."""
     rows, _unmatched = resolve_effort_rows(lanes_doc, effort_rows)
-    certain = _certain_effort_rows(rows)
+    certain = certain_effort_rows(rows)
     supplied = bool(effort_rows)
     out = {}
     for name, lane in lanes_doc["lanes"].items():
@@ -138,23 +167,24 @@ def propose_enabled(lanes_doc, effort_rows):
             # pre-screen proposes for lanes that have no decision yet; it does not
             # undo one. Silently switching a lane back on would put it in front of
             # the ranker again without anyone saying so.
-            out[name] = (bool(lane["enabled"]), RECORDED_REASON)
+            enabled = bool(lane["enabled"])
+            out[name] = (enabled, recorded_reason(enabled))
             continue
         other = _dominating_effort(lane, certain)
         if other is not None:
-            out[name] = (False, f"dominated by {other} of the same model")
+            out[name] = (False, f"dominated by {other}")
             continue
         if not supplied:
-            out[name] = (True, "no per-effort data; absence is not evidence against")
+            out[name] = (True, NO_DATA_REASON)
         elif not any(
             not row.get("uncertain")
             and row.get("model") == lane["model"]
             and row.get("effort") == lane["effort"]
             for row in rows
         ):
-            out[name] = (True, "no rows for this lane; absence is not evidence against")
+            out[name] = (True, NO_ROWS_REASON)
         else:
-            out[name] = (True, "not dominated")
+            out[name] = (True, NOT_DOMINATED_REASON)
     return out
 
 
@@ -240,8 +270,11 @@ class Wizard:
         self.screen = "prescreen"
         self.tier = None
         self.cursor = 0
-        self.message = (unmatched_message(self._unmatched) if self.effort_rows
-                        else NO_DATA_MESSAGE)
+        # The models no lane runs are a note about the data, so they read as a
+        # legend line. The message slot is bold and sits below the footer, where
+        # `every lane needs a tier` goes: a standing note there reads as an
+        # error the human has just caused.
+        self.message = "" if self.effort_rows else NO_DATA_MESSAGE
 
     def _lane_names(self):
         return list(self.lanes_doc["lanes"])
@@ -360,6 +393,17 @@ class Wizard:
                 self._enter_tier(1)
             return
         if self.screen == "confirm":
+            # The list of what is about to be written is longer than a short
+            # window: at 80x24 eleven of twenty items showed, and the nine out
+            # of sight included both file paths and every routing value. A
+            # confirm screen you cannot read to the end is not one.
+            count = len(self.lanes_doc["lanes"]) + len(CLASSES) + 4
+            if key == "up":
+                self.cursor = (self.cursor - 1) % count
+                return
+            if key == "down":
+                self.cursor = (self.cursor + 1) % count
+                return
             if key == "y":
                 result_lanes = copy.deepcopy(self._original_lanes)
                 for name, lane in result_lanes["lanes"].items():
@@ -399,14 +443,36 @@ class Wizard:
         return values
 
     def _frame(self, screen, title, *, tier=None, columns=None, rows=None,
-               footer="", body=None, legend=None):
+               footer="", body=None, legend=None, elastic=""):
         return {
             "screen": screen, "title": title, "tier": tier,
             "columns": columns or [], "rows": rows or [],
             "footer": footer, "message": self.message,
             "body": body or [], "legend": legend or [],
-            "steps": self._step_marker(),
+            "steps": self._step_marker(), "elastic": elastic,
         }
+
+    def _prescreen_legend(self):
+        """Explain the reasons that are on this screen, and no others.
+
+        Each reason in the `why` column is a phrase; the sentence it stands for
+        is here. Listing the sentences unconditionally would push the lane rows
+        off a short window to explain a case that is not on screen, so each line
+        is earned by a reason that is actually shown.
+        """
+        reasons = [self._reasons[name] for name in self._lane_names()]
+        lines = [DOMINATED_LEGEND]
+        if any(r in (NO_ROWS_REASON, NO_DATA_REASON) for r in reasons):
+            lines.append(ABSENCE_LEGEND)
+        # a `published_as` still owed to us shows up here and nowhere else
+        ignored = unmatched_message(self._unmatched) if self.effort_rows else ""
+        if ignored:
+            lines.append(ignored)
+        if any(r == ULTRA_REASON for r in reasons):
+            lines.append(ULTRA_LEGEND)
+        if any(r.endswith("in the catalog") for r in reasons):
+            lines.append(RECORDED_LEGEND)
+        return lines
 
     def _tier_map_lines(self):
         by_tier = {tier: [] for tier in range(1, 5)}
@@ -414,8 +480,13 @@ class Wizard:
             by_tier[tier].append(name)
         lines = []
         for tier in range(1, 5):
-            names = ", ".join(sorted(by_tier[tier])) or "(none)"
-            lines.append(f"tier {tier}: {names}")
+            names = sorted(by_tier[tier])
+            if not names:
+                lines.append(f"tier {tier} (0): (none)")
+            else:
+                # five lanes on one tier already ran past column 80 and were cut
+                # after a comma, which reads as a list that stops for no reason
+                lines.append(self._drift_line(f"tier {tier}", names, always_count=True))
         return lines
 
     @staticmethod
@@ -423,10 +494,15 @@ class Wizard:
         """One width rule for every start-screen line: the renderer clips at 79."""
         return line if len(line) <= 79 else line[:76] + "..."
 
-    def _drift_line(self, label, items):
-        """`label (n): a, b (+k more)`, filled to the width and no further."""
+    def _drift_line(self, label, items, always_count=False):
+        """`label (n): a, b (+k more)`, filled to the width and no further.
+
+        `always_count` keeps the count on a list of one, for a block of lines
+        read together — the tier map — where a line without it reads as a
+        different kind of line.
+        """
         total = len(items)
-        if total == 1:
+        if total == 1 and not always_count:
             return self._fit(f"{label}: {items[0]}")
         prefix = f"{label} ({total}): "
         chosen = []
@@ -534,24 +610,27 @@ class Wizard:
             for index, name in enumerate(names):
                 lane = self.lanes_doc["lanes"][name]
                 on = self._enabled[name]
+                # One signal for one fact. This screen used to carry three — the
+                # box, a `carry` column reading on/off, and an `off` tag after
+                # the reason — and the three together cost the reason its room:
+                # at 80 places the reason column did not fit at all and was
+                # dropped, so the screen proposed a lane off and said nothing.
                 rows.append({
                     "cells": [
                         "[x]" if on else "[ ]", name, lane["model"], lane["effort"],
-                        "on" if on else "off", self._reasons[name],
+                        self._reasons[name],
                     ],
                     "marked": on, "dimmed": not on,
                     "cursor": index == self.cursor,
-                    "tag": "" if on else "off",
+                    "tag": "",
                 })
-            legend = [PRESCREEN_LEGEND]
-            if not self.effort_rows:
-                legend = [PRESCREEN_NODATA_LEGEND, NO_DATA_MESSAGE]
             return self._frame(
                 "prescreen", "Lanes to carry",
-                columns=["mark", "lane", "model", "effort", "carry", "reason"],
+                columns=["carry", "lane", "model", "effort", "why"],
                 rows=rows,
                 footer=PRESCREEN_FOOTER,
-                legend=legend,
+                legend=self._prescreen_legend(),
+                elastic="why",
             )
         if self.screen == "tier":
             epoch_names = (self.bench or {}).get("epoch_benchmarks", list(EPOCH_BENCHMARKS))
@@ -565,16 +644,18 @@ class Wizard:
                 is_assigned = name in self._assigned
                 is_off = not self._enabled[name]
                 marked = name in self._marks[self.tier] if not is_assigned else False
-                if is_off and is_assigned:
-                    tag = f"off, tier {self._assigned[name]}"
-                elif is_off:
-                    tag = "off"
-                elif is_assigned:
-                    tag = f"tier {self._assigned[name]}"
+                # The tier a lane already went to belongs in the box, not in a
+                # tag after the table: a tag is rendered past the last column and
+                # then clipped, so `tier 3` reached the eye as `ti`. `[3]` is the
+                # same fact in the width the box already has, and it leaves `off`
+                # as the only tag, which fits.
+                if is_assigned:
+                    box = f"[{self._assigned[name]}]"
                 else:
-                    tag = ""
+                    box = "[x]" if marked else "[ ]"
+                tag = "off" if is_off else ""
                 rows.append({
-                    "cells": ["[x]" if marked else "[ ]", name, lane["model"], lane["effort"],
+                    "cells": [box, name, lane["model"], lane["effort"],
                               *self._bench_cells(lane)],
                     "marked": marked, "dimmed": is_assigned or is_off,
                     "cursor": not is_assigned and index == self.cursor,
@@ -608,53 +689,193 @@ class Wizard:
             )
         if self.screen == "confirm":
             rows = []
+            # `carry` sits between the item and its value so that `value`, the
+            # one column with a path in it, is last: an elastic column pads to
+            # the widest row it holds, and a 40-place path column with `tier 4`
+            # in it opened a river of blanks across every other line.
             for name in self.lanes_doc["lanes"]:
                 off = not self._enabled[name]
-                rows.append({"cells": [name, f"tier {self._assigned[name]}",
-                                       "off" if off else ""],
-                             "marked": False, "dimmed": off, "cursor": False,
-                             "tag": "off" if off else ""})
+                # the column says `off`; a tag saying it again read `off  off`
+                rows.append({"cells": [name, "off" if off else "",
+                                       f"tier {self._assigned[name]}"],
+                             "marked": False, "dimmed": off, "tag": ""})
             for name in CLASSES:
-                rows.append({"cells": [f"classTier.{name}", str(self.routing_doc["classTier"][name]), ""],
-                             "marked": False, "dimmed": False, "cursor": False, "tag": ""})
+                rows.append({"cells": [f"classTier.{name}", "", str(self.routing_doc["classTier"][name])],
+                             "marked": False, "dimmed": False, "tag": ""})
             for name in ("margin", "gate"):
-                rows.append({"cells": [name, str(self.routing_doc[name]), ""], "marked": False,
-                             "dimmed": False, "cursor": False, "tag": ""})
+                rows.append({"cells": [name, "", str(self.routing_doc[name])], "marked": False,
+                             "dimmed": False, "tag": ""})
             for path in (self.lanes_path, self.routing_path):
-                rows.append({"cells": ["file", path, ""], "marked": False,
-                             "dimmed": False, "cursor": False, "tag": ""})
+                rows.append({"cells": ["file", "", path], "marked": False,
+                             "dimmed": False, "tag": ""})
+            for index, row in enumerate(rows):
+                row["cursor"] = index == self.cursor
             return self._frame(
                 "confirm", "Confirm changes",
-                columns=["item", "value", ""], rows=rows,
-                footer="y: write  n/q: quit without writing  b: back",
+                columns=["item", "carry", "value"], rows=rows,
+                footer="↑/↓ or j/k: read on  y: write  n/q: quit without writing  b: back",
+                # a path is the one value here that will not fit a 24-place cell,
+                # and `/Users/dreiss/.config/de…` is not a path anyone can check
+                elastic="value",
                 legend=[CLASSTIER_LEGEND, *self._margin_legend(),
                         *self._gate_legend(), CONFIRM_OFF_LEGEND],
             )
         return self._frame(self.screen, "Delegate setup")
 
 
+MIN_ELASTIC = 12
+
+
+def _clip(text, width):
+    """Fit a cell, and say so when it did not fit.
+
+    A cell cut with no mark cannot be told from a value that ends there:
+    `dominated by the` looks like the whole reason. The ellipsis is one place of
+    the width, which is cheaper than the doubt.
+    """
+    if width <= 0:
+        return ""
+    if len(text) <= width:
+        return text
+    return text[: width - 1] + "…" if width > 1 else "…"
+
+
+def _natural_width(view, index):
+    cells = [len(row["cells"][index]) for row in view["rows"] if index < len(row["cells"])]
+    return max([len(view["columns"][index])] + cells)
+
+
 def _fit_table(view, width):
-    """Return visible column indices and widths, preserving decision columns."""
+    """Return visible column indices and widths, preserving decision columns.
+
+    `width` is the room the table has; the caller deducts the tag first, because
+    a tag is drawn after the last column and then clipped with the line, which
+    turned `tier 3` into `ti`.
+
+    One column may be named `elastic` in the frame. It is never dropped: it takes
+    whatever room the other columns leave and its cells are clipped to that. A
+    column that explains a decision is the last thing a narrow window should
+    lose — dropping it is how the pre-screen came to propose a lane off at 80
+    places and give no reason at all.
+    """
     columns = view["columns"]
     if not columns:
         return [], []
-    priority_names = ("mark", "lane", "Epoch mean rank")
+    elastic = view.get("elastic")
+    elastic_index = columns.index(elastic) if elastic in columns else None
+    priority_names = ("mark", "carry", "lane", "Epoch mean rank")
     priority = [columns.index(name) for name in priority_names if name in columns]
-    order = priority + [i for i in range(len(columns)) if i not in priority]
+    rest = [i for i in range(len(columns)) if i not in priority and i != elastic_index]
     chosen = []
+    widths = {}
     used = 0
-    for i in order:
-        max_cell = max([len(columns[i])] + [len(row["cells"][i]) for row in view["rows"] if i < len(row["cells"])])
-        cell_width = min(max_cell, 24)
-        if chosen and used + 2 + cell_width > max(1, width - 1):
+    room = max(1, width - 1)
+    for i in priority + rest:
+        cell_width = min(_natural_width(view, i), 24)
+        if chosen and used + 2 + cell_width > room:
+            # A column skipped over while a narrower one behind it is drawn
+            # reads as data nobody gathered: at 100 places FrontierCode dropped
+            # out and APEX-Agents took its place. What is shown is a prefix of
+            # what was asked for, so the rest is missing width, not missing data.
+            if i in rest:
+                break
             continue
         chosen.append(i)
+        widths[i] = cell_width
         used += (2 if len(chosen) > 1 else 0) + cell_width
+    if elastic_index is not None:
+        spare = room - used - (2 if chosen else 0)
+        if spare >= MIN_ELASTIC or not chosen:
+            chosen.append(elastic_index)
+            widths[elastic_index] = min(_natural_width(view, elastic_index),
+                                        max(MIN_ELASTIC, spare))
     chosen.sort()
-    widths = []
-    for i in chosen:
-        widths.append(min(24, max([len(columns[i])] + [len(row["cells"][i]) for row in view["rows"] if i < len(row["cells"])])))
-    return chosen, widths
+    return chosen, [widths[i] for i in chosen]
+
+
+# The table keeps this many rows before the legend starts giving way. Four left
+# 4 of 11 lanes on screen once the pre-screen legend grew; the legend is
+# reference and the rows are the work.
+ROW_FLOOR = 6
+MIN_WIDTH, MIN_HEIGHT = 80, 16
+
+
+def layout_lines(view, width, height):
+    """Place one frame on a character grid: [(row, text, role)].
+
+    Separated from the curses call so a test can read the screen a human sees.
+    Every fault this function now guards against — a reason column silently
+    dropped, a tag clipped to `ti`, rows scrolled away with nothing to say so —
+    was invisible to tests that only ever read the frame dict.
+    """
+    lines = []
+    rows = view["rows"]
+    tag_room = max([len(row["tag"]) for row in rows], default=0)
+    chosen, widths = _fit_table(view, width - (tag_room + 2 if tag_room else 0))
+    body = view.get("body") or []
+    legend = list(view.get("legend") or [])
+    footer_y = height - 3
+    steps = view.get("steps") or ""
+    steps_y = footer_y - 1 if steps else footer_y
+    table_floor = 2 + (1 if view["columns"] else 0) + min(len(rows), ROW_FLOOR)
+    if legend and steps_y - len(legend) < table_floor:
+        keep = max(0, steps_y - table_floor)
+        if keep < len(legend):
+            legend = legend[:keep]
+            if keep:
+                legend[-1] = "… enlarge the window for the rest"
+    legend_y = steps_y - len(legend)
+
+    y = 2
+    for line in body:
+        if y >= legend_y:
+            break
+        lines.append((y, line, "body"))
+        y += 1
+    first, shown = 0, 0
+    if chosen and y < legend_y:
+        if body:
+            y += 1
+        if y < legend_y:
+            lines.append((y, "  ".join(_clip(view["columns"][i], w).ljust(w)
+                                      for i, w in zip(chosen, widths)), "header"))
+            y += 1
+        room = max(1, legend_y - y)
+        cursor_index = next((i for i, row in enumerate(rows) if row["cursor"]), 0)
+        if cursor_index >= room:
+            first = cursor_index - room + 1
+        for row in rows[first:]:
+            if y >= legend_y:
+                break
+            cells = []
+            for i, w in zip(chosen, widths):
+                cell = row["cells"][i] if i < len(row["cells"]) else ""
+                cells.append(_clip(cell, w).ljust(w))
+            line = "  ".join(cells)
+            if row["tag"]:
+                line += "  " + row["tag"]
+            role = "row-cursor" if row["cursor"] else "row"
+            if row["dimmed"]:
+                role += "-dim"
+            lines.append((y, line, role))
+            y += 1
+            shown += 1
+
+    title = view["title"]
+    if shown and shown < len(rows):
+        # a window too short for the list said nothing about it, so eight lanes
+        # looked like the whole catalog
+        note = f"{first + 1}-{first + shown} of {len(rows)}"
+        gap = width - 1 - len(title) - len(note)
+        title = title + " " * gap + note if gap >= 2 else f"{title}  {note}"
+    lines.append((0, title, "title"))
+    for offset, line in enumerate(legend):
+        lines.append((legend_y + offset, line, "legend"))
+    if steps:
+        lines.append((steps_y, steps, "steps"))
+    lines.append((footer_y, view["footer"], "footer"))
+    lines.append((height - 2, view["message"], "message"))
+    return lines
 
 
 def run_curses(wizard):
@@ -667,12 +888,21 @@ def run_curses(wizard):
         except curses.error:
             pass
         stdscr.keypad(True)
+        roles = {
+            "title": curses.A_BOLD, "header": curses.A_BOLD,
+            "steps": curses.A_BOLD, "message": curses.A_BOLD,
+            "body": 0, "legend": 0, "footer": 0, "row": 0,
+            "row-dim": curses.A_DIM,
+            "row-cursor": curses.A_REVERSE | curses.A_BOLD,
+            "row-cursor-dim": curses.A_DIM | curses.A_REVERSE | curses.A_BOLD,
+        }
         while wizard.screen not in ("done", "quit"):
             stdscr.erase()
             height, width = stdscr.getmaxyx()
-            if width < 80 or height < 16:
+            if width < MIN_WIDTH or height < MIN_HEIGHT:
                 try:
-                    stdscr.addnstr(0, 0, "Please enlarge the terminal window (minimum 80x16).", max(1, width - 1))
+                    stdscr.addnstr(0, 0, "Please enlarge the terminal window "
+                                   f"(minimum {MIN_WIDTH}x{MIN_HEIGHT}).", max(1, width - 1))
                 except curses.error:
                     pass
                 stdscr.refresh()
@@ -683,69 +913,12 @@ def run_curses(wizard):
                     wizard.handle("q")
                 continue
             view = wizard.view()
-            chosen, widths = _fit_table(view, width)
-            def put(y, value, attr=0):
-                if 0 <= y < height:
+            for y, text, role in layout_lines(view, width, height):
+                if 0 <= y < height and text:
                     try:
-                        stdscr.addnstr(y, 0, value, max(1, width - 1), attr)
+                        stdscr.addnstr(y, 0, text, max(1, width - 1), roles[role])
                     except curses.error:
                         pass
-            put(0, view["title"], curses.A_BOLD)
-            body = view.get("body") or []
-            legend = view.get("legend") or []
-            footer_y = height - 3
-            steps = view.get("steps") or ""
-            steps_y = footer_y - 1 if steps else footer_y
-            # The table is the thing you act on, so it keeps its room and the
-            # legend gives way. The clear margin and gate wording runs to nine
-            # lines on the routing screen, which at 80x16 left the table none.
-            table_floor = 2 + (1 if view["columns"] else 0) + min(len(view["rows"]), 4)
-            if legend and steps_y - len(legend) < table_floor:
-                keep = max(0, steps_y - table_floor)
-                if keep < len(legend):
-                    legend = legend[:keep]
-                    if keep:
-                        legend[-1] = "… enlarge the window for the rest"
-            legend_y = steps_y - len(legend)
-            y = 2
-            for line in body:
-                if y >= legend_y:
-                    break
-                put(y, line)
-                y += 1
-            if chosen and y < legend_y:
-                if body:
-                    y += 1
-                if y < legend_y:
-                    put(y, "  ".join(view["columns"][i][:w].ljust(w) for i, w in zip(chosen, widths)), curses.A_BOLD)
-                    y += 1
-                room = max(1, legend_y - y)
-                cursor_index = next(
-                    (i for i, row in enumerate(view["rows"]) if row["cursor"]), 0)
-                first = 0
-                if cursor_index >= room:
-                    first = cursor_index - room + 1
-                for row in view["rows"][first:]:
-                    if y >= legend_y:
-                        break
-                    cells = []
-                    for i, w in zip(chosen, widths):
-                        cell = row["cells"][i] if i < len(row["cells"]) else ""
-                        cells.append(cell[:w].ljust(w))
-                    line = "  ".join(cells)
-                    if row["tag"]:
-                        line += "  " + row["tag"]
-                    attr = curses.A_DIM if row["dimmed"] else 0
-                    if row["cursor"]:
-                        attr |= curses.A_REVERSE | curses.A_BOLD
-                    put(y, line, attr)
-                    y += 1
-            for offset, line in enumerate(legend):
-                put(legend_y + offset, line)
-            if steps:
-                put(steps_y, steps, curses.A_BOLD)
-            put(footer_y, view["footer"])
-            put(height - 2, view["message"], curses.A_BOLD)
             stdscr.refresh()
             code = stdscr.getch()
             mapping = {curses.KEY_UP: "up", curses.KEY_DOWN: "down",
