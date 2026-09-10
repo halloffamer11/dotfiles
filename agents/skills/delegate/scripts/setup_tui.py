@@ -3,7 +3,7 @@
 import copy
 
 from bench import EPOCH_BENCHMARKS
-from catalog import CLASSES, EFFORTS, HARNESSES
+from catalog import CLASSES, EFFORTS, HARNESSES, resolve_published_model
 
 # These render as single lines in an 80-column terminal, where anything past
 # column 79 is clipped. Keep each one under that; a legend cut mid-sentence
@@ -22,6 +22,58 @@ RECORDED_REASON = "as recorded in the catalog; the pre-screen does not undo your
 ULTRA_REASON = (
     "unscoreable (no source reports ultra); auto-delegation breaks worker preamble"
 )
+
+
+def resolve_effort_rows(lanes_doc, effort_rows):
+    """Returns (rows keyed by catalog model, published names that name no lane).
+
+    A source prints a model however it pleases: `gpt-5.6-luna` from SWE Refactor
+    Bench, `GPT-6 Astra` from Terminal-Bench and Artificial Analysis. Every
+    comparison below is against `lane["model"]`, so each row is re-keyed to the
+    lane model its printed name denotes, and the catalog owns that mapping
+    (`catalog.resolve_published_model`). A row naming no lane model is dropped
+    rather than reported per lane: the leaderboards carry GLM-5.3, Opus 4.8,
+    Sonnet 5 and a dozen others that are nobody's lane, and one line naming them
+    all is what a human needs to spot a `published_as` they still owe us.
+    """
+    resolved, unmatched = [], []
+    for row in effort_rows or []:
+        if not isinstance(row, dict):
+            continue
+        model = resolve_published_model(row.get("model"), lanes_doc)
+        if model is None:
+            name = row.get("model")
+            if isinstance(name, str) and name.strip() and name not in unmatched:
+                unmatched.append(name)
+            continue
+        if model == row.get("model"):
+            resolved.append(row)
+        else:
+            copied = dict(row)
+            copied["model"] = model
+            resolved.append(copied)
+    return resolved, unmatched
+
+
+def unmatched_message(unmatched, width=79):
+    """One line naming the published models no lane runs, or "" for none."""
+    if not unmatched:
+        return ""
+    head = "no lane runs these, ignored: "
+    shown = []
+    for name in unmatched:
+        candidate = shown + [name]
+        more = len(unmatched) - len(candidate)
+        tail = f" +{more} more" if more else ""
+        if len(head + ", ".join(candidate) + tail) > width:
+            break
+        shown.append(name)
+    if not shown:
+        count = len(unmatched)
+        phrase = "name matches" if count == 1 else "names match"
+        return f"{count} published {phrase} no lane; each is too long to print here"
+    more = len(unmatched) - len(shown)
+    return head + ", ".join(shown) + (f" +{more} more" if more else "")
 
 
 def _certain_effort_rows(effort_rows):
@@ -73,7 +125,8 @@ def _dominating_effort(lane, certain):
 
 def propose_enabled(lanes_doc, effort_rows):
     """Ticket-15 pre-screen rule. Returns {name: (enabled, reason)}."""
-    certain = _certain_effort_rows(effort_rows)
+    rows, _unmatched = resolve_effort_rows(lanes_doc, effort_rows)
+    certain = _certain_effort_rows(rows)
     supplied = bool(effort_rows)
     out = {}
     for name, lane in lanes_doc["lanes"].items():
@@ -94,11 +147,10 @@ def propose_enabled(lanes_doc, effort_rows):
         if not supplied:
             out[name] = (True, "no per-effort data; absence is not evidence against")
         elif not any(
-            isinstance(row, dict)
-            and not row.get("uncertain")
+            not row.get("uncertain")
             and row.get("model") == lane["model"]
             and row.get("effort") == lane["effort"]
-            for row in effort_rows
+            for row in rows
         ):
             out[name] = (True, "no rows for this lane; absence is not evidence against")
         else:
@@ -149,6 +201,7 @@ class Wizard:
                    if lane["tier"] == tier}
             for tier in range(1, 5)
         }
+        _rows, self._unmatched = resolve_effort_rows(self.lanes_doc, effort_rows)
         proposals = propose_enabled(self.lanes_doc, effort_rows)
         self._enabled = {name: enabled for name, (enabled, _) in proposals.items()}
         self._reasons = {name: reason for name, (_, reason) in proposals.items()}
@@ -187,7 +240,8 @@ class Wizard:
         self.screen = "prescreen"
         self.tier = None
         self.cursor = 0
-        self.message = "" if self.effort_rows else NO_DATA_MESSAGE
+        self.message = (unmatched_message(self._unmatched) if self.effort_rows
+                        else NO_DATA_MESSAGE)
 
     def _lane_names(self):
         return list(self.lanes_doc["lanes"])

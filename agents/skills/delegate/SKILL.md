@@ -19,7 +19,7 @@ The session plans, adjudicates, and synthesizes. Worker-shaped work goes out on 
 
 ## Files
 
-- `~/.config/delegate/lanes.json`: meters and lanes (harness, model, effort, meter, meter weight, timeout, price, tier, basis). Global only.
+- `~/.config/delegate/lanes.json`: meters and lanes (harness, model, effort, meter, meter weight, timeout, price, tier, basis; optional `enabled`, and `published_as` — the names benchmark sources print for this lane's model, e.g. `"published_as": ["Fable 5.1"]` on a `claude-fable-5-1` lane, needed only where case and separators alone do not bridge the two). Global only.
 - `~/.config/delegate/routing.json`: `classTier` (class to tier), `margin`, `gate`. A project overrides any key at `<git-root>/.delegate/routing.json`; `classTier` merges per class.
 - Both are strict JSON, validated on read with a plain-language message naming the field and the rule, formatted on write, and accept `note` fields anywhere. `python3 ~/.claude/skills/delegate/scripts/catalog.py show` prints the effective catalog for the current directory; `scripts/catalog.py check <file>` validates one file. The starting catalog ships in `assets/samples/`; `/delegate setup` is the wizard that builds or revises it (direct command: `python3 ~/.claude/skills/delegate/scripts/setup.py`). When `$ARGUMENTS` asks for setup (e.g. `/delegate setup`), run `python3 ~/.claude/skills/delegate/scripts/setup.py`.
 

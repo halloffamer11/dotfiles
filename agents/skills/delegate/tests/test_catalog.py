@@ -505,4 +505,119 @@ with tempfile.TemporaryDirectory() as td:
         "delegate-routing.v1" in res_no_ver.stderr,
     )
 
+# 7. published_as: the local mapping from a leaderboard's display name to a lane model
+#    (ticket 16). Sources publish "GPT-6 Astra" or "Fable 5.1"; the catalog keys on
+#    slugs. The derived rule covers formatting; published_as covers the rest.
+
+pub_ok = copy.deepcopy(lanes_sample)
+pub_ok["lanes"]["fable-xhigh@claude"]["published_as"] = ["Fable 5.1", "Claude Fable 5.1"]
+record(
+    "7.1 published_as list of names is accepted",
+    check_catalog_error(catalog.validate_lanes, pub_ok) is None,
+)
+
+for bad, tag in (
+    ("Fable 5.1", "a bare string"),
+    ([], "an empty list"),
+    (["Fable 5.1", ""], "an empty entry"),
+    (["Fable 5.1", 5], "a non-string entry"),
+    (["Fable 5.1", "  "], "a blank entry"),
+):
+    doc = copy.deepcopy(lanes_sample)
+    doc["lanes"]["fable-xhigh@claude"]["published_as"] = bad
+    msg = check_catalog_error(catalog.validate_lanes, doc)
+    record(
+        f"7.2 published_as rejects {tag}",
+        bool(msg and "fable-xhigh@claude" in msg and "published_as" in msg),
+        msg,
+    )
+
+conflict = copy.deepcopy(lanes_sample)
+conflict["lanes"]["fable-xhigh@claude"]["published_as"] = ["Fable 5.1"]
+conflict["lanes"]["sol-high@codex"]["published_as"] = ["fable 5.1"]
+msg = check_catalog_error(catalog.validate_lanes, conflict)
+record(
+    "7.3 one published name claimed by two models is rejected",
+    bool(msg and "Fable 5.1" in msg and "claude-fable-5-1" in msg and "gpt-5.6-sol" in msg),
+    msg,
+)
+
+shared = copy.deepcopy(lanes_sample)
+shared["lanes"]["sol-low@codex"] = copy.deepcopy(shared["lanes"]["sol-high@codex"])
+shared["lanes"]["sol-low@codex"]["effort"] = "low"
+shared["lanes"]["sol-high@codex"]["published_as"] = ["GPT-5.6 Sol"]
+shared["lanes"]["sol-low@codex"]["published_as"] = ["GPT-5.6 Sol"]
+record(
+    "7.4 the same name on two lanes of one model is accepted",
+    check_catalog_error(catalog.validate_lanes, shared) is None,
+)
+
+# 7.5 resolution: what the pre-screen asks of the catalog
+resolve = catalog.resolve_published_model
+astra = copy.deepcopy(lanes_sample)
+astra["lanes"]["astra-high@codex"] = copy.deepcopy(astra["lanes"]["sol-high@codex"])
+astra["lanes"]["astra-high@codex"]["model"] = "gpt-6-astra"
+astra["lanes"]["fable-xhigh@claude"]["published_as"] = ["Fable 5.1"]
+cases = (
+    ("GPT-6 Astra", "gpt-6-astra", "a display name differing only in case and separators"),
+    ("gpt-6-astra", "gpt-6-astra", "a slug already in catalog form"),
+    ("GPT-5.6 Sol", "gpt-5.6-sol", "a display name whose dot is a separator"),
+    ("Gemini 3.8 Flash", "gemini-3.8-flash-high", "a lane model carrying an effort suffix"),
+    ("Fable 5.1", "claude-fable-5-1", "a published_as entry"),
+    ("fable  5.1", "claude-fable-5-1", "a published_as entry, loosely typed"),
+    ("GLM-5.3", None, "a model that is nobody's lane"),
+    ("", None, "an empty name"),
+    (None, None, "no name at all"),
+)
+for name, want, tag in cases:
+    got = resolve(name, astra)
+    record(f"7.5 resolve {tag}", got == want, f"{name!r} -> {got!r}, wanted {want!r}")
+
+ambiguous = copy.deepcopy(lanes_sample)
+ambiguous["lanes"]["flash-medium@agy"] = copy.deepcopy(ambiguous["lanes"]["flash-high@agy"])
+ambiguous["lanes"]["flash-medium@agy"]["effort"] = "medium"
+ambiguous["lanes"]["flash-medium@agy"]["model"] = "gemini-3.8-flash-medium"
+record(
+    "7.6 a name two lane models could denote resolves to neither",
+    resolve("Gemini 3.8 Flash", ambiguous) is None,
+    repr(resolve("Gemini 3.8 Flash", ambiguous)),
+)
+
+# 7.7 A published_as entry may not be pointed at a model another lane runs: the
+#     explicit map is consulted first, so such an entry would silently read that
+#     lane's rows as this one's — its own numbers would then switch it off as
+#     dominated while the real lane read "no rows". Both spellings of the
+#     collision are rejected: the model slug itself, and the display name that
+#     denotes it.
+for entry, tag in (
+    ("gpt-5.6-luna", "another lane's model slug"),
+    ("Gemini 3.8 Flash", "a display name another lane's model already answers to"),
+):
+    doc = copy.deepcopy(lanes_sample)
+    doc["lanes"]["sol-high@codex"]["published_as"] = [entry]
+    msg = check_catalog_error(catalog.validate_lanes, doc)
+    record(
+        f"7.7 published_as rejects {tag}",
+        bool(msg and "sol-high@codex" in msg and "gpt-5.6-sol" in msg
+             and ("gpt-5.6-luna" in msg or "gemini-3.8-flash-high" in msg)),
+        msg,
+    )
+
+own = copy.deepcopy(lanes_sample)
+own["lanes"]["flash-high@agy"]["published_as"] = ["Gemini 3.8 Flash", "gemini-3.8-flash-high"]
+record(
+    "7.7 a lane may spell out its own model",
+    check_catalog_error(catalog.validate_lanes, own) is None,
+)
+
+record(
+    "7.7 an entry the derived rule cannot reach still resolves",
+    resolve("Fable 5.1", {"lanes": {
+        "a@codex": {"model": "gpt-6-astra", "effort": "high"},
+        "b@claude": {"model": "claude-fable-5-1", "effort": "xhigh",
+                     "published_as": ["Fable 5.1"]},
+    }}) == "claude-fable-5-1",
+)
+
+
 sys.exit(1 if fails else 0)

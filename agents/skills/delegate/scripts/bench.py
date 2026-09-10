@@ -16,7 +16,6 @@ import csv
 import io
 import json
 import os
-import re
 import sys
 import urllib.error
 import urllib.request
@@ -24,7 +23,10 @@ from collections import defaultdict
 from datetime import datetime, timezone
 
 import catalog
-from catalog import CatalogError
+# Reconciling a source's printed model name against a lane model is the
+# catalog's own knowledge; both this report and the setup pre-screen read it
+# from there rather than keeping a second copy.
+from catalog import CatalogError, normalize_name, strip_effort_suffix
 
 EPOCH_URL = "https://epoch.ai/data/eci_benchmarks.csv"
 AA_URL = "https://artificialanalysis.ai/api/v2/language/models/free"
@@ -43,19 +45,12 @@ EPOCH_BENCHMARKS = (
 )
 EFFORT_FALLBACK = ("max", "xhigh", "high")
 LANE_EFFORT_ORDER = ("xhigh", "high", "medium", "low")
-MODEL_EFFORT_SUFFIXES = (
-    ("-xhigh", "xhigh"),
-    ("-high", "high"),
-    ("-medium", "medium"),
-    ("-low", "low"),
-)
 AA_COLUMNS = (
     ("Coding Index", ("coding-index",)),
     ("Agentic Index", ("agentic-index",)),
     ("Terminal-Bench", ("terminal-bench",)),
     ("Output tokens/s", ("median-output-tokens-per-second", "output-tokens-per-second")),
 )
-NORM_SEP = re.compile(r"[-_. ]+")
 
 
 class BenchError(Exception):
@@ -64,20 +59,6 @@ class BenchError(Exception):
 
 def utc_today():
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-
-def normalize_name(value):
-    if value is None:
-        return ""
-    text = NORM_SEP.sub("-", str(value).strip().lower()).strip("-")
-    return text
-
-
-def strip_effort_suffix(model):
-    for suffix, effort in MODEL_EFFORT_SUFFIXES:
-        if model.endswith(suffix):
-            return model[: -len(suffix)], effort
-    return model, None
 
 
 def split_model_version(model_version):

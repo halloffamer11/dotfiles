@@ -53,12 +53,66 @@ Read those before inventing anything.
 chunking (a 656KB Artificial Analysis packet against agy's ~128KB prompt cap); land
 that first or expect a conflict.
 
-**Status:** open, found 2026-09-10 while extracting Terminal-Bench to close the
-coverage gap.
+**Status:** landed 2026-09-10 on `bench-aa-effort-slugs`. Found the same day while
+extracting Terminal-Bench to close the coverage gap.
 
-- [ ] A row whose model is a published display name is matched to the catalog lane it denotes
-- [ ] The mapping is data a human can read and correct, not a guess inside the extractor
-- [ ] `check` still verifies every number against the packet; no identifier is originated by a worker
-- [ ] The pre-screen proposes `astra-xhigh@codex` off against `_data/tbench-accepted.json`, for the stated reason
-- [ ] A published name with no catalog lane is ignored without a warning storm — Terminal-Bench lists GLM-5.3, Opus 4.8, Sonnet 5 and others that are nobody's lane
-- [ ] `tests/test_effort.py` or `tests/test_setup_tui.py` covers the match from a fixture, with no network
+- [x] A row whose model is a published display name is matched to the catalog lane it denotes
+- [x] The mapping is data a human can read and correct, not a guess inside the extractor
+- [x] `check` still verifies every number against the packet; no identifier is originated by a worker
+- [x] The pre-screen proposes `astra-xhigh@codex` off against `_data/tbench-accepted.json`, for the stated reason
+- [x] A published name with no catalog lane is ignored without a warning storm — Terminal-Bench lists GLM-5.3, Opus 4.8, Sonnet 5 and others that are nobody's lane
+- [x] `tests/test_effort.py` or `tests/test_setup_tui.py` covers the match from a fixture, with no network
+
+## Landed 2026-09-10
+
+The mapping is `catalog.py`'s, in two parts. The derived part: a printed name
+matches a lane model when they differ by formatting alone — case and the `-_. `
+separators — reaching past the effort suffix some slugs carry, so
+`GPT-6 Astra` → `gpt-6-astra` and `Gemini 3.8 Flash` → `gemini-3.8-flash-high`
+need no configuration. The written part: the optional lane field `published_as`,
+a list of the names sources print for that lane's model, which wins over the
+derived rule and is the only way across a gap formatting cannot bridge —
+`Fable 5.1` → `claude-fable-5-1`. `resolve_published_model(name, lanes_doc)`
+returns the slug or `None`, and returns `None` rather than guessing when two
+lane models could equally be meant. `validate_lanes` rejects one published name
+claimed by two different models, naming both.
+
+Review caught a hole in the first cut, and it was the same hole the ticket is
+about, pointing the other way: the explicit map is read first, so
+`"published_as": ["gpt-5.6-luna"]` typed on `sol-high@codex` passed validation
+and read luna's rows as sol's — luna would report "no rows" while its own
+numbers switched sol off as dominated. `validate_lanes` now refuses an entry
+that names a model another lane runs, in either spelling, so the explicit map
+can no longer contradict the derived rule. The first cut's own test had asserted
+that precedence as intended behaviour; it now asserts the rejection.
+
+Nothing was added to the extractor and `check` is untouched: `accepted.json`
+still carries the name the page printed, and the reconciliation happens where
+the rows are consumed. `bench.py` lost its private copies of `normalize_name`
+and `strip_effort_suffix` and imports the catalog's.
+
+The pre-screen re-keys each row through the catalog before comparing, drops rows
+naming no lane model, and prints the dropped names on one capped line —
+`no lane runs these, ignored: Fable 5.1, Opus 5, Fable 5, GLM-5.3 +4 more`. That
+line is the point: a lane reading "no rows" while its model sits in the file is
+the bug this ticket is, and one line a human can scan is what catches the next
+missing `published_as`. It replaced no per-lane warning, so there is no storm.
+
+Measured against the real `_data/tbench-accepted.json` (18 rows) with the live
+catalog plus the four missing astra lanes:
+
+    astra-low@codex     on   not dominated
+    astra-medium@codex  on   not dominated
+    astra-high@codex    on   not dominated
+    astra-xhigh@codex   off  dominated by high of the same model
+    astra-max@codex     on   not dominated
+
+Neither catalog gained a `published_as` line. Whether `claude-fable-5-1` should
+carry `["Fable 5.1"]` is catalog data, and which of the two catalogs is
+authoritative is still Orin's open decision.
+
+Tests: 22 new assertions in `tests/test_catalog.py` (validation, the collision,
+and resolution including the ambiguous and the unknown name) and 6 in
+`tests/test_setup_tui.py`, the latter against
+`tests/fixtures/tbench-accepted.json`, a copy of the accepted extraction. Suite
+334 assertions, 0 failures.

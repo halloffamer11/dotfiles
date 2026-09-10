@@ -10,6 +10,14 @@ Three stages, one trust boundary:
 An LLM may select and restructure text. It may not originate a number.
 Stage 3 enforces that mechanically.
 
+A row keeps the model name its source printed — `GPT-6 Astra` from
+Terminal-Bench, `gpt-5.6-luna` from SWE Refactor Bench. Normalising that to a
+catalog slug here would be originating an identifier out of local knowledge the
+packet cannot vouch for, which is the same objection as originating a number, so
+the reconciliation happens where that knowledge lives: `catalog.py`'s
+`resolve_published_model` and the lane field `published_as`, read by whoever
+consumes the rows (ticket 16).
+
 Stage 3 catches invented distinctive numbers and cannot vouch for small
 integers, so a human still reads accepted.json. A badge that sits in different
 markup from its row will degrade to a rejection rather than a false accept:

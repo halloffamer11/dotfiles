@@ -16,7 +16,7 @@ The delegate redesign is the only live thread. Spec
 "Landed" note; skill context `agents/skills/delegate/CLAUDE.md`.
 
 **Branch `delegate-lane-catalog` is unmerged**, 13 commits ahead of `main` and 2
-behind, suite green at 306 assertions. Tickets 01-15 are implemented. `main` still
+behind, suite green at 334 assertions. Tickets 01-16 are implemented. `main` still
 has none of it, and `~/.claude/skills/delegate` symlinks to the **main** checkout —
 so the installed skill has no `discover.py` and no pre-screen, and the four
 `/delegate-*` wrappers cannot be exercised until this merges. Merging conflicts on
@@ -24,14 +24,10 @@ this file only.
 
 **Open, in priority order:**
 
-1. **Ticket 16** — `effort.py` returns published display names (`GPT-6 Astra`) and
-   the catalog keys on slugs (`gpt-6-astra`), so the pre-screen sees no data at all.
-   Do this before any tier pass: measured, it hides that `astra-xhigh` is dominated.
-   `bench.py`'s `model_matches_slug` already solves the same problem.
-2. **Ticket 14** — two real gaps: a cancelled-at-the-gate run returns `partial`
+1. **Ticket 14** — two real gaps: a cancelled-at-the-gate run returns `partial`
    rather than `blocked` naming the gate, and the cancelled-tool-call regression
    test through `map_result` does not exist. The agy box is satisfied by the ADS pin.
-3. **Chunk dispatch does not fit one agy window.** `effort.py` splits a large packet
+2. **Chunk dispatch does not fit one agy window.** `effort.py` splits a large packet
    correctly, but dispatches the chunks in sequence: both live Artificial Analysis
    runs on 2026-09-10 failed at chunk 6 of 7 when the agy **5-hour** meter hit 0%
    (the weekly had just refilled to 95% — the 5h window is the binding constraint,

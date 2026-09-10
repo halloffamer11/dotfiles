@@ -15,7 +15,8 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 DELEGATE_DIR = os.path.abspath(os.path.join(HERE, "..", "scripts"))
 FIXTURE = os.path.join(HERE, "fixture", "bench-epoch.csv")
-FIXTURES_DISCOVER = os.path.join(HERE, "fixtures", "discover")
+FIXTURES = os.path.join(HERE, "fixtures")
+FIXTURES_DISCOVER = os.path.join(FIXTURES, "discover")
 sys.path.insert(0, DELEGATE_DIR)
 
 import bench
@@ -610,6 +611,133 @@ try:
            luna["cells"][4] == "on" and luna["cells"][5] == "not dominated")
 except Exception as e:
     record("25 uncertain rows do not dominate", False, repr(e))
+
+
+# --- ticket 16: rows that name a model the way a leaderboard prints it -------
+# The real Terminal-Bench extraction, 18 rows, `check` accepted 18 and rejected
+# 0. Every model in it is a display name, so before this the pre-screen matched
+# none of them and read "no rows for this lane" against a full effort sweep.
+with open(os.path.join(FIXTURES, "tbench-accepted.json"), encoding="utf-8") as f:
+    TBENCH = json.load(f)
+
+
+def astra_lanes():
+    doc = copy.deepcopy(LANES)
+    for effort in ("low", "medium", "high", "xhigh", "max"):
+        lane = copy.deepcopy(doc["lanes"]["sol-high@codex"])
+        lane["model"] = "gpt-6-astra"
+        lane["effort"] = effort
+        doc["lanes"][f"astra-{effort}@codex"] = lane
+    return doc
+
+
+try:
+    w = wizard(lanes=astra_lanes(), effort_rows=TBENCH)
+    w.handle("enter")
+    w.handle("enter")
+    v = w.view()
+    xhigh = row_for(v, "astra-xhigh@codex")
+    high = row_for(v, "astra-high@codex")
+    low = row_for(v, "astra-low@codex")
+    record("28 a display-name sweep switches off the dominated lane",
+           w.screen == "prescreen"
+           and xhigh["cells"][4] == "off"
+           and xhigh["cells"][5] == "dominated by high of the same model"
+           and high["cells"][4] == "on" and high["cells"][5] == "not dominated"
+           and low["cells"][4] == "on" and low["cells"][5] == "not dominated",
+           str([xhigh["cells"], high["cells"], low["cells"]]))
+except Exception as e:
+    record("28 a display-name sweep switches off the dominated lane", False, repr(e))
+
+
+try:
+    w = wizard(lanes=astra_lanes(), effort_rows=TBENCH)
+    w.handle("enter")
+    w.handle("enter")
+    v = w.view()
+    grok = row_for(v, "grok46-high@grok")
+    flash = row_for(v, "flash-high@agy")
+    fable = row_for(v, "fable-xhigh@claude")
+    record("28b a matched lane with one row is not dominated; an unmatched one keeps absence",
+           grok["cells"][5] == "not dominated"
+           and flash["cells"][5] == "not dominated"
+           # Terminal-Bench prints "Fable 5.1"; no published_as says that is ours
+           and "absence is not evidence against" in fable["cells"][5],
+           str([grok["cells"], flash["cells"], fable["cells"]]))
+except Exception as e:
+    record("28b a matched lane with one row is not dominated; an unmatched one keeps absence",
+           False, repr(e))
+
+
+try:
+    # Terminal-Bench prints "Fable 5.1" and the lane model is
+    # `claude-fable-5-1`; no formatting rule may bridge a vendor prefix, so the
+    # catalog says it. The one Fable row is at max, so a max lane is what it
+    # informs — an xhigh lane still has no row of its own.
+    named = astra_lanes()
+    named["lanes"]["fable-max@claude"] = copy.deepcopy(named["lanes"]["fable-xhigh@claude"])
+    named["lanes"]["fable-max@claude"]["effort"] = "max"
+    named["lanes"]["fable-max@claude"]["published_as"] = ["Fable 5.1"]
+    w = wizard(lanes=named, effort_rows=TBENCH)
+    w.handle("enter")
+    w.handle("enter")
+    v = w.view()
+    fable_max = row_for(v, "fable-max@claude")
+    record("28c published_as connects a name the derived rule cannot",
+           fable_max["cells"][5] == "not dominated"
+           and "Fable 5.1" not in v["message"], str(fable_max["cells"]) + v["message"])
+except Exception as e:
+    record("28c published_as connects a name the derived rule cannot", False, repr(e))
+
+
+try:
+    w = wizard(lanes=astra_lanes(), effort_rows=TBENCH)
+    w.handle("enter")
+    w.handle("enter")
+    message = w.view()["message"]
+    record("28d models that are nobody's lane are listed once, not warned per lane",
+           message.startswith("no lane runs these, ignored: ")
+           and "GLM-5.3" in message and "+4 more" in message
+           and "gpt-6-astra" not in message and len(message) <= 79
+           and all("no lane" not in row["cells"][5] for row in w.view()["rows"]),
+           repr(message))
+except Exception as e:
+    record("28d models that are nobody's lane are listed once, not warned per lane",
+           False, repr(e))
+
+
+try:
+    from setup_tui import unmatched_message
+    short = unmatched_message(["GLM-5.3", "Opus 4.8"])
+    long = unmatched_message([f"A Very Long Model Name {n}" for n in range(9)])
+    record("28f the ignored line lists what fits and counts the rest",
+           short == "no lane runs these, ignored: GLM-5.3, Opus 4.8"
+           and unmatched_message([]) == ""
+           and len(long) <= 79 and long.endswith("more"),
+           repr(short) + repr(long))
+except Exception as e:
+    record("28f the ignored line lists what fits and counts the rest", False, repr(e))
+
+
+try:
+    # A source that publishes slugs must go on working unchanged.
+    rows = [
+        {"model": "gpt-5.6-luna", "effort": "low", "score": 4.0, "cost_usd": 1.7,
+         "uncertain": False, "source": "swerb", "benchmark": "b"},
+        {"model": "gpt-5.6-luna", "effort": "medium", "score": 6.0, "cost_usd": 1.5,
+         "uncertain": False, "source": "swerb", "benchmark": "b"},
+    ]
+    w = wizard(effort_rows=rows)
+    w.handle("enter")
+    w.handle("enter")
+    luna = row_for(w.view(), "luna-low@codex")
+    record("28e a slug-publishing source still matches, and rows are not mutated",
+           luna["cells"][4] == "off" and "dominated" in luna["cells"][5]
+           and rows[0]["model"] == "gpt-5.6-luna", str(luna["cells"]))
+except Exception as e:
+    record("28e a slug-publishing source still matches, and rows are not mutated",
+           False, repr(e))
+
 
 
 try:

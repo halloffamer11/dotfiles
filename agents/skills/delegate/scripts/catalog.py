@@ -31,6 +31,20 @@ CLASSES = ("scout", "mechanical", "impl", "review", "hard-impl")
 LANES_VERSION = "delegate-lanes.v1"
 ROUTING_VERSION = "delegate-routing.v1"
 
+# Benchmark sources print a model however they please: some publish the slug a
+# harness accepts (`gpt-5.6-luna`), some a display name (`GPT-6 Astra`,
+# `Fable 5.1`). The catalog keys on slugs, so a consumer of published rows has
+# to reconcile the two. That mapping is local knowledge — which published name
+# denotes which of our lane models — so it lives here, beside the lane, where a
+# human can read and correct it: the optional lane field `published_as`.
+NORM_SEP = re.compile(r"[-_. ]+")
+MODEL_EFFORT_SUFFIXES = (
+    ("-xhigh", "xhigh"),
+    ("-high", "high"),
+    ("-medium", "medium"),
+    ("-low", "low"),
+)
+
 
 class CatalogError(Exception):
     """Plain-language catalog configuration or validation error."""
@@ -114,6 +128,74 @@ def load_json(path):
         raise CatalogError(f"{path}: number: NaN is not allowed in strict JSON ({e})")
 
 
+def normalize_name(value):
+    """Lower-case, with the -_. and space separators collapsed to one hyphen."""
+    if value is None:
+        return ""
+    return NORM_SEP.sub("-", str(value).strip().lower()).strip("-")
+
+
+def strip_effort_suffix(model):
+    """Splits a trailing effort off a model slug: gemini-3.8-flash-high -> (base, 'high')."""
+    for suffix, effort in MODEL_EFFORT_SUFFIXES:
+        if model.endswith(suffix):
+            return model[: -len(suffix)], effort
+    return model, None
+
+
+def published_as_map(lanes_doc):
+    """{normalized published name: lane model} from every lane's published_as."""
+    out = {}
+    for lane in (lanes_doc.get("lanes") or {}).values():
+        if not isinstance(lane, dict):
+            continue
+        for name in lane.get("published_as") or []:
+            key = normalize_name(name)
+            if key:
+                out[key] = lane.get("model")
+    return out
+
+
+def resolve_published_model(published, lanes_doc):
+    """The lane model that a source's printed model name denotes, or None.
+
+    A `published_as` entry is consulted first: it is the human's own correction,
+    and it is the only way across a gap formatting cannot bridge
+    (`Fable 5.1` -> `claude-fable-5-1`). It cannot contradict the derived rule,
+    because `validate_lanes` refuses an entry that names a model another lane
+    runs — an entry that could redirect one lane's rows onto another lane is a
+    typo, never an intention.
+
+    Failing an entry, the name has to differ from a lane model by formatting
+    alone — case and the -_. separators — reaching past the effort suffix some
+    of our slugs carry (`gemini-3.8-flash-high`). Anything looser would be a
+    guess about which model a leaderboard meant, and a wrong guess switches a
+    working lane off. A name that two lane models could equally denote therefore
+    resolves to neither, and a name no lane runs resolves to None: the
+    leaderboards are full of models that are nobody's lane.
+    """
+    key = normalize_name(published)
+    if not key:
+        return None
+    explicit = published_as_map(lanes_doc)
+    if key in explicit:
+        return explicit[key]
+    candidates = set()
+    for lane in (lanes_doc.get("lanes") or {}).values():
+        if not isinstance(lane, dict):
+            continue
+        model = lane.get("model")
+        if not isinstance(model, str) or not model.strip():
+            continue
+        normalized = normalize_name(model)
+        base, _effort = strip_effort_suffix(normalized)
+        if key in (normalized, base):
+            candidates.add(model)
+    if len(candidates) == 1:
+        return candidates.pop()
+    return None
+
+
 def validate_lanes(doc, source="lanes.json"):
     """Validates a lanes document against the schema. Returns doc or raises CatalogError."""
     if not isinstance(doc, dict):
@@ -177,13 +259,27 @@ def validate_lanes(doc, source="lanes.json"):
 
     allowed_lane_fields = {
         "harness", "model", "effort", "meter", "meter_weight", "timeout",
-        "price", "tier", "basis", "note", "enabled"
+        "price", "tier", "basis", "note", "enabled", "published_as"
     }
     required_lane_fields = (
         "harness", "model", "effort", "meter", "meter_weight", "timeout",
         "price", "tier", "basis"
     )
     price_keys = ("in", "cache_read", "cache_write", "out")
+    claimed = {}
+    # Which lane models a published name could denote on its own, so that a
+    # published_as entry cannot be pointed at somebody else's model.
+    owners = {}
+    for lane in lanes.values():
+        if not isinstance(lane, dict):
+            continue
+        model = lane.get("model")
+        if not isinstance(model, str) or not model.strip():
+            continue
+        normalized = normalize_name(model)
+        base, _effort = strip_effort_suffix(normalized)
+        for key in {normalized, base}:
+            owners.setdefault(key, set()).add(model)
 
     for lane_name, lane in lanes.items():
         if not isinstance(lane, dict):
@@ -271,6 +367,39 @@ def validate_lanes(doc, source="lanes.json"):
                 raise CatalogError(
                     f"{source}: lane '{lane_name}': enabled must be a boolean, got {en!r}"
                 )
+
+        if "published_as" in lane:
+            names = lane["published_as"]
+            if not isinstance(names, list) or not names:
+                raise CatalogError(
+                    f"{source}: lane '{lane_name}': published_as must be a non-empty list of "
+                    f"the names benchmark sources print for this model, got {names!r}"
+                )
+            for name in names:
+                if not isinstance(name, str) or not name.strip():
+                    raise CatalogError(
+                        f"{source}: lane '{lane_name}': published_as entries must be "
+                        f"non-empty strings, got {name!r}"
+                    )
+                key = normalize_name(name)
+                foreign = sorted(m for m in owners.get(key, ()) if m != lane["model"])
+                if foreign:
+                    raise CatalogError(
+                        f"{source}: lane '{lane_name}': published_as {name!r} already names "
+                        f"model '{foreign[0]}', which another lane runs; that would read "
+                        f"'{foreign[0]}' rows as '{lane['model']}'. Drop the entry, or put it "
+                        f"on the lane that runs '{foreign[0]}'"
+                    )
+                first = claimed.get(key)
+                if first is not None and first[2] != lane["model"]:
+                    raise CatalogError(
+                        f"{source}: lane '{lane_name}': published_as {name!r} names the same "
+                        f"model as {first[0]!r} on lane '{first[1]}'; one published name "
+                        f"denotes one model, but this would make it both '{first[2]}' and "
+                        f"'{lane['model']}'"
+                    )
+                if first is None:
+                    claimed[key] = (name, lane_name, lane["model"])
 
     return doc
 
