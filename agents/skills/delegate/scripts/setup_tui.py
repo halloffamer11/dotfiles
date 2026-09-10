@@ -3,7 +3,7 @@
 import copy
 
 from bench import EPOCH_BENCHMARKS
-from catalog import CLASSES, HARNESSES
+from catalog import CLASSES, EFFORTS, HARNESSES
 
 # These render as single lines in an 80-column terminal, where anything past
 # column 79 is clipped. Keep each one under that; a legend cut mid-sentence
@@ -12,6 +12,99 @@ TIER_ONELINER = "Tier: capability 1-4, a ceiling — needing 3 means tier 3 or 4
 MARGIN_LEGEND = "margin: pace a lower lane must beat the pick by to steal the job (0.2 = by 0.2)"
 GATE_LEGEND = "gate: meter-remaining floor; a lane below it is skipped (0.1 = under 10%)"
 CLASSTIER_LEGEND = "classTier: a class needing N uses a lane of tier N or higher, never lower."
+TIER_FOOTER = "↑/↓/j/k: move  space: mark  x: on/off  enter: next  b: back  o: bench  q: quit"
+TIER_OFF_LEGEND = "dim: assigned a higher tier.  tag off: switched off (still takes a tier)."
+PRESCREEN_FOOTER = "↑/↓ or j/k: move  x: flip  enter: continue  b: back  q: quit"
+PRESCREEN_LEGEND = "ultra: always off.  Dominated: same model, ≥ score at ≤ cost.  Else on."
+PRESCREEN_NODATA_LEGEND = "ultra is always off.  Absence of data is not evidence against a lane."
+NO_DATA_MESSAGE = "No per-effort data was supplied, so nothing else could be judged."
+CONFIRM_OFF_LEGEND = "off: written with enabled: false.  On lanes omit the key."
+RECORDED_REASON = "as recorded in the catalog; the pre-screen does not undo your decision"
+ULTRA_REASON = (
+    "unscoreable (no source reports ultra); auto-delegation breaks worker preamble"
+)
+
+
+def _certain_effort_rows(effort_rows):
+    """Rows that may dominate. Uncertain rows inform nothing: they must not
+    dominate another lane, and they are not evidence against the lane they name.
+
+    A row at an effort no lane can select is dropped for the same reason. The
+    benchmark harnesses drive the API enum, which runs `none` to `max`, so every
+    published sweep carries a `none` row — and no lane can be configured at
+    `none`. Letting one dominate would switch off a real lane on the strength of
+    a setting that cannot be chosen, which is exactly what it did to
+    luna-low@codex: equal score to `none` at a tenth of a cent more.
+    """
+    certain = []
+    for row in effort_rows or []:
+        if not isinstance(row, dict) or row.get("uncertain"):
+            continue
+        if not row.get("model") or not row.get("effort"):
+            continue
+        if row["effort"] not in EFFORTS:
+            continue
+        score, cost = row.get("score"), row.get("cost_usd")
+        if isinstance(score, bool) or isinstance(cost, bool):
+            continue
+        if not isinstance(score, (int, float)) or not isinstance(cost, (int, float)):
+            continue
+        certain.append(row)
+    return certain
+
+
+def _dominating_effort(lane, certain):
+    """Return another effort of the same model that weakly Pareto-dominates this
+    one (score >=, cost <=, strict in at least one), else None. Compared only
+    within the same source and benchmark.
+    """
+    model, effort = lane["model"], lane["effort"]
+    mine = [r for r in certain if r.get("model") == model and r.get("effort") == effort]
+    others = [r for r in certain if r.get("model") == model and r.get("effort") != effort]
+    for a in mine:
+        scope = (a.get("source"), a.get("benchmark"))
+        for b in others:
+            if (b.get("source"), b.get("benchmark")) != scope:
+                continue
+            if b["score"] >= a["score"] and b["cost_usd"] <= a["cost_usd"]:
+                if b["score"] > a["score"] or b["cost_usd"] < a["cost_usd"]:
+                    return b["effort"]
+    return None
+
+
+def propose_enabled(lanes_doc, effort_rows):
+    """Ticket-15 pre-screen rule. Returns {name: (enabled, reason)}."""
+    certain = _certain_effort_rows(effort_rows)
+    supplied = bool(effort_rows)
+    out = {}
+    for name, lane in lanes_doc["lanes"].items():
+        if lane.get("effort") == "ultra":
+            out[name] = (False, ULTRA_REASON)
+            continue
+        if "enabled" in lane:
+            # An explicit `enabled` is a decision the human already recorded. The
+            # pre-screen proposes for lanes that have no decision yet; it does not
+            # undo one. Silently switching a lane back on would put it in front of
+            # the ranker again without anyone saying so.
+            out[name] = (bool(lane["enabled"]), RECORDED_REASON)
+            continue
+        other = _dominating_effort(lane, certain)
+        if other is not None:
+            out[name] = (False, f"dominated by {other} of the same model")
+            continue
+        if not supplied:
+            out[name] = (True, "no per-effort data; absence is not evidence against")
+        elif not any(
+            isinstance(row, dict)
+            and not row.get("uncertain")
+            and row.get("model") == lane["model"]
+            and row.get("effort") == lane["effort"]
+            for row in effort_rows
+        ):
+            out[name] = (True, "no rows for this lane; absence is not evidence against")
+        else:
+            out[name] = (True, "not dominated")
+    return out
 
 
 class Wizard:
@@ -19,12 +112,13 @@ class Wizard:
 
     def __init__(self, lanes_doc, routing_doc, bench, discovered,
                  lanes_path, routing_path, initial_message="",
-                 bench_page_path=None):
+                 bench_page_path=None, effort_rows=None):
         self._original_lanes = copy.deepcopy(lanes_doc)
         self._original_routing = copy.deepcopy(routing_doc)
         self.lanes_doc = copy.deepcopy(lanes_doc)
         self.routing_doc = copy.deepcopy(routing_doc)
         self.bench = bench
+        self.effort_rows = effort_rows
         self.discovered = set(discovered)
         self.lanes_path = lanes_path
         self.routing_path = routing_path
@@ -40,6 +134,9 @@ class Wizard:
                    if lane["tier"] == tier}
             for tier in range(1, 5)
         }
+        proposals = propose_enabled(self.lanes_doc, effort_rows)
+        self._enabled = {name: enabled for name, (enabled, _) in proposals.items()}
+        self._reasons = {name: reason for name, (_, reason) in proposals.items()}
 
     def result(self):
         return self._result
@@ -71,6 +168,19 @@ class Wizard:
             active, _ = self._tier_names()
             self._marks[1].update(active)
 
+    def _enter_prescreen(self):
+        self.screen = "prescreen"
+        self.tier = None
+        self.cursor = 0
+        self.message = "" if self.effort_rows else NO_DATA_MESSAGE
+
+    def _lane_names(self):
+        return list(self.lanes_doc["lanes"])
+
+    def _toggle_enabled(self, name):
+        if name:
+            self._enabled[name] = not self._enabled[name]
+
     def _active_name(self):
         active, _ = self._tier_names()
         if not active:
@@ -85,13 +195,28 @@ class Wizard:
             self.screen = "quit"
             self._result = None
             return
-        if key == "o" and self.screen in ("start", "tier"):
+        if key == "o" and self.screen in ("start", "tier", "prescreen"):
             return
         if self.screen == "start":
             self.screen = "discovery"
             return
         if self.screen == "discovery":
-            self._enter_tier(4)
+            self._enter_prescreen()
+            return
+        if self.screen == "prescreen":
+            names = self._lane_names()
+            if key == "up" and names:
+                self.cursor = (self.cursor - 1) % len(names)
+            elif key == "down" and names:
+                self.cursor = (self.cursor + 1) % len(names)
+            elif key == "x" and names:
+                self._toggle_enabled(names[min(self.cursor, len(names) - 1)])
+            elif key == "enter":
+                self._enter_tier(4)
+            elif key == "b":
+                self.screen = "discovery"
+                self.cursor = 0
+                self.message = ""
             return
         if self.screen == "tier":
             active, _ = self._tier_names()
@@ -106,6 +231,8 @@ class Wizard:
                         self._marks[self.tier].remove(name)
                     else:
                         self._marks[self.tier].add(name)
+            elif key == "x":
+                self._toggle_enabled(self._active_name())
             elif key == "enter":
                 active, _ = self._tier_names()
                 if self.tier == 1 and any(name not in self._marks[1] for name in active):
@@ -127,6 +254,8 @@ class Wizard:
                     if self._assigned[name] == previous:
                         del self._assigned[name]
                 self._enter_tier(previous)
+            elif key == "b" and self.tier == 4:
+                self._enter_prescreen()
             return
         if self.screen == "routing":
             count = len(CLASSES) + 2
@@ -159,6 +288,10 @@ class Wizard:
                 result_lanes = copy.deepcopy(self._original_lanes)
                 for name, lane in result_lanes["lanes"].items():
                     lane["tier"] = self._assigned[name]
+                    if not self._enabled[name]:
+                        lane["enabled"] = False
+                    else:
+                        lane.pop("enabled", None)
                 self._result = (result_lanes, copy.deepcopy(self.routing_doc))
                 self.screen = "done"
             elif key in ("n", "q"):
@@ -241,6 +374,31 @@ class Wizard:
                        "cursor": False, "tag": ""} for name in HARNESSES],
                 footer="any key: continue  q: quit",
             )
+        if self.screen == "prescreen":
+            names = self._lane_names()
+            rows = []
+            for index, name in enumerate(names):
+                lane = self.lanes_doc["lanes"][name]
+                on = self._enabled[name]
+                rows.append({
+                    "cells": [
+                        "[x]" if on else "[ ]", name, lane["model"], lane["effort"],
+                        "on" if on else "off", self._reasons[name],
+                    ],
+                    "marked": on, "dimmed": not on,
+                    "cursor": index == self.cursor,
+                    "tag": "" if on else "off",
+                })
+            legend = [PRESCREEN_LEGEND]
+            if not self.effort_rows:
+                legend = [PRESCREEN_NODATA_LEGEND, NO_DATA_MESSAGE]
+            return self._frame(
+                "prescreen", "Lanes to carry",
+                columns=["mark", "lane", "model", "effort", "carry", "reason"],
+                rows=rows,
+                footer=PRESCREEN_FOOTER,
+                legend=legend,
+            )
         if self.screen == "tier":
             epoch_names = (self.bench or {}).get("epoch_benchmarks", list(EPOCH_BENCHMARKS))
             columns = ["mark", "lane", "model", "effort", *epoch_names, "Epoch mean rank"]
@@ -250,27 +408,33 @@ class Wizard:
             rows = []
             for index, name in enumerate(active + dimmed):
                 lane = self.lanes_doc["lanes"][name]
-                is_dim = name in self._assigned
-                marked = name in self._marks[self.tier] if not is_dim else False
+                is_assigned = name in self._assigned
+                is_off = not self._enabled[name]
+                marked = name in self._marks[self.tier] if not is_assigned else False
+                if is_off and is_assigned:
+                    tag = f"off, tier {self._assigned[name]}"
+                elif is_off:
+                    tag = "off"
+                elif is_assigned:
+                    tag = f"tier {self._assigned[name]}"
+                else:
+                    tag = ""
                 rows.append({
                     "cells": ["[x]" if marked else "[ ]", name, lane["model"], lane["effort"],
                               *self._bench_cells(lane)],
-                    "marked": marked, "dimmed": is_dim,
-                    "cursor": not is_dim and index == self.cursor,
-                    "tag": f"tier {self._assigned[name]}" if is_dim else "",
+                    "marked": marked, "dimmed": is_assigned or is_off,
+                    "cursor": not is_assigned and index == self.cursor,
+                    "tag": tag,
                 })
             return self._frame(
                 "tier", f"Assign tier {self.tier}", tier=self.tier,
                 columns=columns, rows=rows,
-                footer=(
-                    "↑/↓ or j/k: move  space: mark  enter: next  b: back  "
-                    "o: open benchmark page  q: quit"
-                ),
+                footer=TIER_FOOTER,
                 # The tier definition belongs where the decision is made, but it
                 # and the key hints together overflow an 80-column footer, and a
                 # truncated footer loses the keys. Last legend line renders
                 # directly above the footer, so it reads as a second footer line.
-                legend=[TIER_ONELINER],
+                legend=[TIER_OFF_LEGEND, TIER_ONELINER],
             )
         if self.screen == "routing":
             values = [(f"classTier.{name}", self.routing_doc["classTier"][name]) for name in CLASSES]
@@ -287,8 +451,11 @@ class Wizard:
         if self.screen == "confirm":
             rows = []
             for name in self.lanes_doc["lanes"]:
-                rows.append({"cells": [name, f"tier {self._assigned[name]}", ""],
-                             "marked": False, "dimmed": False, "cursor": False, "tag": ""})
+                off = not self._enabled[name]
+                rows.append({"cells": [name, f"tier {self._assigned[name]}",
+                                       "off" if off else ""],
+                             "marked": False, "dimmed": off, "cursor": False,
+                             "tag": "off" if off else ""})
             for name in CLASSES:
                 rows.append({"cells": [f"classTier.{name}", str(self.routing_doc["classTier"][name]), ""],
                              "marked": False, "dimmed": False, "cursor": False, "tag": ""})
@@ -302,7 +469,7 @@ class Wizard:
                 "confirm", "Confirm changes",
                 columns=["item", "value", ""], rows=rows,
                 footer="y: write  n/q: quit without writing  b: back",
-                legend=[CLASSTIER_LEGEND, MARGIN_LEGEND, GATE_LEGEND],
+                legend=[CLASSTIER_LEGEND, MARGIN_LEGEND, GATE_LEGEND, CONFIRM_OFF_LEGEND],
             )
         return self._frame(self.screen, "Delegate setup")
 
@@ -413,7 +580,8 @@ def run_curses(wizard):
                        10: "enter", 13: "enter", curses.KEY_ENTER: "enter",
                        ord("b"): "b", ord("q"): "q", ord("y"): "y", ord("n"): "n",
                        ord("+"): "plus", ord("="): "plus", ord("-"): "minus",
-                       ord("o"): "o", ord("O"): "o"}
+                       ord("o"): "o", ord("O"): "o",
+                       ord("x"): "x", ord("X"): "x"}
             if ord("1") <= code <= ord("5"):
                 key = chr(code)
             else:

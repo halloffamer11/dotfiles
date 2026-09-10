@@ -250,7 +250,7 @@ def main(argv=None):
     bench_group.add_argument("--no-bench", action="store_true", help="skip benchmark display")
     parser.add_argument("--epoch-csv", default=None, help="local Epoch CSV for bench.py")
     parser.add_argument("--aa-json", default=None, help="local Artificial Analysis JSON for bench.py")
-    parser.add_argument("--effort-rows", default=None, help="effort.py check accepted.json for the benchmark page")
+    parser.add_argument("--effort-rows", default=None, help="effort.py check accepted.json for the pre-screen and benchmark page")
     args = parser.parse_args(argv)
 
     try:
@@ -293,6 +293,7 @@ def main(argv=None):
                 lanes_doc, routing_doc, bench_data, discovered,
                 lanes_path, routing_path, initial_message,
                 bench_page_path=page_path,
+                effort_rows=effort_rows,
             )
             result = setup_tui.run_curses(wizard)
             if result is None:

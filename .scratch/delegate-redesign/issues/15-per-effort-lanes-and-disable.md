@@ -77,13 +77,13 @@ sensitive.
 
 - [x] `enabled` is a validated boolean on every lane, defaulting to true when absent so existing catalogs keep working
 - [x] `rank.py` reports a disabled lane as ineligible with reason `disabled`, and never picks one
-- [ ] The wizard toggles `enabled` on the cursor row and shows disabled lanes dimmed, not hidden
+- [x] The wizard toggles `enabled` on the cursor row and shows disabled lanes dimmed, not hidden
 - [x] `discover.py --efforts <model>` prints a ready-to-paste lane stanza per effort the harness reports
 - [x] A generated `ultra` stanza carries `enabled: false`, with the reason in its `basis`
 - [x] `discover.py --efforts` emits one shared `price` block across a model's efforts, not a prompt per lane
 - [x] `tests/test_rank.py` covers a disabled lane that would otherwise be the pick
 - [x] `effort.py extract` completes one real run end to end, so the pipeline is proven, not half-proven
-- [ ] A pre-screen runs before the tier screens, proposes `enabled` per lane from `effort.py` output, and sets the starting mark state rather than writing the catalog
+- [x] A pre-screen runs before the tier screens, proposes `enabled` per lane from `effort.py` output, and sets the starting mark state rather than writing the catalog
 - [ ] Orin enumerates the codex efforts he wants and switches off the rest in one wizard run
 
 ## Schema and generator landed 2026-09-10
@@ -114,4 +114,43 @@ accepts the result once the four human fields are filled. One shared `price`
 block in the output, `enabled` present on the `ultra` stanza and on no other, and
 `rank.py` reports `astra-ultra@codex` as `vetoed: disabled`.
 
-Still open: the wizard toggle and the pre-screen.
+The wizard toggle and the pre-screen followed; see below.
+
+### The toggle and the pre-screen, same day
+
+`x` flips `enabled` on the cursor row, on the pre-screen and on the tier screens.
+A lane switched off stays on the tier table, tagged `off`, and still takes a tier —
+`tier` is required on every lane, so being off does not excuse it from the tier
+pass. The tag distinguishes "switched off" from the existing dimming for
+"already assigned a higher tier". The confirm screen lists the lanes it will write
+off. A lane that is off is written `enabled: false`; a lane that is on is written
+with no `enabled` key, so the round trip stays byte-identical when nothing is
+switched off.
+
+The pre-screen consumes `effort.py check` output through `--effort-rows` rather
+than running the pipeline. `extract` is an LLM call — 121s on one packet — and a
+curses wizard has to stay deterministic and fast.
+
+Two defects found in review, both of which would have switched off a lane Orin
+uses:
+
+- **A row at an effort no lane can select must never dominate.** Every published
+  sweep carries a `none` row, because the benchmark harnesses drive the API enum,
+  which runs `none` to `max`. `gpt-5.6-luna` at `none` scores 4.0 for $1.6 and at
+  `low` scores 4.0 for $1.7, so the first pass proposed `luna-low@codex` **off** —
+  dominated by a setting no lane can be configured at. The dominating pool is now
+  filtered to `catalog.EFFORTS`, and the reason string it printed, "dominated by
+  none of the same model", was the tell.
+- **An explicit `enabled` in the catalog is a recorded human decision.** The first
+  pass ignored it, so a lane switched off in one run came back on in the next,
+  silently, and went straight back in front of the ranker. The pre-screen now
+  reports it as recorded and proposes nothing; only `ultra` still overrides, since
+  an `ultra` lane switched on breaks the return contract by construction.
+
+Verified against the real swerb rows with the six-effort `EFFORTS`: every unscored
+lane on, `luna-low` on, `luna-xhigh` off because `max` scores 10.5 at $2.8 against
+its 5.5 at $2.9, `ultra` off. That is the rule doing real work rather than
+switching off whatever it has no data for.
+
+One box left, and only Orin can close it: enumerate the codex efforts he wants and
+switch off the rest in one wizard run.

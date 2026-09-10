@@ -40,13 +40,16 @@ def data():
     return bench.collect(copy.deepcopy(LANES), epoch_csv=FIXTURE, key_file=None)
 
 
-def wizard(bench_data=True, message=""):
-    return Wizard(copy.deepcopy(LANES), copy.deepcopy(ROUTING),
+def wizard(bench_data=True, message="", effort_rows=None, lanes=None):
+    return Wizard(copy.deepcopy(lanes if lanes is not None else LANES),
+                  copy.deepcopy(ROUTING),
                   data() if bench_data else None, DISCOVERED,
-                  "/tmp/lanes.json", "/tmp/routing.json", message)
+                  "/tmp/lanes.json", "/tmp/routing.json", message,
+                  effort_rows=effort_rows)
 
 
 def start(w):
+    w.handle("enter")
     w.handle("enter")
     w.handle("enter")
 
@@ -236,11 +239,11 @@ try:
     record("12 tier footer carries the tier one-liner",
            w.screen == "tier"
            and "ceiling" in footer
-           and "o: open benchmark page" in footer)
+           and "x: on/off" in footer
+           and "o: bench" in footer)
     before_cursor = w.cursor
-    w.handle("x")
     w.handle("d")
-    record("12b x and d are unbound on tier",
+    record("12b d is unbound on tier",
            w.screen == "tier" and w.cursor == before_cursor and w.tier == 4)
 except Exception as e:
     record("12 tier footer carries the tier one-liner", False, repr(e))
@@ -286,6 +289,301 @@ except Exception as e:
     record("13 routing legend maps this session's assignments", False, repr(e))
 
 
+VIEW_KEYS = {"screen", "title", "tier", "columns", "rows", "footer", "message", "body", "legend"}
+
+
+def row_for(view, lane):
+    return next(r for r in view["rows"] if r["cells"][1] == lane)
+
+
+def to_confirm(w):
+    while w.screen == "tier":
+        w.handle("enter")
+    if w.screen == "routing":
+        w.handle("enter")
+
+
+try:
+    w = wizard()
+    start(w)
+    cursor_name = next(r["cells"][1] for r in w.view()["rows"] if r["cursor"])
+    enabled_before = dict(w._enabled)
+    marks_before = {tier: set(names) for tier, names in w._marks.items()}
+    assigned_before = dict(w._assigned)
+    others = {r["cells"][1]: (r["marked"], r["cells"][0], r["tag"])
+              for r in w.view()["rows"] if r["cells"][1] != cursor_name}
+    w.handle("x")
+    v = w.view()
+    flipped = row_for(v, cursor_name)
+    others_after = {r["cells"][1]: (r["marked"], r["cells"][0], r["tag"])
+                    for r in v["rows"] if r["cells"][1] != cursor_name}
+    record("16 x flips only the cursor row",
+           w.screen == "tier" and w.tier == 4
+           and w._assigned == assigned_before and w._marks == marks_before
+           and w._enabled[cursor_name] is not enabled_before[cursor_name]
+           and all(w._enabled[name] is enabled_before[name]
+                   for name in enabled_before if name != cursor_name)
+           and others_after == others
+           and flipped["dimmed"] and flipped["tag"] == "off")
+except Exception as e:
+    record("16 x flips only the cursor row", False, repr(e))
+
+
+try:
+    w = wizard()
+    start(w)
+    move_to(w, "sol-high@codex")
+    w.handle("space")
+    w.handle("enter")
+    move_to(w, "flash-high@agy")
+    w.handle("x")
+    v = w.view()
+    names = [r["cells"][1] for r in v["rows"]]
+    flash = row_for(v, "flash-high@agy")
+    sol = row_for(v, "sol-high@codex")
+    record("17 disabled lane stays visible and is not assigned-dimmed",
+           "flash-high@agy" in names
+           and flash["dimmed"] and flash["tag"] == "off"
+           and sol["dimmed"] and sol["tag"] == "tier 4"
+           and flash["tag"] != sol["tag"])
+except Exception as e:
+    record("17 disabled lane stays visible and is not assigned-dimmed", False, repr(e))
+
+
+try:
+    w = wizard()
+    start(w)
+    move_to(w, "flash-high@agy")
+    w.handle("x")
+    while w.tier != 1:
+        w.handle("enter")
+    move_to(w, "flash-high@agy")
+    w.handle("space")
+    w.handle("enter")
+    blocked = w.screen == "tier" and w.tier == 1 and w.view()["message"] == "every lane needs a tier"
+    w.handle("space")
+    w.handle("enter")
+    record("18 disabled lane still takes a tier; tier-1 rule applies",
+           blocked and w.screen == "routing")
+    to_confirm(w)
+    w.handle("y")
+    lanes, _ = w.result()
+    record("18b disabled lane is written with a tier",
+           lanes["lanes"]["flash-high@agy"]["tier"] in (1, 2, 3, 4)
+           and lanes["lanes"]["flash-high@agy"]["enabled"] is False)
+except Exception as e:
+    record("18 disabled lane still takes a tier; tier-1 rule applies", False, repr(e))
+
+
+try:
+    w = wizard()
+    start(w)
+    move_to(w, "flash-high@agy")
+    w.handle("x")
+    to_confirm(w)
+    confirm = w.view()
+    off_rows = [r for r in confirm["rows"] if r["cells"][0] == "flash-high@agy"]
+    record("19 confirm lists lanes written off",
+           confirm["screen"] == "confirm"
+           and off_rows
+           and off_rows[0]["cells"][2] == "off"
+           and off_rows[0]["tag"] == "off"
+           and any("enabled: false" in line for line in (confirm.get("legend") or [])))
+    w.handle("y")
+    lanes, _ = w.result()
+    on_lanes = [name for name in LANES["lanes"] if name != "flash-high@agy"]
+    record("20 enabled false only on lanes switched off",
+           lanes["lanes"]["flash-high@agy"]["enabled"] is False
+           and all("enabled" not in lanes["lanes"][name] for name in on_lanes))
+except Exception as e:
+    record("19 confirm lists lanes written off", False, repr(e))
+
+
+try:
+    incoming = copy.deepcopy(LANES)
+    incoming["lanes"]["sol-high@codex"]["enabled"] = False
+    w = wizard(lanes=incoming)
+    w.handle("enter")
+    w.handle("enter")
+    start_from_prescreen = w.screen == "prescreen"
+    # the recorded decision stands until the human flips it
+    held = row_for(w.view(), "sol-high@codex")["cells"][4] == "off"
+    while w.view()["rows"][w.cursor]["cells"][1] != "sol-high@codex":
+        w.handle("down")
+    w.handle("x")
+    flipped_on = row_for(w.view(), "sol-high@codex")["cells"][4] == "on"
+    w.handle("enter")
+    finish(w)
+    lanes, _ = w.result()
+    record("21 incoming enabled false switched on drops the key",
+           start_from_prescreen and held and flipped_on
+           and "enabled" not in lanes["lanes"]["sol-high@codex"])
+except Exception as e:
+    record("21 incoming enabled false switched on drops the key", False, repr(e))
+
+
+try:
+    w = wizard()
+    w.handle("enter")
+    w.handle("enter")
+    v = w.view()
+    record("22 pre-screen is in the key sequence",
+           w.screen == "prescreen" and set(v) == VIEW_KEYS
+           and [r["cells"][1] for r in v["rows"]] == list(LANES["lanes"])
+           and v["message"] == "No per-effort data was supplied, so nothing else could be judged.")
+    w.handle("q")
+    record("22b q on pre-screen quits without writing",
+           w.screen == "quit" and w.result() is None)
+except Exception as e:
+    record("22 pre-screen is in the key sequence", False, repr(e))
+
+
+try:
+    with_ultra = copy.deepcopy(LANES)
+    with_ultra["lanes"]["sol-ultra@codex"] = copy.deepcopy(LANES["lanes"]["sol-high@codex"])
+    with_ultra["lanes"]["sol-ultra@codex"]["effort"] = "ultra"
+    w = wizard(lanes=with_ultra)
+    w.handle("enter")
+    w.handle("enter")
+    ultra = row_for(w.view(), "sol-ultra@codex")
+    reason = ultra["cells"][5]
+    record("23 ultra is proposed off with both reasons",
+           w.screen == "prescreen"
+           and ultra["cells"][4] == "off" and ultra["tag"] == "off"
+           and "unscoreable" in reason and "no source reports ultra" in reason
+           and "auto-delegation" in reason and "preamble" in reason)
+except Exception as e:
+    record("23 ultra is proposed off with both reasons", False, repr(e))
+
+
+try:
+    # medium scores higher for less money, so low is genuinely dominated by an
+    # effort a lane can actually be set to
+    rows = [
+        {"model": "gpt-5.6-luna", "effort": "low", "score": 4.0, "cost_usd": 1.7,
+         "uncertain": False, "source": "t", "benchmark": "b"},
+        {"model": "gpt-5.6-luna", "effort": "medium", "score": 6.0, "cost_usd": 1.5,
+         "uncertain": False, "source": "t", "benchmark": "b"},
+        {"model": "gpt-5.6-sol", "effort": "high", "score": 19.0, "cost_usd": 7.7,
+         "uncertain": False, "source": "t", "benchmark": "b"},
+    ]
+    w = wizard(effort_rows=rows)
+    w.handle("enter")
+    w.handle("enter")
+    v = w.view()
+    luna = row_for(v, "luna-low@codex")
+    sol = row_for(v, "sol-high@codex")
+    flash = row_for(v, "flash-high@agy")
+    record("24 dominated lane proposed off; unscored proposed on",
+           luna["cells"][4] == "off" and "dominated" in luna["cells"][5]
+           and sol["cells"][4] == "on" and sol["cells"][5] == "not dominated"
+           and flash["cells"][4] == "on"
+           and "absence is not evidence against" in flash["cells"][5])
+except Exception as e:
+    record("24 dominated lane proposed off; unscored proposed on", False, repr(e))
+
+
+try:
+    # Every published sweep carries a `none` row, and no lane can be set to
+    # `none`. A row at an effort no lane can select must never switch a real lane
+    # off: this is what proposed luna-low@codex off on its first run.
+    rows = [
+        {"model": "gpt-5.6-luna", "effort": "low", "score": 4.0, "cost_usd": 1.7,
+         "uncertain": False, "source": "t", "benchmark": "b"},
+        {"model": "gpt-5.6-luna", "effort": "none", "score": 4.0, "cost_usd": 1.6,
+         "uncertain": False, "source": "t", "benchmark": "b"},
+    ]
+    w = wizard(effort_rows=rows)
+    w.handle("enter")
+    w.handle("enter")
+    luna = row_for(w.view(), "luna-low@codex")
+    record("24b an effort no lane can select never dominates",
+           luna["cells"][4] == "on" and "dominated by" not in luna["cells"][5])
+except Exception as e:
+    record("24b an effort no lane can select never dominates", False, repr(e))
+
+
+try:
+    # An explicit `enabled` in the catalog is a decision the human recorded. The
+    # pre-screen must not quietly undo it and hand the lane back to the ranker.
+    recorded = copy.deepcopy(LANES)
+    recorded["lanes"]["flash-high@agy"]["enabled"] = False
+    recorded["lanes"]["luna-low@codex"]["enabled"] = True
+    rows = [
+        {"model": "gpt-5.6-luna", "effort": "low", "score": 4.0, "cost_usd": 1.7,
+         "uncertain": False, "source": "t", "benchmark": "b"},
+        {"model": "gpt-5.6-luna", "effort": "medium", "score": 6.0, "cost_usd": 1.5,
+         "uncertain": False, "source": "t", "benchmark": "b"},
+    ]
+    w = wizard(lanes=recorded, effort_rows=rows)
+    w.handle("enter")
+    w.handle("enter")
+    v = w.view()
+    flash = row_for(v, "flash-high@agy")
+    luna = row_for(v, "luna-low@codex")
+    record("24c an explicit enabled is respected, not overwritten",
+           flash["cells"][4] == "off" and "recorded" in flash["cells"][5]
+           # luna would be dominated by medium, but the human said on
+           and luna["cells"][4] == "on" and "recorded" in luna["cells"][5])
+except Exception as e:
+    record("24c an explicit enabled is respected, not overwritten", False, repr(e))
+
+
+try:
+    rows = [
+        {"model": "gpt-5.6-luna", "effort": "low", "score": 4.0, "cost_usd": 1.7,
+         "uncertain": False, "source": "t", "benchmark": "b"},
+        {"model": "gpt-5.6-luna", "effort": "none", "score": 10.0, "cost_usd": 0.1,
+         "uncertain": True, "source": "t", "benchmark": "b"},
+    ]
+    w = wizard(effort_rows=rows)
+    w.handle("enter")
+    w.handle("enter")
+    luna = row_for(w.view(), "luna-low@codex")
+    record("25 uncertain rows do not dominate",
+           luna["cells"][4] == "on" and luna["cells"][5] == "not dominated")
+except Exception as e:
+    record("25 uncertain rows do not dominate", False, repr(e))
+
+
+try:
+    w = wizard()
+    start(w)
+    finish(w)
+    lanes, routing = w.result()
+    record("26 round-trip with nothing switched off is byte-identical",
+           lanes == LANES and routing == ROUTING
+           and all("enabled" not in lane for lane in lanes["lanes"].values()))
+except Exception as e:
+    record("26 round-trip with nothing switched off is byte-identical", False, repr(e))
+
+
+try:
+    over = []
+    w = wizard()
+    screens = []
+    v = w.view()
+    screens.append(v)
+    w.handle("enter")
+    screens.append(w.view())
+    w.handle("enter")
+    screens.append(w.view())
+    w.handle("enter")
+    screens.append(w.view())
+    while w.screen == "tier":
+        w.handle("enter")
+    screens.append(w.view())
+    w.handle("enter")
+    screens.append(w.view())
+    for v in screens:
+        for line in [v["footer"], *(v.get("legend") or []), *(v.get("body") or [])]:
+            if len(line) > 80:
+                over.append((v["screen"], len(line), line))
+    record("27 legend and footer stay under 80", not over, repr(over))
+except Exception as e:
+    record("27 legend and footer stay under 80", False, repr(e))
+
+
 def pty_smoke():
     with tempfile.TemporaryDirectory() as td:
         config_dir = os.path.join(td, "config")
@@ -313,7 +611,7 @@ def pty_smoke():
         deadline = time.monotonic() + 30
         try:
             os.set_blocking(master, False)
-            for key in [b"\n"] * 7 + [b"y"]:
+            for key in [b"\n"] * 8 + [b"y"]:
                 try:
                     while chunk := os.read(master, 65536):
                         output.extend(chunk)
