@@ -48,11 +48,38 @@ next session starts from CLAUDE.md.
 
 ## Restart prompt
 
-After the fresh context protocol is completed the user is expecting to clear 
-the context or start a new session. Assume this is the case and proactively
-provide a 1-line "restart prompt" that will pick up work where it left off.
-Use 1-line because the project itself is self-documenting. Most cases a simple
-statement like "resume" will be sufficient. If a custom workflow or execution
-plan is underway it may be necessary to trigger key words like "workflows" or 
-use specific skills like "implement" for mattpocock skills or something equivalent.
-Use your judgement to determine the correct restart prompt.
+The user is about to clear the context or start a new session. Proactively
+give a restart prompt that picks the work up where it left off. Keep it to one
+line — the project is self-documenting, so a plain `resume` is usually enough.
+
+### Skills the next session cannot start on its own
+
+A skill whose frontmatter carries `disable-model-invocation: true` is hidden
+from the model. The next session will not see it in its skill list, will not
+find it by name, and may report that it does not exist. Only the user can
+start it, by typing its slash command.
+
+So: if the resumed work runs through such a skill — directly, or through a
+workflow or plan that calls it — the restart prompt must carry that slash
+command explicitly. Do not rely on the next session to reach for it.
+
+Check the frontmatter of any skill you plan to name:
+
+```
+grep -l 'disable-model-invocation: true' <skills-dir>/*/SKILL.md
+```
+
+Plugin skills live under
+`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/skills/`.
+
+### Writing it
+
+Put the slash command first, with nothing in front of it — no `resume:`
+prefix, no lead-in sentence. It expands only when it leads the message.
+Context follows it.
+
+- Wrong: `resume: /mattpocock-skills:implement ticket 07b from ...`
+- Right: `/mattpocock-skills:implement ticket 07b from .scratch/delegate-redesign/issues/07b-setup-tui.md`
+
+Use the full `plugin:skill` form for a plugin skill. Name a skill only when
+the work needs it; otherwise the one-word default stands.
