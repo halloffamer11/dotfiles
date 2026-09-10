@@ -107,9 +107,19 @@ catalog plus the four missing astra lanes:
     astra-xhigh@codex   off  dominated by high of the same model
     astra-max@codex     on   not dominated
 
-Neither catalog gained a `published_as` line. Whether `claude-fable-5-1` should
-carry `["Fable 5.1"]` is catalog data, and which of the two catalogs is
-authoritative is still Orin's open decision.
+`stow/delegate/.config/delegate/lanes.json` gained the one entry the derived
+rule cannot reach — `"published_as": ["Fable 5.1"]` on `fable-xhigh@claude`
+(Orin, 2026-09-10). The live `~/.config/delegate/lanes.json` was left alone: it
+is a regular file that nothing propagates to, and which of the two catalogs is
+authoritative is still open, so writing to both would have answered that
+quietly. The stowed catalog now differs from the live one by this field as well
+as by `sol-high@codex`'s tier.
+
+With that entry the Terminal-Bench `Fable 5.1` row attaches to
+`claude-fable-5-1` and leaves the ignored line. `fable-xhigh@claude` still reads
+"no rows for this lane", and correctly: the one Fable row is at `max` and the
+lane runs `xhigh`. `Fable 5` stays ignored — it is the older model, nobody's
+lane.
 
 Tests: 22 new assertions in `tests/test_catalog.py` (validation, the collision,
 and resolution including the ambiguous and the unknown name) and 6 in

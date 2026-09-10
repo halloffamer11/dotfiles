@@ -47,7 +47,10 @@
         "out": 50
       },
       "tier": 4,
-      "basis": "frontier; protect: orchestrator meter"
+      "basis": "frontier; protect: orchestrator meter",
+      "published_as": [
+        "Fable 5.1"
+      ]
     },
     "astra-high@codex": {
       "harness": "codex",

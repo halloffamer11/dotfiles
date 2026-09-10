@@ -47,8 +47,9 @@ this file only.
   not exist; and `export DELEGATE_BALANCE=1` is still line 1 of `~/.zshrc.local`.
 - Decide which catalog is authoritative: `stow/delegate/.config/delegate/lanes.json`
   says `sol-high@codex` is tier 4, the live `~/.config/delegate/lanes.json` says
-  tier 3. The live file is a regular file, not a stow symlink, so neither drives the
-  other.
+  tier 3, and the stowed one alone carries `published_as: ["Fable 5.1"]` on the
+  fable lane (ticket 16). The live file is a regular file, not a stow symlink, so
+  neither drives the other.
 - Decide whether the `~/.claude/CLAUDE.md` Delegation section collapses to one line
   as ticket 09 asks, which would drop the `why-claude` and "a result is a claim"
   rules.
