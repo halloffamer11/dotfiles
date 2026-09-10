@@ -80,6 +80,31 @@ try:
 except Exception as e:
     record("show --json parses", False, str(e))
 
+# 1d. enabled field: absent defaults to true, explicit true and false are valid
+doc_absent = copy.deepcopy(lanes_sample)
+doc_absent["lanes"]["fable-xhigh@claude"].pop("enabled", None)
+val_absent = catalog.validate_lanes(doc_absent)
+record(
+    "enabled absent defaults true",
+    val_absent is not None and doc_absent["lanes"]["fable-xhigh@claude"].get("enabled", True) is True,
+)
+
+doc_true = copy.deepcopy(lanes_sample)
+doc_true["lanes"]["fable-xhigh@claude"]["enabled"] = True
+val_true = catalog.validate_lanes(doc_true)
+record(
+    "enabled true is valid",
+    val_true is not None and doc_true["lanes"]["fable-xhigh@claude"].get("enabled", True) is True,
+)
+
+doc_false = copy.deepcopy(lanes_sample)
+doc_false["lanes"]["fable-xhigh@claude"]["enabled"] = False
+val_false = catalog.validate_lanes(doc_false)
+record(
+    "enabled false is valid",
+    val_false is not None and doc_false["lanes"]["fable-xhigh@claude"].get("enabled", True) is False,
+)
+
 # 2. Rejections
 # 2.1 lane naming a missing meter
 doc = copy.deepcopy(lanes_sample)
@@ -272,6 +297,17 @@ record(
     bool(msg and "flash-high" in msg and "lane name must end with" in msg and "@agy" in msg),
     msg,
 )
+
+# 2.19 reject: enabled as non-boolean
+for bad_val, label in [("true", 'string "true"'), ("false", 'string "false"'), (1, "int 1"), (0, "int 0")]:
+    doc_bad = copy.deepcopy(lanes_sample)
+    doc_bad["lanes"]["fable-xhigh@claude"]["enabled"] = bad_val
+    msg = check_catalog_error(catalog.validate_lanes, doc_bad)
+    record(
+        f"reject: enabled as {label}",
+        bool(msg and "fable-xhigh@claude" in msg and "enabled" in msg and "boolean" in msg),
+        msg,
+    )
 
 # 3. Override merge
 with tempfile.TemporaryDirectory() as td:

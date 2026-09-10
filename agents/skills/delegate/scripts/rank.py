@@ -8,11 +8,12 @@ subscription meter gate thresholds, harness CLI availability, and pacing.
 The selection rule:
   1. Determine task tier requirement: need = routing.classTier[class].
   2. Filter eligible lanes:
+       enabled is True (defaults to True if absent),
        tier >= need,
        meter gate passed: meter r is None (unknown) or r >= routing.gate,
        harness CLI is present (found in PATH or specified via --harnesses).
      Vetoed lanes fail one or more conditions (reported in precedence order:
-     ceiling, gate, cli).
+     disabled, ceiling, gate, cli).
   3. Sort eligible lanes by:
        tier ascending,
        pace descending,
@@ -33,6 +34,7 @@ Reason vocabulary (exactly one per lane):
   - stolen by pace: <pace> >= <pick0 pace> + <margin>: steal rule moved pick
   - eligible: any other eligible lane
   - unknown meter, sorted last: eligible lane with unknown pace (overrides eligible)
+  - vetoed: disabled
   - vetoed: ceiling (tier <t> < need <n>)
   - vetoed: gate (r <pct> < <gate pct>)
   - vetoed: cli absent (<harness>)
@@ -108,7 +110,9 @@ def rank(cls, cat, meters, present, effort=None):
         lane_effort = lane_def.get("effort")
 
         veto_reason = None
-        if tier is not None and need is not None and tier < need:
+        if not lane_def.get("enabled", True):
+            veto_reason = "vetoed: disabled"
+        elif tier is not None and need is not None and tier < need:
             veto_reason = f"vetoed: ceiling (tier {tier} < need {need})"
         elif r is not None and r < gate:
             r_pct = f"{int(round(r * 100)):d}%"

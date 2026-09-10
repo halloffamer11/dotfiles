@@ -177,7 +177,7 @@ def validate_lanes(doc, source="lanes.json"):
 
     allowed_lane_fields = {
         "harness", "model", "effort", "meter", "meter_weight", "timeout",
-        "price", "tier", "basis", "note"
+        "price", "tier", "basis", "note", "enabled"
     }
     required_lane_fields = (
         "harness", "model", "effort", "meter", "meter_weight", "timeout",
@@ -264,6 +264,13 @@ def validate_lanes(doc, source="lanes.json"):
 
         if "note" in lane and not isinstance(lane["note"], str):
             raise CatalogError(f"{source}: lane '{lane_name}': note must be a string")
+
+        if "enabled" in lane:
+            en = lane["enabled"]
+            if type(en) is not bool:
+                raise CatalogError(
+                    f"{source}: lane '{lane_name}': enabled must be a boolean, got {en!r}"
+                )
 
     return doc
 

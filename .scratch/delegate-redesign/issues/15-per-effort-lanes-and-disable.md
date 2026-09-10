@@ -75,13 +75,24 @@ sensitive.
 
 **Status:** open, raised by Orin 2026-09-09: "we should have each level. so luna-low, luna-med, luna-high would all be lanes. add an option to disable or turn off certain lanes."
 
-- [ ] `enabled` is a validated boolean on every lane, defaulting to true when absent so existing catalogs keep working
-- [ ] `rank.py` reports a disabled lane as ineligible with reason `disabled`, and never picks one
+- [x] `enabled` is a validated boolean on every lane, defaulting to true when absent so existing catalogs keep working
+- [x] `rank.py` reports a disabled lane as ineligible with reason `disabled`, and never picks one
 - [ ] The wizard toggles `enabled` on the cursor row and shows disabled lanes dimmed, not hidden
 - [ ] `discover.py --efforts <model>` prints a ready-to-paste lane stanza per effort the harness reports
 - [ ] A generated `ultra` stanza carries `enabled: false`, with the reason in its `basis`
 - [ ] `discover.py --efforts` emits one shared `price` block across a model's efforts, not a prompt per lane
-- [ ] `tests/test_rank.py` covers a disabled lane that would otherwise be the pick
+- [x] `tests/test_rank.py` covers a disabled lane that would otherwise be the pick
 - [x] `effort.py extract` completes one real run end to end, so the pipeline is proven, not half-proven
 - [ ] A pre-screen runs before the tier screens, proposes `enabled` per lane from `effort.py` output, and sets the starting mark state rather than writing the catalog
 - [ ] Orin enumerates the codex efforts he wants and switches off the rest in one wizard run
+
+## Schema half landed 2026-09-10
+
+`enabled` is optional and defaults to true, so every existing catalog — the
+samples and the live one — validates untouched. It is checked **first** in
+`rank.py`'s veto chain, ahead of the tier ceiling: a lane switched off is out of
+play, not a lane that lost a comparison, so its reason must not depend on which
+class asked. The reason reads `vetoed: disabled`.
+
+Still open, and all of it depends on the wizard and on `discover.py`:
+`--efforts` lane generation, the wizard toggle and dimming, and the pre-screen.

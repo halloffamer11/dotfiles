@@ -456,4 +456,65 @@ with tempfile.TemporaryDirectory() as td:
     all_keys_ok = all(set(r.keys()) == required_row_keys for r in data12["rows"])
     record("case 12 CLI --json output schema", res12.returncode == 0 and top_keys_ok and pick_matches and all_keys_ok)
 
+    # -------------------------------------------------------------
+    # 13. Disabled lane: enabled: false on the lane that would otherwise be the pick
+    cat13 = copy.deepcopy(cat)
+    cat13["lanes"]["grok46-high@grok"]["enabled"] = False
+    # Also disable luna-low@codex (tier 1 < need 2) to verify disabled check is first in veto chain
+    cat13["lanes"]["luna-low@codex"]["enabled"] = False
+
+    rows13 = rank.rank("impl", cat13, doc1, ALL_HARNESSES)
+
+    # Pick moves to next lane (terra-high@codex instead of grok46-high@grok)
+    pick13_ok = (
+        rows13[0]["lane"] == "terra-high@codex" and
+        rows13[0]["pick"] is True and
+        rows13[0]["reason"] == "pick"
+    )
+
+    # Disabled lane is still present in rows, marked ineligible with reason 'vetoed: disabled'
+    grok13 = next((r for r in rows13 if r["lane"] == "grok46-high@grok"), None)
+    grok13_ok = (
+        grok13 is not None and
+        grok13["eligible"] is False and
+        grok13["pick"] is False and
+        grok13["reason"] == "vetoed: disabled"
+    )
+
+    # Disabled check precedes ceiling veto: luna-low@codex would fail tier ceiling (1 < 2),
+    # but gets "vetoed: disabled" because disabled is first in the veto chain
+    luna13 = next((r for r in rows13 if r["lane"] == "luna-low@codex"), None)
+    luna13_ok = (
+        luna13 is not None and
+        luna13["eligible"] is False and
+        luna13["pick"] is False and
+        luna13["reason"] == "vetoed: disabled"
+    )
+
+    record("case 13 rank() disabled lane moves pick", pick13_ok and grok13_ok and luna13_ok)
+
+    # CLI test with disabled lane
+    cfg13_dir = os.path.join(td, "cfg13")
+    os.makedirs(cfg13_dir, exist_ok=True)
+    lanes13_doc = catalog.load_json(os.path.join(cfg_dir, "lanes.json"))
+    lanes13_doc["lanes"]["grok46-high@grok"]["enabled"] = False
+    lanes13_doc["lanes"]["luna-low@codex"]["enabled"] = False
+    catalog.write_json(os.path.join(cfg13_dir, "lanes.json"), lanes13_doc)
+    shutil.copy(os.path.join(cfg_dir, "routing.json"), cfg13_dir)
+
+    res13 = subprocess.run(
+        [sys.executable, RANK_PY, "impl", "--config-dir", cfg13_dir, "--meters", meters_path, "--harnesses", ALL_HARNESSES_ARG],
+        capture_output=True,
+        text=True,
+    )
+    lines13 = res13.stdout.strip().splitlines()
+    cli13_ok = (
+        res13.returncode == 0 and
+        "1. terra-high@codex" in lines13[1] and
+        lines13[1].endswith("pick") and
+        any("grok46-high@grok" in line and "vetoed: disabled" in line for line in lines13) and
+        any("luna-low@codex" in line and "vetoed: disabled" in line for line in lines13)
+    )
+    record("case 13 CLI disabled lane moves pick", cli13_ok)
+
 sys.exit(1 if fails else 0)
