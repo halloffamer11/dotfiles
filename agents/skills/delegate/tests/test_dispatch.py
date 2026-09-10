@@ -15,6 +15,22 @@ DELEGATE_DIR = os.path.abspath(os.path.join(HERE, "..", "scripts"))
 SAMPLES_DIR = os.path.abspath(os.path.join(HERE, "..", "assets", "samples"))
 DELEGATE_PY = os.path.join(DELEGATE_DIR, "delegate.py")
 FAKE_RELAY_SRC = os.path.join(HERE, "fake-ads", "relay.mjs")
+ADS_SH = os.path.join(DELEGATE_DIR, "ads.sh")
+
+
+def pinned_ads_commit():
+    """The commit ads.sh pins, read from ads.sh itself.
+
+    The fake git below must answer with this, or `ads.sh check` fails every
+    dispatch test. Hardcoding it here meant the suite broke on each repin and
+    blamed the dispatcher; read it instead so the test follows the pin.
+    """
+    with open(ADS_SH) as f:
+        for line in f:
+            if line.startswith("ADS_COMMIT="):
+                return line.split("=", 1)[1].strip()
+    raise AssertionError(f"no ADS_COMMIT= line in {ADS_SH}")
+
 
 fails = 0
 
@@ -51,13 +67,13 @@ for arg in "$@"; do
     if [ -n "${ADS_FAKE_GIT_SHA:-}" ]; then
       echo "$ADS_FAKE_GIT_SHA"
     else
-      echo "b781ee2e23089630e2fbee1cfd6174afe4edeb76"
+      echo "%s"
     fi
     exit 0
   fi
 done
 exec /usr/bin/git "$@"
-''')
+''' % pinned_ads_commit())
     os.chmod(git_script, 0o755)
 
     for h in ("claude", "codex", "agy", "grok"):
