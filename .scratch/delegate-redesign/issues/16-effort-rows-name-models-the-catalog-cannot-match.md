@@ -124,5 +124,26 @@ lane.
 Tests: 22 new assertions in `tests/test_catalog.py` (validation, the collision,
 and resolution including the ambiguous and the unknown name) and 6 in
 `tests/test_setup_tui.py`, the latter against
-`tests/fixtures/tbench-accepted.json`, a copy of the accepted extraction. Suite
-334 assertions, 0 failures.
+`tests/fixtures/tbench-accepted.json`, a copy of the accepted extraction.
+
+## Verified in the wizard 2026-09-10
+
+Driving the real curses wizard on a pty — throwaway config dir seeded from the
+live catalog plus the four missing astra lanes, fed `_data/tbench-accepted.json`
+— exits 0 and writes a catalog that differs from the seed by one line:
+`"enabled": false` on `astra-xhigh@codex`. So a display name in a packet now
+reaches a written catalog decision. `published_as` survives the round trip.
+
+Two defects were found by running it, both fixed on this branch:
+
+- `--effort-rows` was read only in the TUI branch, so under `--plain` or any
+  pipe it was accepted and ignored in silence (`4d08244`).
+- At 80 columns the `why` column was not truncated but dropped entirely, so the
+  pre-screen switched a lane off and gave no reason at the width the file
+  targets (`b530b89`, which also faceted the benchmark page: fourteen series
+  shared six colours and the astra pair plotted 5px apart with overprinted
+  labels).
+
+Suite 347 assertions, 0 failures. Still outstanding, and Orin's: the four astra
+lanes exist in no catalog, so a live run cannot reproduce the finding until they
+are added.

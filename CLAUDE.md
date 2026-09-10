@@ -16,7 +16,7 @@ The delegate redesign is the only live thread. Spec
 "Landed" note; skill context `agents/skills/delegate/CLAUDE.md`.
 
 **Branch `delegate-lane-catalog` is unmerged**, 13 commits ahead of `main` and 2
-behind, suite green at 334 assertions. Tickets 01-16 are implemented. `main` still
+behind, suite green at 347 assertions. Tickets 01-16 are implemented. `main` still
 has none of it, and `~/.claude/skills/delegate` symlinks to the **main** checkout —
 so the installed skill has no `discover.py` and no pre-screen, and the four
 `/delegate-*` wrappers cannot be exercised until this merges. Merging conflicts on
