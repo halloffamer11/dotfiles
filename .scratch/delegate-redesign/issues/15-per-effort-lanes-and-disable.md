@@ -154,3 +154,26 @@ switching off whatever it has no data for.
 
 One box left, and only Orin can close it: enumerate the codex efforts he wants and
 switch off the rest in one wizard run.
+
+## A sequential chunk sweep does not fit one agy window — measured 2026-09-10
+
+The first live Artificial Analysis extractions, run right after packet chunking
+landed, both **failed at chunk 6 of 7** with the lane `blocked`. Not the weekly
+quota — that had just refilled to 95% — but the **5-hour window**, which hit 0%.
+
+So the binding constraint on `effort.py` is the 5h meter, and a 656KB page is seven
+sequential dispatches at roughly 100-640s each. One page cannot finish inside one
+agy 5h window, and a five-model sweep is out of the question on one lane.
+
+Three ways out, none of them tried yet:
+
+- Dispatch the chunks **concurrently** rather than in sequence. This is the open
+  question the chunking worker raised, and it does not fix the quota arithmetic by
+  itself — it just stops the wall clock being the problem.
+- Spread the chunks **across lanes**, so one page does not drain one meter.
+- Raise the per-chunk budget. agy's cap is ~128KB of prompt against a 100KB default
+  and ~3.5KB of measured overhead; 120KB would cut seven chunks to six, which is a
+  rounding error, not a fix.
+
+Terminal-Bench (29KB, one chunk, 18 rows accepted) and SWE Refactor Bench (15KB)
+both fit in a single dispatch, which is why this never showed up before.

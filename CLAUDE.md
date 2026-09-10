@@ -10,20 +10,86 @@ Machine configuration and agent tooling managed as one Git repository.
 
 ## Active work
 
-- Delegate redesign **merged to `main`** 2026-09-09; the `delegate-rebuild` branch is deleted and tag `delegate-v1-last` still holds the removed old path. Tickets 01-10 and 14 landed. **11, 12, 13 and 15 landed on `delegate-lane-catalog` 2026-09-10** — every implementable box is ticked and three remain, all needing Orin at a keyboard: type each of the four wrappers once with a plain-language constraint (11), enumerate the codex efforts he wants and switch off the rest in one wizard run (15), and one in flight at the time of writing (the start screen's no-lane notice, 13). Spec `docs/superpowers/specs/2026-09-08-delegate-redesign.md`; §9 acceptance is five of eight signed off, with the walk recorded in ticket 09. Skill context: `agents/skills/delegate/CLAUDE.md`.
-- `effort-data-tooling` **merged to `main`** 2026-09-10: `agents/skills/delegate/scripts/effort.py`, a `pack`/`extract`/`check` pipeline that pulls per-effort score-and-cost off benchmark pages for ticket 15. All three stages are proven — one `extract` run on `flash-high@agy` returned 26 rows and `check` accepted 26, rejected 0. That output is kept as evidence in `.scratch/delegate-redesign/_data/`. Approved sources and their cautions are in `agents/skills/delegate/assets/sources.json`; the provenance research behind that choice is `.scratch/delegate-redesign/research/2026-09-09-effort-data-sources.md`. Coverage is the gap now: swerb reaches only `gpt-5.6-sol` and `gpt-5.6-luna`, and Artificial Analysis is the widest source. **The "all seven catalog models" claim applies to AA's `/models/releases/` pages that `effort.py` scrapes, not to the free API `bench.py` uses** — measured 2026-09-10, that endpoint reaches six of seven and has no Gemini 3.8 at all.
-- Ticket 14 **closed out 2026-09-10**: `ADS_COMMIT` now pins `integration/read-only-fixes` @ `1ff8bd6`, which carries both read-only fixes, so grok *and* agy read-only work at runtime and `--write` is no longer a workaround. Upstream PRs #119 and #120 stay independent; retire the integration branch and repoint `ADS_REPO` at `amElnagdy` when they land. Two follow-ups recorded in the ticket: agy's own docs still describe plan mode, and `claude-delegate`/`commandcode-delegate` still push `--permission-mode plan` untested. Note `ads.sh install` detaches the shared clone at `$ADS_COMMIT` and will move the tree under a working agent.
-- `delegate-lane-catalog` **not yet merged** as of 2026-09-10: `trust` is removed from the design entirely (decision q1a) — schema, validators, ranking, wizard, TUI, both catalogs, tests and spec. Ranking now sorts `(tier asc, pace desc, lane name asc)`; the name term is an arbitrary deterministic tie-break, and a steal can no longer happen inside a tier, only across tiers. Decisions and consequences are recorded in `.scratch/delegate-redesign/issues/01-…` and `02-…`; the surface map is `.scratch/delegate-redesign/trust-removal-blast-radius.md`. Setup was verified working on this branch (fresh, revise, and with live Epoch benchmarks). **The old warning that this branch's validator rejects the live `~/.config/delegate/lanes.json` is out of date** — measured 2026-09-10, that file carries no `trust` and `catalog.py check` accepts it.
-- **Landed on `delegate-lane-catalog` 2026-09-10**, six commits on top of the trust removal, whole suite green at 291 assertions:
-  - `scripts/discover.py` (ticket 13) reports what each harness offers with its lane or `none`, plus drift in both directions. A report, never a gate: exit 0 on anything, including a catalog that will not validate. Only codex models with `visibility: "list"` are shown. Tests run off output captured from the three live CLIs, in `tests/fixtures/discover/`.
-  - `enabled` on a lane (ticket 15), optional and defaulting to true, checked **first** in `rank.py`'s veto chain with reason `vetoed: disabled`.
-  - The four wrappers read prose, not flags (ticket 11), resolve through `rank.py --harnesses <h> --json`, and pass `--class` — the tool-call leash is now chosen from the class. The leash sentence lives in `assets/preamble-leash.md`, is present for `scout`/`mechanical`/`review` and absent for `impl`/`hard-impl`, with `--no-leash` per dispatch and the effective value in `dispatch.json`. `build_prompt` raises if the splice anchor in `preamble.md` is reworded, rather than quietly sending an unleashed worker.
-  - The wizard explains itself (ticket 12): a start screen, the tier definition recalled on every tier screen, a tier-to-lanes map built from this session's assignments, and margin/gate legends on the routing **and** confirm screens. `scripts/bench_page.py` renders the gathered data as a self-contained local HTML page read beside the terminal; `o` opens it.
-  - `discover.py --efforts <model>` generates one lane stanza per effort (ticket 15), with one shared `price` block and the `ultra` stanza carrying `enabled: false`. `EFFORTS` had to grow to `low, medium, high, xhigh, max, ultra` first, or every generated `max`/`ultra` stanza would have been rejected on paste. **Side effect: `delegate.py --effort` now accepts `max` and `ultra` on harnesses that do not offer them.** Policing effort per harness is a separate decision, deliberately not taken.
-  - `x` switches a lane off in the wizard, and a pre-screen proposes which to carry (ticket 15). Off writes `enabled: false`; on writes no key, so the round trip stays byte-identical. The rule: `ultra` off by construction, a recorded `enabled` left alone, a dominated effort off, everything else on — **including a lane no source scores**. Two defects were caught in review, both of which switched off a lane in daily use: a `none` row (which every published sweep carries, and no lane can select) dominated `luna-low@codex`, and an explicit `enabled` was overwritten, quietly handing a switched-off lane back to the ranker.
-- **Open for Orin, found 2026-09-10:** `stow/delegate/.config/delegate/lanes.json` says `sol-high@codex` is tier 4; the live `~/.config/delegate/lanes.json`, written 13:12 that day, says tier 3. The live file is a regular file (mode 600), not a stow symlink, so the repo copy is not driving it and the two will keep drifting. A tier is Orin's judgement, so neither was changed. Decide which is authoritative.
-- Benchmark evidence for the tier pass, as of 2026-09-10: the AA key is in place at `~/.config/delegate/aa-key` (mode 600, outside the repo, guarded by `.gitignore`; never stow it — this repo is public). Epoch reaches six of seven lanes and AA reaches six of seven, but not the same six. `flash-high@agy` (`gemini-3.8-flash-high`) has no rows in **either** source, so its tier is a judgement from its `basis` ledger note, not from numbers. AA scores for `gpt-5.6-sol`, `gpt-5.6-terra` and `grok-4.6` were measured at low/medium/medium against lanes that run high; the report prints that caveat per model.
-- **Decided 2026-09-10:** `lanes.json` and `routing.json` both ship in this public repo via `stow/delegate/`. Orin ruled the subscription costs and vendor notes non-sensitive, so no split to the forge and no constraint on what the ticket-15 pre-screen may write. Do not re-raise it.
-- Waiting on Orin: drop `export DELEGATE_BALANCE=1` from `~/.zshrc.local` (spec §9.7); finish `astra-high@codex` in `~/.config/delegate/lanes.json` — as of 2026-09-10 its `price` is still four nulls and the `10 / 1 / 12.5 / 50` figures sourced from OpenAI's pricing page have not been pasted in; its `meter_weight` is `40` but its own `note` marks that a placeholder a session set, not a measurement (`trust` was removed from the schema on 2026-09-10, so that part of this item is gone); decide whether the `~/.claude/CLAUDE.md` Delegation section collapses to one line as ticket 09 asks, which would drop the `why-claude` and "result is a claim" rules.
+The delegate redesign is the only live thread. Spec
+`docs/superpowers/specs/2026-09-08-delegate-redesign.md`; tickets in
+`.scratch/delegate-redesign/issues/`, each carrying its own decisions and a
+"Landed" note; skill context `agents/skills/delegate/CLAUDE.md`.
 
-Preserve unrelated working-tree changes. Validate the smallest affected surface before committing.
+**Branch `delegate-lane-catalog` is unmerged**, 13 commits ahead of `main` and 2
+behind, suite green at 306 assertions. Tickets 01-15 are implemented. `main` still
+has none of it, and `~/.claude/skills/delegate` symlinks to the **main** checkout —
+so the installed skill has no `discover.py` and no pre-screen, and the four
+`/delegate-*` wrappers cannot be exercised until this merges. Merging conflicts on
+this file only.
+
+**Open, in priority order:**
+
+1. **Ticket 16** — `effort.py` returns published display names (`GPT-6 Astra`) and
+   the catalog keys on slugs (`gpt-6-astra`), so the pre-screen sees no data at all.
+   Do this before any tier pass: measured, it hides that `astra-xhigh` is dominated.
+   `bench.py`'s `model_matches_slug` already solves the same problem.
+2. **Ticket 14** — two real gaps: a cancelled-at-the-gate run returns `partial`
+   rather than `blocked` naming the gate, and the cancelled-tool-call regression
+   test through `map_result` does not exist. The agy box is satisfied by the ADS pin.
+3. **Chunk dispatch does not fit one agy window.** `effort.py` splits a large packet
+   correctly, but dispatches the chunks in sequence: both live Artificial Analysis
+   runs on 2026-09-10 failed at chunk 6 of 7 when the agy **5-hour** meter hit 0%
+   (the weekly had just refilled to 95% — the 5h window is the binding constraint,
+   not the weekly). Options and measurements are in ticket 15's last section: run the
+   chunks concurrently, spread them across lanes, or both. Raising the budget is not
+   a fix.
+
+**Waiting on Orin** (nothing else blocks on these):
+
+- Run the wizard once to close tickets 06, 07, 07b and 15's last box:
+  `python3 <this worktree>/agents/skills/delegate/scripts/setup.py --effort-rows <effort.py check accepted.json>`
+- Type each of the four `/delegate-*` wrappers once with a plain-language
+  constraint (ticket 11) — needs the merge first.
+- Two one-liners in his own files, outside this repo (ticket 09):
+  `~/.claude/hooks/delegate-gate.py` names `{SKILL_DIR}/delegate.py`, which moved to
+  `scripts/delegate.py`, so the hook advises every session to run a path that does
+  not exist; and `export DELEGATE_BALANCE=1` is still line 1 of `~/.zshrc.local`.
+- Decide which catalog is authoritative: `stow/delegate/.config/delegate/lanes.json`
+  says `sol-high@codex` is tier 4, the live `~/.config/delegate/lanes.json` says
+  tier 3. The live file is a regular file, not a stow symlink, so neither drives the
+  other.
+- Decide whether the `~/.claude/CLAUDE.md` Delegation section collapses to one line
+  as ticket 09 asks, which would drop the `why-claude` and "a result is a claim"
+  rules.
+- Walk the eight spec §9 acceptance items and sign each off. §9.2 is signed; §9.6 is
+  down to the hook above; §9.7 is the `.zshrc.local` line.
+
+## Benchmark data
+
+`agents/skills/delegate/scripts/effort.py` is a `pack`/`extract`/`check` pipeline;
+`check` is the trust boundary and rejects any number not on the page. Approved
+sources and their cautions: `agents/skills/delegate/assets/sources.json`; the
+provenance research behind that choice:
+`.scratch/delegate-redesign/research/2026-09-09-effort-data-sources.md`. Accepted
+rows and their packets are kept as evidence in `.scratch/delegate-redesign/_data/`.
+
+Coverage is uneven and the two sources are not interchangeable: swerb reaches only
+`gpt-5.6-sol` and `gpt-5.6-luna` but publishes slugs; Artificial Analysis and
+Terminal-Bench are wider but publish display names (ticket 16) and their `cost_usd`
+is a whole-run figure, not swerb's per-task one, so never compare costs across
+sources. The AA key is at `~/.config/delegate/aa-key`, mode 600, outside the repo and
+in `.gitignore` — never stow it; this repo is public.
+
+`flash-high@agy` has no rows in any approved source, so its tier is a judgement from
+its `basis` note rather than from numbers. The AA figures for `gpt-5.6-sol`,
+`gpt-5.6-terra` and `grok-4.6` were measured at low/medium/medium against lanes that
+run high; the report prints that caveat per model.
+
+## Settled, do not re-raise
+
+- `lanes.json` and `routing.json` both ship in this public repo via `stow/delegate/`.
+  Orin ruled the subscription costs and vendor notes non-sensitive, so no split to a
+  forge and no constraint on what the pre-screen may write (2026-09-10).
+- `trust` is gone from the design entirely. Ranking sorts
+  `(tier asc, pace desc, lane name asc)`; the name term is an arbitrary deterministic
+  tie-break, so a steal only ever crosses tiers (tickets 01 and 02).
+- `ultra` lanes are generated disabled: no source scores them, and automatic task
+  delegation contradicts the worker preamble (ticket 15).
+
+Preserve unrelated working-tree changes. Validate the smallest affected surface
+before committing.
