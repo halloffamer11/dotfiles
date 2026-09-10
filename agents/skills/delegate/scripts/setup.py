@@ -9,6 +9,7 @@ import sys
 import tempfile
 
 import bench
+import bench_page
 import catalog
 import setup_tui
 from catalog import CatalogError, CLASSES, HARNESSES, load_json, validate_lanes, validate_routing, write_json
@@ -206,6 +207,21 @@ def ask_routing(routing_doc):
     routing_doc["gate"] = ask_fraction("gate", routing_doc["gate"])
 
 
+def load_effort_rows(path):
+    if not path:
+        return None, ""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except OSError as e:
+        return None, f"effort-rows: {e}"
+    except json.JSONDecodeError as e:
+        return None, f"effort-rows: invalid JSON: {e}"
+    if not isinstance(data, list):
+        return None, "effort-rows: expected a JSON list"
+    return data, ""
+
+
 def confirm_and_write(lanes_doc, routing_doc, lanes_path, routing_path):
     print(lanes_path)
     print(routing_path)
@@ -234,6 +250,7 @@ def main(argv=None):
     bench_group.add_argument("--no-bench", action="store_true", help="skip benchmark display")
     parser.add_argument("--epoch-csv", default=None, help="local Epoch CSV for bench.py")
     parser.add_argument("--aa-json", default=None, help="local Artificial Analysis JSON for bench.py")
+    parser.add_argument("--effort-rows", default=None, help="effort.py check accepted.json for the benchmark page")
     args = parser.parse_args(argv)
 
     try:
@@ -261,9 +278,21 @@ def main(argv=None):
                     )
                 except bench.BenchError as e:
                     initial_message = f"bench: {e}"
+            effort_rows, effort_message = load_effort_rows(args.effort_rows)
+            if effort_message:
+                initial_message = f"{initial_message}; {effort_message}" if initial_message else effort_message
+            fd, page_path = tempfile.mkstemp(prefix="delegate-bench-", suffix=".html")
+            os.close(fd)
+            try:
+                bench_page.write(page_path, bench_data, lanes_doc, effort_rows)
+            except OSError as e:
+                page_path = None
+                page_message = f"benchmark page: {e}"
+                initial_message = f"{initial_message}; {page_message}" if initial_message else page_message
             wizard = setup_tui.Wizard(
                 lanes_doc, routing_doc, bench_data, discovered,
                 lanes_path, routing_path, initial_message,
+                bench_page_path=page_path,
             )
             result = setup_tui.run_curses(wizard)
             if result is None:

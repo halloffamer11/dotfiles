@@ -48,6 +48,7 @@ def wizard(bench_data=True, message=""):
 
 def start(w):
     w.handle("enter")
+    w.handle("enter")
 
 
 def move_to(w, lane):
@@ -201,6 +202,89 @@ try:
 except Exception as e:
     record("9 absent benchmarks render em dashes", False, repr(e))
 
+try:
+    w = wizard()
+    v = w.view()
+    body = "\n".join(v.get("body") or [])
+    record("11 start screen names both files",
+           v["screen"] == "start" and v["columns"] == [] and v["rows"] == []
+           and w.lanes_path in body and w.routing_path in body
+           and "Nothing is written until the confirm screen" in body
+           and "q leaves without writing" in body)
+    w.handle("q")
+    record("11b q on start quits without writing",
+           w.screen == "quit" and w.result() is None)
+except Exception as e:
+    record("11 start screen names both files", False, repr(e))
+
+try:
+    w = wizard()
+    w.handle("other")
+    record("11c any unmapped key leaves start", w.screen == "discovery")
+    w2 = wizard()
+    w2.handle("o")
+    record("11d o on start does not advance", w2.screen == "start")
+except Exception as e:
+    record("11c any unmapped key leaves start", False, repr(e))
+
+try:
+    w = wizard()
+    start(w)
+    # the tier definition renders as the last legend line, directly above the
+    # key hints, so the two together are the footer block the human reads
+    footer = w.view()["footer"] + "  " + "  ".join(w.view().get("legend") or [])
+    record("12 tier footer carries the tier one-liner",
+           w.screen == "tier"
+           and "ceiling" in footer
+           and "o: open benchmark page" in footer)
+    before_cursor = w.cursor
+    w.handle("x")
+    w.handle("d")
+    record("12b x and d are unbound on tier",
+           w.screen == "tier" and w.cursor == before_cursor and w.tier == 4)
+except Exception as e:
+    record("12 tier footer carries the tier one-liner", False, repr(e))
+
+try:
+    w = wizard()
+    start(w)
+    incoming_sol = LANES["lanes"]["sol-high@codex"]["tier"]
+    move_to(w, "sol-high@codex")
+    w.handle("space")
+    w.handle("enter")
+    while w.screen == "tier":
+        w.handle("enter")
+    legend = w.view().get("legend") or []
+    t4 = next(line for line in legend if line.startswith("tier 4:"))
+    t_incoming = next(line for line in legend if line.startswith(f"tier {incoming_sol}:"))
+    prefixes = [line.split(":", 1)[0] for line in legend if line.startswith("tier ")]
+    record("13 routing legend maps this session's assignments",
+           w.screen == "routing"
+           and incoming_sol != 4
+           and "sol-high@codex" in t4
+           and "sol-high@codex" not in t_incoming
+           and prefixes[:4] == ["tier 1", "tier 2", "tier 3", "tier 4"]
+           and any("margin:" in line for line in legend)
+           and any("gate:" in line for line in legend)
+           and any("0.2" in line for line in legend)
+           and any("10%" in line for line in legend))
+    w.handle("enter")
+    confirm_legend = w.view().get("legend") or []
+    record("14 confirm legend explains classTier, margin and gate",
+           w.screen == "confirm"
+           and any("classTier:" in line for line in confirm_legend)
+           and any("margin:" in line for line in confirm_legend)
+           and any("gate:" in line for line in confirm_legend)
+           and any("0.2" in line for line in confirm_legend)
+           and any("10%" in line for line in confirm_legend))
+    w.handle("y")
+    lanes, routing = w.result()
+    record("15 key sequence write path is unchanged",
+           lanes["lanes"]["sol-high@codex"]["tier"] == 4
+           and routing == ROUTING)
+except Exception as e:
+    record("13 routing legend maps this session's assignments", False, repr(e))
+
 
 def pty_smoke():
     with tempfile.TemporaryDirectory() as td:
@@ -229,7 +313,7 @@ def pty_smoke():
         deadline = time.monotonic() + 30
         try:
             os.set_blocking(master, False)
-            for key in [b"\n"] * 6 + [b"y"]:
+            for key in [b"\n"] * 7 + [b"y"]:
                 try:
                     while chunk := os.read(master, 65536):
                         output.extend(chunk)

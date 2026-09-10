@@ -5,12 +5,21 @@ import copy
 from bench import EPOCH_BENCHMARKS
 from catalog import CLASSES, HARNESSES
 
+# These render as single lines in an 80-column terminal, where anything past
+# column 79 is clipped. Keep each one under that; a legend cut mid-sentence
+# explains nothing.
+TIER_ONELINER = "Tier: capability 1-4, a ceiling — needing 3 means tier 3 or 4, never lower."
+MARGIN_LEGEND = "margin: pace a lower lane must beat the pick by to steal the job (0.2 = by 0.2)"
+GATE_LEGEND = "gate: meter-remaining floor; a lane below it is skipped (0.1 = under 10%)"
+CLASSTIER_LEGEND = "classTier: a class needing N uses a lane of tier N or higher, never lower."
+
 
 class Wizard:
     """Pure setup state.  Rendering and terminal input live in run_curses."""
 
     def __init__(self, lanes_doc, routing_doc, bench, discovered,
-                 lanes_path, routing_path, initial_message=""):
+                 lanes_path, routing_path, initial_message="",
+                 bench_page_path=None):
         self._original_lanes = copy.deepcopy(lanes_doc)
         self._original_routing = copy.deepcopy(routing_doc)
         self.lanes_doc = copy.deepcopy(lanes_doc)
@@ -19,7 +28,8 @@ class Wizard:
         self.discovered = set(discovered)
         self.lanes_path = lanes_path
         self.routing_path = routing_path
-        self.screen = "discovery"
+        self.bench_page_path = bench_page_path
+        self.screen = "start"
         self.tier = None
         self.cursor = 0
         self.message = initial_message or ("benchmark data unavailable" if bench is None else "")
@@ -74,6 +84,11 @@ class Wizard:
         if key == "q" and self.screen != "confirm":
             self.screen = "quit"
             self._result = None
+            return
+        if key == "o" and self.screen in ("start", "tier"):
+            return
+        if self.screen == "start":
+            self.screen = "discovery"
             return
         if self.screen == "discovery":
             self._enter_tier(4)
@@ -174,16 +189,58 @@ class Wizard:
             values.append(aa["mean_s"] if aa else "—")
         return values
 
+    def _frame(self, screen, title, *, tier=None, columns=None, rows=None,
+               footer="", body=None, legend=None):
+        return {
+            "screen": screen, "title": title, "tier": tier,
+            "columns": columns or [], "rows": rows or [],
+            "footer": footer, "message": self.message,
+            "body": body or [], "legend": legend or [],
+        }
+
+    def _tier_map_lines(self):
+        by_tier = {tier: [] for tier in range(1, 5)}
+        for name, tier in self._assigned.items():
+            by_tier[tier].append(name)
+        lines = []
+        for tier in range(1, 5):
+            names = ", ".join(sorted(by_tier[tier])) or "(none)"
+            lines.append(f"tier {tier}: {names}")
+        return lines
+
     def view(self):
+        if self.screen == "start":
+            page = self.bench_page_path or "(not written)"
+            body = [
+                "You are assigning each lane a tier, from the best tier down,",
+                "with benchmark numbers beside each row.",
+                "Nothing is written until the confirm screen.",
+                "q leaves without writing.",
+                f"Will write {self.lanes_path}",
+                f"Will write {self.routing_path}",
+                f"Benchmark page: {page}",
+                "",
+                "Tier is capability, 1 to 4, and it is a ceiling:",
+                "a class needing tier 3 can use a tier 3 or 4 lane and nothing lower.",
+                "It is not computed; it is your judgement.",
+                "Lanes alike on tier are equivalent, and ranking separates them by pace.",
+            ]
+            footer = ("any key: continue  o: open benchmark page  q: quit"
+                      if self.bench_page_path else "any key: continue  q: quit")
+            return self._frame(
+                "start", "Delegate setup",
+                footer=footer,
+                body=body,
+            )
         if self.screen == "discovery":
-            return {
-                "screen": "discovery", "title": "Delegate setup: discovery", "tier": None,
-                "columns": ["harness", "status"],
-                "rows": [{"cells": [name, "found" if name in self.discovered else "missing"],
-                          "marked": False, "dimmed": name not in self.discovered,
-                          "cursor": False, "tag": ""} for name in HARNESSES],
-                "footer": "any key: continue  q: quit", "message": self.message,
-            }
+            return self._frame(
+                "discovery", "Delegate setup: discovery",
+                columns=["harness", "status"],
+                rows=[{"cells": [name, "found" if name in self.discovered else "missing"],
+                       "marked": False, "dimmed": name not in self.discovered,
+                       "cursor": False, "tag": ""} for name in HARNESSES],
+                footer="any key: continue  q: quit",
+            )
         if self.screen == "tier":
             epoch_names = (self.bench or {}).get("epoch_benchmarks", list(EPOCH_BENCHMARKS))
             columns = ["mark", "lane", "model", "effort", *epoch_names, "Epoch mean rank"]
@@ -202,20 +259,31 @@ class Wizard:
                     "cursor": not is_dim and index == self.cursor,
                     "tag": f"tier {self._assigned[name]}" if is_dim else "",
                 })
-            return {"screen": "tier", "title": f"Assign tier {self.tier}", "tier": self.tier,
-                    "columns": columns, "rows": rows,
-                    "footer": "↑/↓ or j/k: move  space: mark  enter: next  b: back  q: quit",
-                    "message": self.message}
+            return self._frame(
+                "tier", f"Assign tier {self.tier}", tier=self.tier,
+                columns=columns, rows=rows,
+                footer=(
+                    "↑/↓ or j/k: move  space: mark  enter: next  b: back  "
+                    "o: open benchmark page  q: quit"
+                ),
+                # The tier definition belongs where the decision is made, but it
+                # and the key hints together overflow an 80-column footer, and a
+                # truncated footer loses the keys. Last legend line renders
+                # directly above the footer, so it reads as a second footer line.
+                legend=[TIER_ONELINER],
+            )
         if self.screen == "routing":
             values = [(f"classTier.{name}", self.routing_doc["classTier"][name]) for name in CLASSES]
             values.extend([("margin", self.routing_doc["margin"]), ("gate", self.routing_doc["gate"])])
             rows = [{"cells": [name, str(value)], "marked": False, "dimmed": False,
                      "cursor": i == self.cursor, "tag": ""}
                     for i, (name, value) in enumerate(values)]
-            return {"screen": "routing", "title": "Routing", "tier": None,
-                    "columns": ["setting", "value"], "rows": rows,
-                    "footer": "↑/↓ or j/k: move  +/-: adjust  enter: confirm  b: back  q: quit",
-                    "message": self.message}
+            return self._frame(
+                "routing", "Routing",
+                columns=["setting", "value"], rows=rows,
+                footer="↑/↓ or j/k: move  +/-: adjust  enter: confirm  b: back  q: quit",
+                legend=[*self._tier_map_lines(), MARGIN_LEGEND, GATE_LEGEND],
+            )
         if self.screen == "confirm":
             rows = []
             for name in self.lanes_doc["lanes"]:
@@ -230,11 +298,13 @@ class Wizard:
             for path in (self.lanes_path, self.routing_path):
                 rows.append({"cells": ["file", path, ""], "marked": False,
                              "dimmed": False, "cursor": False, "tag": ""})
-            return {"screen": "confirm", "title": "Confirm changes", "tier": None,
-                    "columns": ["item", "value", ""], "rows": rows,
-                    "footer": "y: write  n/q: quit without writing  b: back", "message": self.message}
-        return {"screen": self.screen, "title": "Delegate setup", "tier": None,
-                "columns": [], "rows": [], "footer": "", "message": self.message}
+            return self._frame(
+                "confirm", "Confirm changes",
+                columns=["item", "value", ""], rows=rows,
+                footer="y: write  n/q: quit without writing  b: back",
+                legend=[CLASSTIER_LEGEND, MARGIN_LEGEND, GATE_LEGEND],
+            )
+        return self._frame(self.screen, "Delegate setup")
 
 
 def _fit_table(view, width):
@@ -289,28 +359,52 @@ def run_curses(wizard):
             view = wizard.view()
             chosen, widths = _fit_table(view, width)
             def put(y, value, attr=0):
-                if y < height:
+                if 0 <= y < height:
                     try:
                         stdscr.addnstr(y, 0, value, max(1, width - 1), attr)
                     except curses.error:
                         pass
             put(0, view["title"], curses.A_BOLD)
-            if chosen:
-                put(2, "  ".join(view["columns"][i][:w].ljust(w) for i, w in zip(chosen, widths)), curses.A_BOLD)
-            max_rows = max(0, height - 7)
-            for offset, row in enumerate(view["rows"][:max_rows]):
-                cells = []
-                for i, w in zip(chosen, widths):
-                    cell = row["cells"][i] if i < len(row["cells"]) else ""
-                    cells.append(cell[:w].ljust(w))
-                line = "  ".join(cells)
-                if row["tag"]:
-                    line += "  " + row["tag"]
-                attr = curses.A_DIM if row["dimmed"] else 0
-                if row["cursor"]:
-                    attr |= curses.A_REVERSE | curses.A_BOLD
-                put(3 + offset, line, attr)
-            put(height - 3, view["footer"])
+            body = view.get("body") or []
+            legend = view.get("legend") or []
+            footer_y = height - 3
+            legend_y = footer_y - len(legend)
+            y = 2
+            for line in body:
+                if y >= legend_y:
+                    break
+                put(y, line)
+                y += 1
+            if chosen and y < legend_y:
+                if body:
+                    y += 1
+                if y < legend_y:
+                    put(y, "  ".join(view["columns"][i][:w].ljust(w) for i, w in zip(chosen, widths)), curses.A_BOLD)
+                    y += 1
+                room = max(1, legend_y - y)
+                cursor_index = next(
+                    (i for i, row in enumerate(view["rows"]) if row["cursor"]), 0)
+                first = 0
+                if cursor_index >= room:
+                    first = cursor_index - room + 1
+                for row in view["rows"][first:]:
+                    if y >= legend_y:
+                        break
+                    cells = []
+                    for i, w in zip(chosen, widths):
+                        cell = row["cells"][i] if i < len(row["cells"]) else ""
+                        cells.append(cell[:w].ljust(w))
+                    line = "  ".join(cells)
+                    if row["tag"]:
+                        line += "  " + row["tag"]
+                    attr = curses.A_DIM if row["dimmed"] else 0
+                    if row["cursor"]:
+                        attr |= curses.A_REVERSE | curses.A_BOLD
+                    put(y, line, attr)
+                    y += 1
+            for offset, line in enumerate(legend):
+                put(legend_y + offset, line)
+            put(footer_y, view["footer"])
             put(height - 2, view["message"], curses.A_BOLD)
             stdscr.refresh()
             code = stdscr.getch()
@@ -318,11 +412,19 @@ def run_curses(wizard):
                        ord("k"): "up", ord("j"): "down", ord(" "): "space",
                        10: "enter", 13: "enter", curses.KEY_ENTER: "enter",
                        ord("b"): "b", ord("q"): "q", ord("y"): "y", ord("n"): "n",
-                       ord("+"): "plus", ord("="): "plus", ord("-"): "minus"}
+                       ord("+"): "plus", ord("="): "plus", ord("-"): "minus",
+                       ord("o"): "o", ord("O"): "o"}
             if ord("1") <= code <= ord("5"):
                 key = chr(code)
             else:
                 key = mapping.get(code, "other")
+            if key == "o" and wizard.bench_page_path:
+                try:
+                    import pathlib
+                    import webbrowser
+                    webbrowser.open(pathlib.Path(wizard.bench_page_path).as_uri())
+                except Exception:
+                    pass
             wizard.handle(key)
         return wizard.result()
 
