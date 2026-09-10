@@ -47,6 +47,10 @@ configs:
 	@if [ -d $(HOME)/.hammerspoon ] && [ ! -L $(HOME)/.hammerspoon ]; then \
 		echo "ERROR: ~/.hammerspoon is a real directory (Hammerspoon launched before configs?) — move it aside first"; exit 1; fi
 	ln -sfn $(CURDIR)/stow/hammerspoon/.hammerspoon $(HOME)/.hammerspoon
+	@# stow -R unlinks before relinking; a Hyprland reload landing in that
+	@# window raises a persistent "config has errors" overlay that outlives
+	@# the restow. Reloading here clears it. No-op without hyprctl (macOS).
+	@if command -v hyprctl >/dev/null 2>&1; then hyprctl reload >/dev/null; fi
 
 skills:
 	for t in $(HARNESS_SKILL_DIRS); do mkdir -p $$t && (cd $(CURDIR)/agents && stow -t $$t -R skills); done

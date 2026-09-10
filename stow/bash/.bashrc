@@ -45,3 +45,4 @@ starship_precmd_user_func=_share_history
 
 # ---- Per-machine overrides (never committed) -------------------------------
 [ -f "$HOME/.bashrc.local" ] && source "$HOME/.bashrc.local"
+export PATH="$HOME/.local/bin:$HOME/.grok/bin:$PATH"
