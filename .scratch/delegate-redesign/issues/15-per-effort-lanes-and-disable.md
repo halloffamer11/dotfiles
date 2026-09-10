@@ -51,6 +51,26 @@ PATH. It now resolves the sibling script beside `effort.py` and falls back to PA
 of the model. No benchmark reports it. Those ~30 values stay hand-set or locally measured whatever
 the research says.
 
+## Decision 2026-09-10 — what the pre-screen is
+
+CLAUDE.md referred to "the ticket-15 pre-screen" as settled, but this ticket
+never defined it and no other file did either. Confirmed by Orin 2026-09-10:
+
+**The pre-screen is a narrowing pass that runs before the tier screens.** It
+takes the ~30 enumerated per-effort lanes and proposes which ones are worth
+carrying, by running `effort.py` over the approved sources and setting
+`enabled` from what it finds. Thirty tier rows is unusable, and this ticket
+already says the `enabled` default "cannot simply be true for everything" — the
+pre-screen is what decides it. `ultra` lanes are the settled case: unscoreable
+by any source and in breach of the worker preamble, so `enabled: false` by
+construction.
+
+It proposes; the human disposes. The pre-screen never writes the catalog on its
+own — its output is the starting mark state on the tier screens, which the human
+overrides with the toggle. Orin ruled on 2026-09-10 that there is no constraint
+on what it may write (see CLAUDE.md), since `lanes.json` carries nothing
+sensitive.
+
 **Blocked by:** 13 (discovery), 12 (the wizard screens this adds a toggle to).
 
 **Status:** open, raised by Orin 2026-09-09: "we should have each level. so luna-low, luna-med, luna-high would all be lanes. add an option to disable or turn off certain lanes."
@@ -63,4 +83,5 @@ the research says.
 - [ ] `discover.py --efforts` emits one shared `price` block across a model's efforts, not a prompt per lane
 - [ ] `tests/test_rank.py` covers a disabled lane that would otherwise be the pick
 - [x] `effort.py extract` completes one real run end to end, so the pipeline is proven, not half-proven
+- [ ] A pre-screen runs before the tier screens, proposes `enabled` per lane from `effort.py` output, and sets the starting mark state rather than writing the catalog
 - [ ] Orin enumerates the codex efforts he wants and switches off the rest in one wizard run
