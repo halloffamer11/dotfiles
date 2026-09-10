@@ -77,7 +77,7 @@ corrected too. This also makes grok match `codex-delegate`, which leans on its s
 
 ### Still open
 
-- **agy: fixed and pushed, still not pinned, so still broken at runtime** (see the section below).
+- **agy: fixed, pushed, and pinned 2026-09-10 — read-only works at runtime now** (see below).
   The claim that agy exposes no sandbox flag was wrong — agy 1.1.28 has `--sandbox`, and the fix is
   the same flag swap grok needed. The claim that `agy` is the only worker CLI on omarchy was also
   wrong: omarchy has all four. That reading came from `ssh omarchy 'command -v codex'`, a
@@ -122,5 +122,24 @@ per upstream CONTRIBUTING — so making it live means combining them into one co
 reverted edits once already, and made an "all green" run meaningless because it tested the pinned
 commit rather than the change.
 
-**Waiting on Orin:** whether to build an integration branch carrying both fixes and re-pin to it.
-Pushing is done — #119 (grok) and #120 (agy) are both open.
+**Pinned 2026-09-10.** `integration/read-only-fixes` @ `1ff8bd6` on the fork carries both fixes on
+one commit; `ADS_COMMIT` now points at it. The two branches touch disjoint files, so the merge needed
+no resolution, and the upstream PRs stay independent — #119 (grok) and #120 (agy), one concern each.
+Verified rather than assumed:
+
+    old pin f14dc1e  agy relay `"--mode", "plan"` occurrences: 1
+    new pin 1ff8bd6  agy relay `"--mode", "plan"` occurrences: 0
+    live tree        agy relay `"--mode", "plan"` occurrences: 0
+    node test/relay-smoke.mjs                     relay smoke: all green (exit 0)
+    ads.sh check                                  OK
+    test_dispatch.py / test_rank.py / test_effort.py   all PASS
+
+Retire the integration branch and point `ADS_REPO` back at `amElnagdy` when the PRs land upstream.
+
+**Still stale upstream, belongs on PR #120, not on our pin:** `skills/agy-delegate/SKILL.md:121` and
+`references/dispatch-and-poll.md:41` still document `--read-only` as running plan mode. The code is
+fixed; those two lines now describe behaviour that no longer exists.
+
+**Unverified, same shape, different harnesses:** `claude-delegate/scripts/relay.mjs:588` and
+`commandcode-delegate/scripts/relay.mjs:706` still push `--permission-mode plan`. Whether they suffer
+the same headless auto-deny has not been tested. `claude-delegate` is a lane we dispatch to.

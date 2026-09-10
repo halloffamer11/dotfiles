@@ -1,13 +1,17 @@
 #!/bin/sh
 set -eu
 
-# Pinned to our fork, not upstream. Upstream's grok relay pairs its read-only
-# sandbox with `--permission-mode plan`, which gates every tool call in a
-# headless pipe, so a --read-only grok run returns no work at all. The fix is on
-# the fork's fix/grok-read-only-plan-mode branch. When it lands upstream, point
-# ADS_REPO back at amElnagdy and pin the merge commit.
+# Pinned to our fork, not upstream. Upstream pairs each read-only sandbox with a
+# plan-mode flag -- `--permission-mode plan` on grok, `--mode plan` on agy --
+# which gates every tool call in a headless pipe, so a --read-only run returns no
+# work at all. The sandbox is the real enforcement; plan mode only auto-denies.
+#
+# integration/read-only-fixes carries both fixes on one commit, because ads.sh can
+# pin only one. The upstream PRs stay independent, one concern each: #119 (grok)
+# and #120 (agy). When they land, point ADS_REPO back at amElnagdy, pin the merge
+# commit, and delete the integration branch.
 ADS_REPO=https://github.com/halloffamer11/delegate-skills.git
-ADS_COMMIT=f14dc1eeb27ae8c6282830566950f832ce366d02
+ADS_COMMIT=1ff8bd6129b78124bd0e6e99fb6e4144b2ca4fe5
 ADS_DIR=${ADS_DIR:-$HOME/.local/share/delegate/ads}
 
 HARNESSES="claude codex agy grok"
