@@ -13,6 +13,9 @@
 #
 # Editing:
 #   - CONFIG_PACKAGES: config packages under stow/, targeted at ~
+#   - delegate ships ~/.config/delegate/{lanes,routing}.json. One catalog serves every
+#     machine: a lane whose harness CLI is not on PATH is vetoed at rank time
+#     ("cli absent"), so the same file is correct on a box that lacks a CLI
 #   - hammerspoon is NOT in CONFIG_PACKAGES: .stowrc sets --no-folding, but Hammerspoon
 #     needs ~/.hammerspoon to be ONE whole-directory symlink (per-file links break
 #     hs.configdir and the pathwatcher auto-reload — upstream issue #830), so `configs`
@@ -27,7 +30,7 @@
 #   - Idempotency lives in the tools: `brew bundle` no-ops when satisfied; `stow -R` re-syncs
 -include local.mk
 
-CONFIG_PACKAGES ?= borders claude ghostty git herdr nvim starship wezterm yazi zsh
+CONFIG_PACKAGES ?= borders claude delegate ghostty git herdr nvim starship wezterm yazi zsh
 HARNESS_SKILL_DIRS ?= $(HOME)/.claude/skills $(HOME)/.agents/skills $(HOME)/.kiro/skills
 EXTRA_BREWFILES ?= 
 
