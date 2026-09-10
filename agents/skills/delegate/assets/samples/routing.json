@@ -1,0 +1,13 @@
+{
+  "version": "delegate-routing.v1",
+  "classTier": {
+    "scout": 1,
+    "mechanical": 1,
+    "impl": 2,
+    "review": 2,
+    "hard-impl": 3
+  },
+  "margin": 0.2,
+  "gate": 0.1,
+  "note": "override per project: e.g. {\"classTier\": {\"review\": 3}} sends reviews to sol"
+}

@@ -1,0 +1,139 @@
+{
+  "version": "delegate-lanes.v1",
+  "meters": {
+    "claude-fable": {
+      "harness": "claude",
+      "plan": "Max 5x",
+      "price_month": 100,
+      "probe": "usage.py"
+    },
+    "claude-general": {
+      "harness": "claude",
+      "plan": "Max 5x",
+      "price_month": 100,
+      "probe": "usage.py"
+    },
+    "codex": {
+      "harness": "codex",
+      "plan": "ChatGPT Plus",
+      "price_month": 20,
+      "probe": "usage.py"
+    },
+    "grok": {
+      "harness": "grok",
+      "plan": "SuperGrok",
+      "price_month": 30,
+      "probe": "usage.py"
+    },
+    "agy-gemini": {
+      "harness": "agy",
+      "plan": "Google AI Pro",
+      "price_month": 17,
+      "probe": "usage.py"
+    }
+  },
+  "lanes": {
+    "fable-xhigh@claude": {
+      "harness": "claude",
+      "model": "claude-fable-5-1",
+      "effort": "xhigh",
+      "meter": "claude-fable",
+      "meter_weight": 10,
+      "timeout": "60m",
+      "price": {
+        "in": 10,
+        "cache_read": 0.25,
+        "cache_write": 12.5,
+        "out": 50
+      },
+      "tier": 4,
+      "trust": 5,
+      "basis": "frontier; protect: orchestrator meter"
+    },
+    "sol-high@codex": {
+      "harness": "codex",
+      "model": "gpt-5.6-sol",
+      "effort": "high",
+      "meter": "codex",
+      "meter_weight": 20,
+      "timeout": "40m",
+      "price": {
+        "in": 4,
+        "cache_read": 0.4,
+        "cache_write": null,
+        "out": 20
+      },
+      "tier": 3,
+      "trust": 5,
+      "basis": "hardest impl and adversarial review"
+    },
+    "terra-high@codex": {
+      "harness": "codex",
+      "model": "gpt-5.6-terra",
+      "effort": "high",
+      "meter": "codex",
+      "meter_weight": 10,
+      "timeout": "25m",
+      "price": {
+        "in": 2,
+        "cache_read": 0.2,
+        "cache_write": null,
+        "out": 12
+      },
+      "tier": 2,
+      "trust": 5,
+      "basis": "preferred reviewer and implementor"
+    },
+    "grok46-high@grok": {
+      "harness": "grok",
+      "model": "grok-4.6",
+      "effort": "high",
+      "meter": "grok",
+      "meter_weight": 1,
+      "timeout": "40m",
+      "price": {
+        "in": 2,
+        "cache_read": 0.5,
+        "cache_write": null,
+        "out": 6
+      },
+      "tier": 2,
+      "trust": 3,
+      "basis": "sink for terra-grade work; not trusted alone"
+    },
+    "luna-low@codex": {
+      "harness": "codex",
+      "model": "gpt-5.6-luna",
+      "effort": "low",
+      "meter": "codex",
+      "meter_weight": 1,
+      "timeout": "10m",
+      "price": {
+        "in": 0.2,
+        "cache_read": 0.02,
+        "cache_write": null,
+        "out": 1.2
+      },
+      "tier": 1,
+      "trust": 3,
+      "basis": "benchmarks overstate it (Orin)"
+    },
+    "flash-high@agy": {
+      "harness": "agy",
+      "model": "gemini-3.8-flash-high",
+      "effort": "high",
+      "meter": "agy-gemini",
+      "meter_weight": 1,
+      "timeout": "25m",
+      "price": {
+        "in": 0.75,
+        "cache_read": 0.075,
+        "cache_write": null,
+        "out": 3.75
+      },
+      "tier": 1,
+      "trust": 4,
+      "basis": "cheap floor; fabricated citations in 3 impl briefs (ledger)"
+    }
+  }
+}

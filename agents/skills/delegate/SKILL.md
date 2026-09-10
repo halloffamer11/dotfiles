@@ -1,118 +1,56 @@
 ---
 name: delegate
-description: Route worker-shaped work to the right model, harness, and quota — a well-scoped lane of implementation, verification, scouting, or mechanical work handed to another agent CLI (Codex, Antigravity, Grok, headless Claude), an independent review from another model family, or a second opinion. Use before any Agent, Workflow, or teammate spawn to rank lanes (scripts/rank.py <class>), and to answer questions about remaining subscription usage or reset times (scripts/usage.py, scripts/probe.sh). Not for work that needs this session's live context, and not for trivial single-file edits that are faster inline.
+description: Route worker-shaped work (implementation with a spec, verification, review, scouting, mechanical transforms) to an external worker on one lane, picked by tier, trust, and remaining subscription usage. Use before any Agent, Workflow, or teammate spawn, and to answer questions about remaining usage. Not for work that needs this session's live context.
 ---
 
-# Delegate — classify, rank, dispatch, verify
+# Delegate
 
-The session (Fable) plans, holds the live context, adjudicates, and
-synthesizes. Everything worker-shaped goes out through a lane: one model
-through one harness on one usage meter. External lanes are the default at
-every quota level; a Claude worker is the exception and needs a reason.
+The session plans, adjudicates, and synthesizes. Worker-shaped work goes out on a **lane**: one (harness, model, effort) tuple that drains one subscription **meter**. `/delegate` is the only entry point that reads meters. The typed-only wrappers `/delegate-claude`, `/delegate-codex`, `/delegate-agy`, `/delegate-grok` run a named lane with no ranking.
 
-Files: `lanes.json` (the registry), `scripts/rank.py` (the arithmetic),
-`scripts/dispatch.sh` (the one way to run a child), `schemas/return.json`
-(the fixed return shape), `templates/brief.md` (the preamble every child
-gets), `references/routing.md` (the rules in prose), `references/<harness>.md`
-(each CLI's recipe and quirks).
+## Terms
 
-## 1. Classify
-Pick the class from lanes.json: `lead design review hard-impl impl verify
-scout mechanical browser council` (rules in references/routing.md §1). A
-workflow stage name maps through the `stages` table, so `rank.py refute`
-works. Work never goes down a tier from its class.
+- **Harness**: a CLI that runs a worker: `claude`, `codex`, `agy`, `grok`.
+- **Lane**: one (harness, model, effort) record in `lanes.json`, named `<model-effort>@<harness>`. Claude lanes are ordinary lanes.
+- **Meter**: one subscription quota, probed by `usage.py`. A lane drains exactly one meter.
+- **Class**: the kind of job. `scout` (find, ground, summarize), `mechanical` (renames, transforms, extraction), `impl` (implementation with a spec), `review` (independent review of a diff; reviewer family differs from author), `hard-impl`. Each class needs a **tier**.
+- **Tier**: capability level 1 (lowest) to 4 (frontier), set by the human per lane after reading the benchmark ranking. **Trust**: the human's ordering of lanes inside a tier, 1 to 5, from experience. Nothing computes either.
+- **Pace**: weekly remaining divided by the fraction of the weekly cycle still to run. 1.0 is spending evenly; above 1 the quota will expire unspent.
+- **Brief**: the task file the session writes. **Run**: one relay invocation and its directory under `~/.cache/delegate/runs/`, never reused.
 
-## 2. Rank
-    python3 scripts/rank.py <class> [author-family]
-Prints the eligible lanes best first. Worker classes pin external lanes
-first and Claude lanes last, so an external lane wins whenever one is
-available: the balancing happens on every call, not only when Claude is
-low. With `DELEGATE_BALANCE=1` (personal machines, `~/.zshrc.local`) the
-live meters decide between eligible lanes: the lane furthest ahead of its
-weekly spending pace wins (pace = weekly remaining ÷ cycle fraction
-remaining; the 5h window is only a gate), pin order breaks near-ties only
-above the 40% line, unavailable lanes are skipped, a tier-1 class with no
-lane says STOP with the earliest reset. Without it, pin order is the answer. For `review` pass the author's family
-so the reviewer is never the author's family. Take the top lane; a lower
-one needs a stated reason. Record one line:
-`delegate: <class> → <lane> (rank #n, r=NN%[, reason])`.
+## Files
 
-## 3. Dispatch
-Write the task as five lines — `objective:`, `scope:`, `constraints:`,
-`done:`, `return:` — nothing else. dispatch.sh adds the non-interactive
-preamble, the convergence budget, the write rule, and the return schema,
-and it retries once on the next-newest model slug if a freshly listed
-version fails.
+- `~/.config/delegate/lanes.json`: meters and lanes (harness, model, effort, meter, meter weight, timeout, price, tier, trust, basis). Global only.
+- `~/.config/delegate/routing.json`: `classTier` (class to tier), `margin`, `gate`. A project overrides any key at `<git-root>/.delegate/routing.json`; `classTier` merges per class.
+- Both are strict JSON, validated on read with a plain-language message naming the field and the rule, formatted on write, and accept `note` fields anywhere. `python3 ~/.claude/skills/delegate/scripts/catalog.py show` prints the effective catalog for the current directory; `scripts/catalog.py check <file>` validates one file. The starting catalog ships in `assets/samples/`; `/delegate setup` is the wizard that builds or revises it.
 
-- **Courier (the default from a session):** Agent tool with
-  `subagent_type` `agy-runner` | `codex-runner` | `grok-runner`. Each is a
-  Haiku relay that runs one dispatch.sh call and returns the schema object
-  verbatim, so the child's exploration never enters this context. State
-  the role (lanes.json `role`), the working directory, effort, and — only
-  when the user authorized implementation — the isolated git worktree.
-  Couriers never need a reason.
-- **Claude worker (the exception):** an Agent spawn on Sonnet or Opus, or
-  a built-in like Explore, is allowed only with `why-claude: <reason>` in
-  the prompt — it needs the Skill tool or this session's live context. The
-  PreToolUse hook denies the spawn otherwise, and denies Opus workers or
-  effort above medium when any Claude lane is below 40%.
-- **Workflow stage:** `agent(brief, {agentType: 'agy-runner', label})`.
-  Every `agent()` names `agentType` or `model`; a `model` stage needs a
-  `// why-claude:` line in the script. The hook denies scripts that miss
-  either, fan-outs over 8 without a `budget`, Fable workers, and stock
-  workflows launched by name. Above 12 agents it asks you to split into
-  phases and re-rank between them.
-- **Teammate:** "spawn a teammate using the agy-runner agent type". The
-  definition's model and tools apply; its `skills:` field is ignored,
-  which is why the recipe lives in dispatch.sh, not in the courier.
-- **Inline (this context runs dispatch.sh):** only for a short expected
-  return, or to see raw child output when debugging the delegation.
-- **Resume, when it is cheaper:** the `delegate:` line carries the child's
-  session id. `--resume <id>` continues that child for a follow-up that
-  builds on its findings and is smaller than a cold spawn. A large or
-  unrelated follow-up starts fresh. An option to right-size, not a rule.
-- **sol@codex and opus46@agy at high effort** outrun the 10-minute Bash
-  ceiling: run the courier or the inline call with `run_in_background` and
-  poll the out file. dispatch.sh sets agy's `--print-timeout` from effort
-  (6m/10m/25m); the default 5m ended a productive review mid-read.
-- **agy read-only children have no terminal.** dispatch.sh says so in the
-  brief; still pre-materialise anything the child would shell out for (a
-  diff, `git show`) as a file in its working directory. A whole-branch
-  review is too big for one agy dispatch: split by file or send it to
-  sol@codex.
-- **Herdr visibility lane:** only when the user asks to watch and
-  `HERDR_ENV=1` (references/herdr.md). Never auto-select.
+## 1. Classify and write the brief
 
-## 4. Verify
-The return object is a claim. `status` other than `done` is a partial
-result, not a success. Read the files in `evidence`, diff the
-`changed_files`, run the checks you would run for your own work. Size a
-review to the artifact: one pass of 3–4 finders plus your own reading; one
-refuter only for a finding you cannot adjudicate; never a workflow review
-and an external review of the same diff.
+Pick the class. Write a Markdown brief with two headings, nothing else: `# Objective` and `# Definition of done`. Name every file the worker must read. Put the gate commands the worker must run in the definition of done. Save it under the session scratchpad with an absolute path.
 
-## Invariants
-- Headless only; stdin closed; prompts via file; caller's Bash timeout.
-- Read-only sandbox unless the user authorized implementation, then an
-  isolated worktree. Never permission-bypass or full-access flags.
-- Models by role through resolve-model.sh; empty output = lane unavailable.
-- Children never delegate and cause no external side effects (template).
-- Quota failure: `usage.py --refresh`, mark the lane unavailable, re-rank
-  once. Exhaustion signals (usage_limit_reached, RESOURCE_EXHAUSTED,
-  free-usage-exhausted, a named plan cap) fail over; a bare 429/529 backs
-  off and retries the same lane once.
-- Version drift (`<cli> --version` ≠ the recipe's `verified-against`): run
-  that subcommand's `--help`, adapt, retry once, report the drift. Never
-  edit references/*.md or routing.md yourself; propose the diff.
+## 2. Run
 
-## The ledger
-`~/.claude/hooks/delegate-ledger.py` records lane r at every spawn and
-subagent stop; `--report --since 24` shows drain per lane, Claude's share
-of it (target ≤ 40%), and dispatch counts. Read it before a second wave of
-any fan-out and when asked "what did that cost".
+    python3 ~/.claude/skills/delegate/scripts/delegate.py run <class> --brief </abs/brief.md> --cwd </abs/project> [--write </abs/worktree>] [--effort low|medium|high|xhigh] [--dry-run]
 
-## Browser lanes
-Authenticated and unauthenticated browser capability is profiled per lane
-in `evals/browser/_profile.md` (rerun `evals/browser/run.sh` after any CLI,
-extension, or grant change). Classify the reasoning part as above; the
-profile gates eligibility. Recipes: each harness reference's Browser section.
+Run it with `run_in_background` so the session keeps working; the notification carries the `delegate:` line with `run=<dir>`, and `<dir>/return.json` is the result. The command prints the ordered lanes with one reason each, then dispatches the pick. `--dry-run` stops after the print. `--effort` overrides the lane's effort dial for this job only; the lane's tier is unchanged. `--write` is the only way a worker gets a shell and edits; the worktree is the blast radius, never a primary checkout.
+
+The rule: `need = classTier[class]`; eligible lanes have `tier >= need`, meter remaining at or above `gate`, and the harness CLI on PATH; sort by tier ascending, trust descending, pace descending; the first is the pick unless a later lane's pace beats the pick's pace by `margin`, which steals the job. A meter whose probe is unknown sorts last and never blocks. When nothing is eligible the command stops with the reasons and starts nothing. Meters are probed at run start and run finish.
+
+To run a specific lane without ranking, type one of the wrappers yourself, for example `/delegate-codex --lane terra-high@codex </abs/brief.md>`. They are typed-only; the model never invokes them.
+
+## 3. Verify and log
+
+`return.json` is a claim. `status` other than `done` is not a success; `blocked` carries its reason in `deliverable`. Read the evidence, diff `changed_files`, run the checks yourself. Then log the adjudication with the thread from the `delegate-metrics:` line:
+
+    python3 ~/.claude/skills/delegate/scripts/report.py log --work "<2-4 words>" --run <run-dir> --verdict clean|findings|partial|failed [--outcome "<phrase>"] --class <class>
+
+`--run` takes lane, seconds, status, thread, and the token cost from the run directory; `report.py cost <run-dir>` prints one run's cost breakdown, or `unmeasured` when the relay reported no tokens (Codex today).
+
+`report.py limits` prints remaining quota per meter; `report.py runs` prints recent adjudicated dispatches. Print these, never a hand-built table.
+
+## Workflow callers
+
+A Workflow script has no shell primitive. The `courier` agent is an optional wrapper for that case only: it runs the same `delegate.py` command and relays `return.json`. Nothing on the main path needs it.
+
+## Health
+
+`python3 tests/test_catalog.py`, `tests/test_rank.py`, `tests/test_dispatch.py`, `tests/test_events.py`, `tests/test_report.py`, `tests/test_usage_reset.py`, `tests/test_bench.py`, `tests/test_setup.py`, `tests/test_setup_tui.py` after touching the matching file. `sh scripts/ads.sh check` confirms the pinned relays; `sh scripts/ads.sh install` restores them. A model slug that stops resolving is edited in `lanes.json`; `agy models`, `codex debug models`, `grok models` list the current ones.

@@ -23,10 +23,10 @@ One brief, received identically by every panelist:
   hint of your own current lean.
 
 ## 2. Compose the panel
-- Run ../delegate/scripts/probe.sh for real availability.
+- Run `python3 ~/.claude/skills/delegate/scripts/usage.py --pretty` for real availability and `python3 ~/.claude/skills/delegate/scripts/catalog.py show` for the lanes.
 - Panelists: available harnesses serving models from different families.
   Exclude your own model family — no agent grades its own work.
-- Quorum (../delegate/references/routing.md "Council defaults"): ≥2 families besides the lead's.
+- Quorum: ≥2 model families besides the lead's.
   Below quorum: report the real composition and STOP. Never simulate absent
   panelists — a role-played council is worse than no council.
 - Deliberation shape is your judgment call: default is sealed memos only;
@@ -40,8 +40,8 @@ recommendation · key assumptions · failure modes · confidence ·
 what would change my mind.
 
 ## 4. Adjudicate
-Adjudicator: the routing.md lead — highest-ranked available deep-reasoning
-model (reached via the delegate skill if that is not you).
+Adjudicator: the highest-tier, highest-trust available lane in
+`~/.config/delegate/lanes.json` (reached via the delegate skill if that is not you).
 - Judge against the brief's success criteria, never by vote count.
 - Name each real disagreement as a crux: what it turns on, what evidence
   would resolve it.

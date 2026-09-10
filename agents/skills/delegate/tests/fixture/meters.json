@@ -1,0 +1,60 @@
+{
+  "probed_at": 1700000000,
+  "lanes": [
+    {
+      "lane": "codex",
+      "harness": "codex",
+      "meter": null,
+      "remaining_5h": 0.55,
+      "remaining_weekly": 0.55,
+      "r": 0.55,
+      "binding": "5h",
+      "pace": 0.75,
+      "status": "ok"
+    },
+    {
+      "lane": "grok",
+      "harness": "grok",
+      "meter": null,
+      "remaining_5h": null,
+      "remaining_weekly": 1.0,
+      "r": 1.0,
+      "binding": "weekly",
+      "pace": 0.9,
+      "status": "ok"
+    },
+    {
+      "lane": "claude-fable",
+      "harness": "claude",
+      "meter": "fable",
+      "remaining_5h": 0.7,
+      "remaining_weekly": 0.7,
+      "r": 0.7,
+      "binding": "5h",
+      "pace": 0.85,
+      "status": "ok"
+    },
+    {
+      "lane": "claude-general",
+      "harness": "claude",
+      "meter": "general",
+      "remaining_5h": 0.7,
+      "remaining_weekly": 0.7,
+      "r": 0.7,
+      "binding": "5h",
+      "pace": 0.85,
+      "status": "ok"
+    },
+    {
+      "lane": "agy-gemini",
+      "harness": "agy",
+      "meter": "gemini",
+      "remaining_5h": 0.61,
+      "remaining_weekly": 0.61,
+      "r": 0.61,
+      "binding": "5h",
+      "pace": 3.27,
+      "status": "ok"
+    }
+  ]
+}

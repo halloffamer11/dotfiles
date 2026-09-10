@@ -38,11 +38,14 @@ profile rather than editing one you do not own, and smoke-test it
 headless before labelling a lane with it.
 
 ## Not a lane (yet)
-kiro has no rows in lanes.json, no case in scripts/dispatch.sh (`unknown
-harness`) and no meter in scripts/usage.py. Until those exist
-(routing.md §6) this is a hand-run recipe: call it inline, write the
-delegate record line yourself, and route by routing.md — this file
-carries no routing rules. evals/browser/run.sh's `run_kiro` is a stub.
+kiro has no rows in lanes.json, no harness case in scripts/delegate.py and
+no meter in scripts/usage.py. Until those exist this is a hand-run recipe:
+call it inline, write the delegate record line yourself, and route by
+SKILL.md — this file carries no routing rules. evals/browser/run.sh's
+`run_kiro` is a stub.
+
+(The old `scripts/dispatch.sh` and `routing.md` this section used to name
+were removed by the redesign; tag `delegate-v1-last` holds them.)
 
 ## Quirks
 - Version gate on headless `--model`. On <= 2.19.x, `--no-interactive

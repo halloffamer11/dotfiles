@@ -1,5 +1,6 @@
 
 # --- Completion & history (previously provided by Oh My Zsh) ---
+fpath=(~/.grok/completions/zsh $fpath)   # grok CLI completions; must precede compinit
 autoload -Uz compinit && compinit
 HISTFILE="$HOME/.zsh_history"
 HISTSIZE=50000
@@ -20,6 +21,7 @@ source "$ZSH_PLUGIN_DIR/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
 export EDITOR="nvim"
 export VISUAL="nvim"
 export PATH="$HOME/.local/bin:$PATH"
+export PATH="$HOME/.grok/bin:$PATH"     # grok CLI (delegate skill lane)
 
 # --- Prompt (Starship) ---
 eval "$(starship init zsh)"
