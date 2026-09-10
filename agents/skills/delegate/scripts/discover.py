@@ -26,6 +26,11 @@ Drift detection:
     is no longer returned by the harness (checked only for successfully
     queried harnesses; claude lanes are excluded).
 
+Lane generation (--efforts <model>):
+  - Prints one ready-to-paste lane stanza per reasoning effort reported
+    for the model, with shared price block above.
+  - Generates ultra with enabled: false and documented basis.
+
 Exit status:
   Always exits 0. This script is a reporting tool, never a pipeline gate.
   Missing harness binaries or failing commands are reported inline.
@@ -124,9 +129,15 @@ def parse_codex_output(text):
         slug = item.get("slug")
         if not slug:
             continue
+        efforts = []
+        for level in item.get("supported_reasoning_levels", []):
+            if isinstance(level, dict) and "effort" in level:
+                efforts.append(level["effort"])
         models.append({
             "slug": slug,
             "display_name": item.get("display_name"),
+            "efforts": efforts,
+            "supported_reasoning_levels": item.get("supported_reasoning_levels", []),
         })
     return models
 
@@ -420,6 +431,196 @@ def format_report(result):
     return "\n".join(lines)
 
 
+def derive_short_name(slug):
+    """Derives a short model identifier from a model slug.
+    Returns (short_name, derivation_explanation)."""
+    parts = slug.split("-")
+    prefixes = {"gpt", "claude", "gemini", "grok"}
+    # If the slug has hyphen-separated parts, check if last component is a distinctive alphabetic name
+    if len(parts) > 1 and parts[-1].isalpha() and parts[-1].lower() not in prefixes:
+        return parts[-1].lower(), f"last component of slug '{slug}' after '-'"
+    # Look for a distinctive alphabetic part that is not a known vendor prefix
+    for p in reversed(parts):
+        if p.isalpha() and p.lower() not in prefixes:
+            return p.lower(), f"distinctive component '{p.lower()}' from slug '{slug}'"
+    # Otherwise fallback to slug with non-alphanumeric characters stripped
+    clean = re.sub(r"[^a-zA-Z0-9]", "", slug).lower()
+    return clean, f"alphanumeric characters of slug '{slug}'"
+
+
+def generate_efforts_stanzas(harness, slug, efforts):
+    """Generates ready-to-paste lane stanza dictionaries for a model's efforts.
+    Returns (short_name, derivation, stanzas_dict)."""
+    short_name, derivation = derive_short_name(slug)
+    stanzas = {}
+    for effort in efforts:
+        lane_name = f"{short_name}-{effort}@{harness}"
+        stanza = {
+            "harness": harness,
+            "model": slug,
+            "effort": effort,
+            "meter": "TODO: meter",
+            "meter_weight": "TODO: meter_weight",
+            "timeout": "TODO: timeout",
+            "price": "TODO: paste shared price block",
+            "tier": "TODO: tier (1-4)",
+        }
+        if effort == "ultra":
+            stanza["basis"] = (
+                "unscoreable: no published source reports ultra on any benchmark for any model; "
+                "ultra is maximum reasoning with automatic task delegation, which contradicts worker preamble "
+                "('Do not delegate, spawn subagents, or call other agents'); "
+                "meter_weight is a property of the plan, not the model (no benchmark can supply it)"
+            )
+            stanza["enabled"] = False
+        else:
+            stanza["basis"] = "meter_weight is a property of the plan, not the model (no benchmark can supply it)"
+        stanzas[lane_name] = stanza
+    return short_name, derivation, stanzas
+
+
+def format_efforts_report(harness, slug, efforts):
+    """Formats lane stanzas and shared price block as text ready for pasting into lanes.json."""
+    short_name, derivation, stanzas = generate_efforts_stanzas(harness, slug, efforts)
+
+    lines = []
+    lines.append(f"# Short name '{short_name}' derived from {derivation}. Edit lane keys if preferred.")
+    lines.append(f"# Shared price block (all reasoning efforts of '{slug}' share the same token rates; every stanza takes this same block):")
+    lines.append('# Paste this block into each lane\'s "price" field below:')
+    lines.append('"price": {')
+    lines.append('  "in": "TODO: $/1M in", "cache_read": "TODO: $/1M cache read", "cache_write": null, "out": "TODO: $/1M out"')
+    lines.append('}')
+    lines.append("")
+    lines.append("# Ready-to-paste lane stanzas for lanes.json:")
+
+    stanza_blocks = []
+    for lane_name, stanza in stanzas.items():
+        block_lines = [f'"{lane_name}": {{']
+        block_lines.append(f'  "harness": {json.dumps(stanza["harness"])}, "model": {json.dumps(stanza["model"])}, "effort": {json.dumps(stanza["effort"])},')
+        block_lines.append(f'  "meter": {json.dumps(stanza["meter"])}, "meter_weight": {json.dumps(stanza["meter_weight"])}, "timeout": {json.dumps(stanza["timeout"])},')
+        block_lines.append(f'  "price": {json.dumps(stanza["price"])}, "tier": {json.dumps(stanza["tier"])},')
+        if "enabled" in stanza:
+            block_lines.append(f'  "basis": {json.dumps(stanza["basis"])},')
+            block_lines.append('  "enabled": false')
+        else:
+            block_lines.append(f'  "basis": {json.dumps(stanza["basis"])}')
+        block_lines.append("}")
+        stanza_blocks.append("\n".join(block_lines))
+
+    lines.append(",\n".join(stanza_blocks))
+    return "\n".join(lines)
+
+
+def handle_efforts(target_model, cat=None, present=None, fixture_dir=None, runner=None, as_json=False):
+    """Discovers efforts for target_model and prints report or message.
+    Always returns 0."""
+    if present is None:
+        if fixture_dir is not None:
+            present = {
+                h for h in DISCOVER_HARNESSES
+                if h == "claude" or os.path.isfile(os.path.join(fixture_dir, FIXTURE_FILES.get(h, "")))
+            }
+        else:
+            present = {h for h in DISCOVER_HARNESSES if shutil.which(h)}
+    else:
+        present = set(present)
+
+    lanes_dict = cat.get("lanes", {}) if isinstance(cat, dict) else {}
+
+    harness_models = {}
+    found_harness = None
+    found_model_dict = None
+
+    for harness in DISCOVER_HARNESSES:
+        if harness not in present:
+            continue
+        if harness == "claude":
+            claude_models = []
+            for lane_name, lane_def in lanes_dict.items():
+                if isinstance(lane_def, dict) and lane_def.get("harness") == "claude":
+                    m = lane_def.get("model")
+                    if m and not any(cm["slug"] == m for cm in claude_models):
+                        claude_models.append({
+                            "slug": m,
+                            "display_name": None,
+                            "efforts": [],
+                        })
+            harness_models["claude"] = claude_models
+            for m in claude_models:
+                if m["slug"].lower() == target_model.lower():
+                    found_harness = "claude"
+                    found_model_dict = m
+                    break
+            continue
+
+        raw_models, err = query_harness(harness, fixture_dir=fixture_dir, runner=runner)
+        if err is not None:
+            continue
+        harness_models[harness] = raw_models
+        if found_model_dict is None:
+            for m in raw_models:
+                if m["slug"].lower() == target_model.lower():
+                    found_harness = harness
+                    found_model_dict = m
+                    break
+
+    if found_model_dict is not None:
+        efforts = found_model_dict.get("efforts", [])
+        if efforts:
+            if as_json:
+                short_name, derivation, stanzas = generate_efforts_stanzas(found_harness, found_model_dict["slug"], efforts)
+                res = {
+                    "harness": found_harness,
+                    "model": found_model_dict["slug"],
+                    "short_name": short_name,
+                    "derivation": derivation,
+                    "price": {
+                        "in": "TODO: $/1M in",
+                        "cache_read": "TODO: $/1M cache read",
+                        "cache_write": None,
+                        "out": "TODO: $/1M out",
+                    },
+                    "lanes": stanzas,
+                }
+                sys.stdout.write(json.dumps(res, indent=2) + "\n")
+            else:
+                print(format_efforts_report(found_harness, found_model_dict["slug"], efforts))
+            return 0
+        else:
+            avail = [m["slug"] for m in harness_models.get(found_harness, [])]
+            avail_str = ", ".join(avail) if avail else "none"
+            if as_json:
+                res = {
+                    "error": f"harness '{found_harness}' does not offer reasoning effort levels for model '{target_model}'",
+                    "harness": found_harness,
+                    "model": target_model,
+                    "available": avail,
+                }
+                sys.stdout.write(json.dumps(res, indent=2) + "\n")
+            else:
+                print(f"discover: harness '{found_harness}' does not offer reasoning effort levels for model '{target_model}'.")
+                print(f"Available models on {found_harness}: {avail_str}")
+            return 0
+
+    # Model not found on any present harness
+    all_avail = []
+    for h in DISCOVER_HARNESSES:
+        for m in harness_models.get(h, []):
+            all_avail.append(f"{m['slug']} ({h})")
+    all_avail_str = ", ".join(all_avail) if all_avail else "none"
+    if as_json:
+        res = {
+            "error": f"model '{target_model}' is not offered by any available harness",
+            "model": target_model,
+            "available": all_avail,
+        }
+        sys.stdout.write(json.dumps(res, indent=2) + "\n")
+    else:
+        print(f"discover: model '{target_model}' is not offered by any available harness.")
+        print(f"Available models: {all_avail_str}")
+    return 0
+
+
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
@@ -433,6 +634,7 @@ def main(argv=None):
     parser.add_argument("--harnesses", default=None, help="comma-separated list of present harnesses")
     parser.add_argument("--fixture-dir", default=None, help="directory containing harness output fixtures")
     parser.add_argument("--json", action="store_true", help="output as JSON")
+    parser.add_argument("--efforts", metavar="MODEL", default=None, help="generate lane stanzas per effort level for model")
 
     args = parser.parse_args(argv)
 
@@ -446,6 +648,16 @@ def main(argv=None):
         present = set(h.strip() for h in args.harnesses.split(",") if h.strip())
     else:
         present = None
+
+    if args.efforts is not None:
+        handle_efforts(
+            args.efforts,
+            cat=cat,
+            present=present,
+            fixture_dir=args.fixture_dir,
+            as_json=args.json,
+        )
+        return 0
 
     result = discover(
         cat,

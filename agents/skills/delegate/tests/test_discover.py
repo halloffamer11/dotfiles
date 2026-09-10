@@ -12,6 +12,7 @@ DELEGATE_DIR = os.path.abspath(os.path.join(HERE, "..", "scripts"))
 SAMPLES_DIR = os.path.abspath(os.path.join(HERE, "..", "assets", "samples"))
 FIXTURES_DIR = os.path.join(HERE, "fixtures", "discover")
 DISCOVER_PY = os.path.join(DELEGATE_DIR, "discover.py")
+CATALOG_PY = os.path.join(DELEGATE_DIR, "catalog.py")
 
 sys.path.insert(0, DELEGATE_DIR)
 import catalog
@@ -398,5 +399,187 @@ with tempfile.TemporaryDirectory() as td:
         and "model: grok-3.0-ancient" in out_ret
     )
     record("CLI reports retired model in tail", ret_cli_ok, f"rc={res_retired_cli.returncode}")
+
+
+# -------------------------------------------------------------
+# 13. discover.py --efforts gpt-6-astra: 6 stanzas, ultra enabled: false, basis reasons, exactly 1 price block
+res_astra = subprocess.run(
+    [
+        sys.executable, DISCOVER_PY,
+        "--fixture-dir", FIXTURES_DIR,
+        "--efforts", "gpt-6-astra",
+    ],
+    capture_output=True,
+    text=True,
+)
+out_astra = res_astra.stdout
+astra_stanzas = [
+    "astra-low@codex",
+    "astra-medium@codex",
+    "astra-high@codex",
+    "astra-xhigh@codex",
+    "astra-max@codex",
+    "astra-ultra@codex",
+]
+astra_has_all_stanzas = all(f'"{s}": {{' in out_astra for s in astra_stanzas)
+astra_one_price_block = (out_astra.count('"price": {') == 1)
+
+# Extract astra-ultra stanza text to verify enabled: false and basis reasons
+ultra_has_enabled_false = '"enabled": false' in out_astra
+ultra_basis_unscoreable = "no published source reports ultra" in out_astra or "unscoreable" in out_astra
+ultra_basis_preamble = (
+    "worker preamble" in out_astra
+    and "automatic task delegation" in out_astra
+    and "Do not delegate, spawn subagents, or call other agents" in out_astra
+)
+meter_weight_note = "meter_weight is a property of the plan, not the model" in out_astra
+
+astra_efforts_ok = (
+    res_astra.returncode == 0
+    and astra_has_all_stanzas
+    and astra_one_price_block
+    and ultra_has_enabled_false
+    and ultra_basis_unscoreable
+    and ultra_basis_preamble
+    and meter_weight_note
+)
+record(
+    "discover.py --efforts gpt-6-astra produces 6 stanzas with ultra disabled and exactly 1 price block",
+    astra_efforts_ok,
+    f"rc={res_astra.returncode}, price_blocks={out_astra.count('\"price\": {')}, stanzas={astra_has_all_stanzas}",
+)
+
+
+# -------------------------------------------------------------
+# 14. discover.py --efforts gpt-5.6-luna: 5 stanzas, no ultra, exactly 1 price block
+res_luna = subprocess.run(
+    [
+        sys.executable, DISCOVER_PY,
+        "--fixture-dir", FIXTURES_DIR,
+        "--efforts", "gpt-5.6-luna",
+    ],
+    capture_output=True,
+    text=True,
+)
+out_luna = res_luna.stdout
+luna_stanzas = [
+    "luna-low@codex",
+    "luna-medium@codex",
+    "luna-high@codex",
+    "luna-xhigh@codex",
+    "luna-max@codex",
+]
+luna_has_all_stanzas = all(f'"{s}": {{' in out_luna for s in luna_stanzas)
+luna_no_ultra = ("luna-ultra@codex" not in out_luna)
+luna_one_price_block = (out_luna.count('"price": {') == 1)
+
+luna_efforts_ok = (
+    res_luna.returncode == 0
+    and luna_has_all_stanzas
+    and luna_no_ultra
+    and luna_one_price_block
+)
+record(
+    "discover.py --efforts gpt-5.6-luna produces 5 stanzas with no ultra and exactly 1 price block",
+    luna_efforts_ok,
+    f"rc={res_luna.returncode}, price_blocks={out_luna.count('\"price\": {')}, stanzas={luna_has_all_stanzas}",
+)
+
+
+# -------------------------------------------------------------
+# 15. discover.py --efforts unknown model: plain message naming available models and exit 0
+res_unknown = subprocess.run(
+    [
+        sys.executable, DISCOVER_PY,
+        "--fixture-dir", FIXTURES_DIR,
+        "--efforts", "gpt-nonexistent-model",
+    ],
+    capture_output=True,
+    text=True,
+)
+out_unknown = res_unknown.stdout
+unknown_ok = (
+    res_unknown.returncode == 0
+    and "gpt-nonexistent-model" in out_unknown
+    and "not offered by any available harness" in out_unknown
+    and "Available models:" in out_unknown
+    and "gpt-6-astra" in out_unknown
+)
+record(
+    "discover.py --efforts unknown model exits 0 and names available models",
+    unknown_ok,
+    f"rc={res_unknown.returncode}, out={out_unknown[:200]}",
+)
+
+
+# -------------------------------------------------------------
+# 16. discover.py --efforts on harness without effort list (agy): plain message and exit 0
+res_agy_eff = subprocess.run(
+    [
+        sys.executable, DISCOVER_PY,
+        "--fixture-dir", FIXTURES_DIR,
+        "--efforts", "gemini-3.8-flash-high",
+    ],
+    capture_output=True,
+    text=True,
+)
+out_agy_eff = res_agy_eff.stdout
+agy_eff_ok = (
+    res_agy_eff.returncode == 0
+    and "gemini-3.8-flash-high" in out_agy_eff
+    and "does not offer reasoning effort levels" in out_agy_eff
+    and "Available models on agy:" in out_agy_eff
+)
+record(
+    "discover.py --efforts on agy model exits 0 and names available models",
+    agy_eff_ok,
+    f"rc={res_agy_eff.returncode}, out={out_agy_eff[:200]}",
+)
+
+
+# -------------------------------------------------------------
+# 17. Pasteability test: paste generated gpt-6-astra stanzas into sample lanes.json copy and validate
+with tempfile.TemporaryDirectory() as td:
+    test_lanes_path = os.path.join(td, "lanes.json")
+    with open(os.path.join(SAMPLES_DIR, "lanes.json"), "r", encoding="utf-8") as f:
+        sample_doc = json.load(f)
+
+    # Extract stanzas JSON block from discover output
+    lines = []
+    capturing = False
+    for line in out_astra.splitlines():
+        if line.startswith('"astra-low@codex":'):
+            capturing = True
+        if capturing:
+            lines.append(line)
+    stanzas_json = "{\n" + "\n".join(lines) + "\n}"
+    parsed_stanzas = json.loads(stanzas_json)
+
+    # Fill human placeholders with plausible values
+    plausible_price = {"in": 10, "cache_read": 1.0, "cache_write": 12.5, "out": 50}
+    for lane_name, lane_def in parsed_stanzas.items():
+        lane_def["meter"] = "codex"
+        lane_def["meter_weight"] = 10
+        lane_def["timeout"] = "30m"
+        lane_def["tier"] = 3
+        lane_def["price"] = plausible_price
+        sample_doc["lanes"][lane_name] = lane_def
+
+    catalog.write_json(test_lanes_path, sample_doc)
+    res_check_paste = subprocess.run(
+        [sys.executable, CATALOG_PY, "check", test_lanes_path],
+        capture_output=True,
+        text=True,
+    )
+    paste_ok = (
+        res_check_paste.returncode == 0
+        and f"ok: {test_lanes_path}" in res_check_paste.stdout
+        and len(parsed_stanzas) == 6
+    )
+    record(
+        "pasting filled gpt-6-astra stanzas into lanes.json validates cleanly",
+        paste_ok,
+        f"rc={res_check_paste.returncode}, err={res_check_paste.stderr}",
+    )
 
 sys.exit(1 if fails else 0)

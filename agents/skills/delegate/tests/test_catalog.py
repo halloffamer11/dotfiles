@@ -105,6 +105,16 @@ record(
     val_false is not None and doc_false["lanes"]["fable-xhigh@claude"].get("enabled", True) is False,
 )
 
+# 1e. lane at each of the six efforts validates
+for eff in ("low", "medium", "high", "xhigh", "max", "ultra"):
+    doc_eff = copy.deepcopy(lanes_sample)
+    doc_eff["lanes"]["fable-xhigh@claude"]["effort"] = eff
+    val_eff = catalog.validate_lanes(doc_eff)
+    record(
+        f"effort {eff} validates",
+        val_eff is not None and doc_eff["lanes"]["fable-xhigh@claude"]["effort"] == eff,
+    )
+
 # 2. Rejections
 # 2.1 lane naming a missing meter
 doc = copy.deepcopy(lanes_sample)
@@ -308,6 +318,16 @@ for bad_val, label in [("true", 'string "true"'), ("false", 'string "false"'), (
         bool(msg and "fable-xhigh@claude" in msg and "enabled" in msg and "boolean" in msg),
         msg,
     )
+
+# 2.20 reject: invalid effort
+doc_bad_eff = copy.deepcopy(lanes_sample)
+doc_bad_eff["lanes"]["fable-xhigh@claude"]["effort"] = "super"
+msg_eff = check_catalog_error(catalog.validate_lanes, doc_bad_eff)
+record(
+    "reject: invalid effort",
+    bool(msg_eff and "fable-xhigh@claude" in msg_eff and "effort must be one of" in msg_eff and "got 'super'" in msg_eff),
+    msg_eff,
+)
 
 # 3. Override merge
 with tempfile.TemporaryDirectory() as td:

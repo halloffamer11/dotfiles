@@ -26,7 +26,7 @@ import tempfile
 CONFIG_DIR = "~/.config/delegate"
 
 HARNESSES = ("claude", "codex", "agy", "grok")
-EFFORTS = ("low", "medium", "high", "xhigh")
+EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
 CLASSES = ("scout", "mechanical", "impl", "review", "hard-impl")
 LANES_VERSION = "delegate-lanes.v1"
 ROUTING_VERSION = "delegate-routing.v1"

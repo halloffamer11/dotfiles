@@ -78,15 +78,15 @@ sensitive.
 - [x] `enabled` is a validated boolean on every lane, defaulting to true when absent so existing catalogs keep working
 - [x] `rank.py` reports a disabled lane as ineligible with reason `disabled`, and never picks one
 - [ ] The wizard toggles `enabled` on the cursor row and shows disabled lanes dimmed, not hidden
-- [ ] `discover.py --efforts <model>` prints a ready-to-paste lane stanza per effort the harness reports
-- [ ] A generated `ultra` stanza carries `enabled: false`, with the reason in its `basis`
-- [ ] `discover.py --efforts` emits one shared `price` block across a model's efforts, not a prompt per lane
+- [x] `discover.py --efforts <model>` prints a ready-to-paste lane stanza per effort the harness reports
+- [x] A generated `ultra` stanza carries `enabled: false`, with the reason in its `basis`
+- [x] `discover.py --efforts` emits one shared `price` block across a model's efforts, not a prompt per lane
 - [x] `tests/test_rank.py` covers a disabled lane that would otherwise be the pick
 - [x] `effort.py extract` completes one real run end to end, so the pipeline is proven, not half-proven
 - [ ] A pre-screen runs before the tier screens, proposes `enabled` per lane from `effort.py` output, and sets the starting mark state rather than writing the catalog
 - [ ] Orin enumerates the codex efforts he wants and switches off the rest in one wizard run
 
-## Schema half landed 2026-09-10
+## Schema and generator landed 2026-09-10
 
 `enabled` is optional and defaults to true, so every existing catalog — the
 samples and the live one — validates untouched. It is checked **first** in
@@ -96,3 +96,22 @@ class asked. The reason reads `vetoed: disabled`.
 
 Still open, and all of it depends on the wizard and on `discover.py`:
 `--efforts` lane generation, the wizard toggle and dimming, and the pre-screen.
+
+### The generator, same day
+
+`discover.py --efforts <model>` prints the stanzas. `catalog.py`'s `EFFORTS` had
+to grow to `low, medium, high, xhigh, max, ultra` first: it allowed four levels,
+codex reports six, so every `max` and `ultra` stanza would have been rejected by
+the validator the moment it was pasted, and this ticket's own requirement of an
+`ultra` stanza would have been unsatisfiable. Side effect recorded here because
+it is real: `delegate.py --effort` now accepts `max` and `ultra` on harnesses that
+do not offer them. Per-harness effort policing is a separate decision and was
+deliberately not taken.
+
+Proven pasteable end to end, not just unit-tested: the six `gpt-6-astra` stanzas
+parse as JSON, go into a copy of the sample catalog, and `catalog.py check`
+accepts the result once the four human fields are filled. One shared `price`
+block in the output, `enabled` present on the `ultra` stanza and on no other, and
+`rank.py` reports `astra-ultra@codex` as `vetoed: disabled`.
+
+Still open: the wizard toggle and the pre-screen.
