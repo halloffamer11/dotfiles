@@ -77,11 +77,34 @@ corrected too. This also makes grok match `codex-delegate`, which leans on its s
 
 ### Still open
 
-- **agy is untouched.** `--mode plan` still auto-denies every permission headless. Unlike grok, agy
-  exposes no sandbox flag to lean on instead, so this is a real fix rather than a flag swap, and
-  `delegate.py` still papers over it by telling agy in the prompt that it has no terminal.
-  **This matters more than it looks: `agy` is the only worker CLI installed on omarchy.**
+- **agy: fixed locally, not pinned, not pushed** (see the section below). The claim that agy exposes
+  no sandbox flag was wrong — agy 1.1.28 has `--sandbox`, and the fix is the same flag swap grok
+  needed. **This matters more than it looks: `agy` is the only worker CLI installed on omarchy.**
 - The three legibility items above — `blocked` instead of `partial` at the gate, refusing a
   read-only dispatch to a lane with no working read-only mode, and the `map_result` fixture test —
   are unaffected by the upstream fix and still want doing. They are what makes the *next* failure of
   this shape legible.
+
+## agy takes the same fix, 2026-09-09
+
+`--read-only` now maps to `--sandbox --dangerously-skip-permissions` instead of `--mode plan`. The
+sandbox is the enforcement; the auto-approve only lets tools run *inside* it. Plan mode could never
+work headless: `--print` has no way to answer a permission prompt, so agy auto-denied the first tool
+that needed one and the run returned nothing.
+
+Verified on **agy 1.1.28**, macOS. Under `--sandbox`, writes to the working tree are overlaid and
+discarded, and every path outside the workspace fails `EPERM` for read *and* write. Two consequences
+the relay header now records: reads are confined to the workspace too, so a brief citing an absolute
+path outside `--cd` cannot be followed; and inside the workspace a write appears to succeed to the
+agent, which reads its own overlay back, then is discarded — trust `touchedFiles`, not the agent's
+account of itself.
+
+`node test/relay-smoke.mjs --only agy` is all green, including the rewritten read-only assertions.
+
+**Where it lives:** commit `69b2eda` on branch `fix/agy-read-only-plan-mode` in the local ADS clone
+only. Not pushed, and **not pinned** — that branch is based on `master`, so it does not carry the
+grok fix `f14dc1e`, and moving `ADS_COMMIT` to it as it stands would regress grok. `ads.sh` is still
+pinned at `f14dc1e`, so the `--write` workaround is still what agy dispatches need today.
+
+**Waiting on Orin:** whether to build an integration branch carrying both fixes and re-pin to it,
+and whether to push the agy branch to the fork as its own PR alongside #119.

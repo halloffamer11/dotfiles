@@ -1,0 +1,277 @@
+## source swerb
+## url https://lab.einsia.ai/swe-refactor-bench/leaderboard/
+## title SWE Refactor Bench Leaderboard | Coding Agents
+## sha256 7e92789ed66dd4e41b51a489715af08248617e55fe7fc4327a952875159207a1
+## packed 2026-09-10
+## table 1
+Task	claude-opus-5	gpt-5.6-sol	claude-sonnet-5	gpt-5.6-luna	kimi-k3	qwen3.8-max	dsv4-flash	glm-5.2	Best
+lang01 C → Rust									—
+lang02 C → Java	90				90				90
+lang03 Python → Go									—
+lang04 JavaScript → Rust									—
+lang05 Go → Zig	100								100
+lang06 C++ → C#	60								60
+lang07 JavaScript → TypeScript	100	100							100
+fw01 Flask → Starlette									—
+fw02 Express → Fastify									—
+fw03 Vue → React	100								100
+fw04 Gin → chi	100	100					80		100
+fw05 actix-web → axum	60								60
+fw06 gorilla/mux → net/http	100	100	100	70	100	100			100
+fw07 Dropwizard → Spring Boot									—
+pf01 POSIX → wasm32-wasi	60								60
+pf02 CommonJS → V8 realm									—
+pf03 x86-64 → tri-arch	100	100	80	80	100		60	70	100
+build01 Autotools → CMake		50			60				60
+build02 Maven → Gradle	60	70	60	40	40			60	70
+build03 setuptools → Meson	100	90	100	80		100			100
+## table 2
+#	Model	Client	Cfg	Runs	Gate	Ceil.	Blind	Adm.	Broken	Acc.	Score
+1	claude-opus-5	Claude Code	5	100	88	45	7	38	22 58%	16	32.30
+2	gpt-5.6-sol	Codex CLI	6	120	68	24	4	20	15 75%	5	12.42
+3	claude-sonnet-5	Claude Code	5	100	69	16	5	11	8 73%	3	8.50
+4	gpt-5.6-luna	Codex CLI	6	120	69	16	8	8	8 100%	0	4.67
+## table 3
+#	Model	Client	Cfg	Runs	Gate	Ceil.	Blind	Adm.	Broken	Acc.	Score
+1	kimi-k3	Claude Code	1	20	15	5	0	5	3 60%	2	19.50
+2	qwen3.8-max	Claude Code	1	20	8	6	4	2	0 0%	2	10.00
+3	dsv4-flash	Claude Code	1	20	13	3	1	2	2 100%	0	7.00
+4	glm-5.2	Claude Code	1	20	10	3	1	2	2 100%	0	6.50
+## jsonld 1
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@id": "https://lab.einsia.ai/#organization",
+      "@type": "Organization",
+      "name": "Navers Lab - Einsia",
+      "parentOrganization": {
+        "@type": "Organization",
+        "name": "Einsia",
+        "url": "https://einsia.ai/"
+      },
+      "sameAs": [
+        "https://github.com/Einsia"
+      ],
+      "url": "https://lab.einsia.ai/"
+    },
+    {
+      "@id": "https://lab.einsia.ai/swe-refactor-bench/leaderboard/#entity",
+      "@type": "Dataset",
+      "description": "Compare coding agents on SWE Refactor Bench: 20 whole-repository migrations evaluated for real migration, behavior preservation, and verification.",
+      "headline": "SWE Refactor Bench Leaderboard | Coding Agents",
+      "mainEntityOfPage": "https://lab.einsia.ai/swe-refactor-bench/leaderboard/",
+      "name": "SWE Refactor Bench Leaderboard | Coding Agents",
+      "publisher": {
+        "@id": "https://lab.einsia.ai/#organization"
+      },
+      "url": "https://lab.einsia.ai/swe-refactor-bench/leaderboard/"
+    }
+  ]
+}
+## labels
+2 accepted, 3 broken by a counterexample, 0 blind, of 20 runs
+claude-opus-5 · low — score 20.5, 2 accepted / 3 broken / 0 blind of 20 runs, $34.8 per task
+2 accepted, 5 broken by a counterexample, 2 blind, of 20 runs
+claude-opus-5 · medium — score 28.5, 2 accepted / 5 broken / 2 blind of 20 runs, $38.4 per task
+4 accepted, 4 broken by a counterexample, 2 blind, of 20 runs
+claude-opus-5 · high — score 34.5, 4 accepted / 4 broken / 2 blind of 20 runs, $55.7 per task
+5 accepted, 6 broken by a counterexample, 1 blind, of 20 runs
+claude-opus-5 · xhigh — score 47.0, 5 accepted / 6 broken / 1 blind of 20 runs, $74.9 per task
+3 accepted, 4 broken by a counterexample, 2 blind, of 20 runs
+claude-opus-5 · max — score 31.0, 3 accepted / 4 broken / 2 blind of 20 runs, $72.4 per task
+0 accepted, 1 broken by a counterexample, 0 blind, of 20 runs
+gpt-5.6-sol · none — score 4.0, 0 accepted / 1 broken / 0 blind of 20 runs, $2.9 per task
+0 accepted, 2 broken by a counterexample, 0 blind, of 20 runs
+gpt-5.6-sol · low — score 7.0, 0 accepted / 2 broken / 0 blind of 20 runs, $5.9 per task
+0 accepted, 2 broken by a counterexample, 3 blind, of 20 runs
+gpt-5.6-sol · medium — score 6.5, 0 accepted / 2 broken / 3 blind of 20 runs, $6.0 per task
+1 accepted, 4 broken by a counterexample, 0 blind, of 20 runs
+gpt-5.6-sol · high — score 19.0, 1 accepted / 4 broken / 0 blind of 20 runs, $7.7 per task
+0 accepted, 3 broken by a counterexample, 1 blind, of 20 runs
+gpt-5.6-sol · xhigh — score 9.5, 0 accepted / 3 broken / 1 blind of 20 runs, $19.1 per task
+4 accepted, 3 broken by a counterexample, 0 blind, of 20 runs
+gpt-5.6-sol · max — score 28.5, 4 accepted / 3 broken / 0 blind of 20 runs, $143.5 per task
+kimi-k3 · max — score 19.5, 2 accepted / 3 broken / 0 blind of 20 runs, $28.9 per task
+0 accepted, 1 broken by a counterexample, 1 blind, of 20 runs
+claude-sonnet-5 · low — score 4.0, 0 accepted / 1 broken / 1 blind of 20 runs, $4.4 per task
+1 accepted, 3 broken by a counterexample, 0 blind, of 20 runs
+claude-sonnet-5 · medium — score 15.0, 1 accepted / 3 broken / 0 blind of 20 runs, $11.9 per task
+0 accepted, 2 broken by a counterexample, 2 blind, of 20 runs
+claude-sonnet-5 · high — score 6.0, 0 accepted / 2 broken / 2 blind of 20 runs, $24.6 per task
+1 accepted, 1 broken by a counterexample, 1 blind, of 20 runs
+claude-sonnet-5 · xhigh — score 9.0, 1 accepted / 1 broken / 1 blind of 20 runs, $27.0 per task
+claude-sonnet-5 · max — score 8.5, 1 accepted / 1 broken / 1 blind of 20 runs, $27.5 per task
+gpt-5.6-luna · none — score 4.0, 0 accepted / 1 broken / 1 blind of 20 runs, $1.6 per task
+gpt-5.6-luna · low — score 4.0, 0 accepted / 1 broken / 1 blind of 20 runs, $1.7 per task
+0 accepted, 0 broken by a counterexample, 1 blind, of 20 runs
+gpt-5.6-luna · medium — score 0.0, 0 accepted / 0 broken / 1 blind of 20 runs, $1.7 per task
+0 accepted, 1 broken by a counterexample, 2 blind, of 20 runs
+gpt-5.6-luna · high — score 4.0, 0 accepted / 1 broken / 2 blind of 20 runs, $1.8 per task
+gpt-5.6-luna · xhigh — score 5.5, 0 accepted / 2 broken / 2 blind of 20 runs, $2.9 per task
+gpt-5.6-luna · max — score 10.5, 0 accepted / 3 broken / 1 blind of 20 runs, $2.8 per task
+2 accepted, 0 broken by a counterexample, 4 blind, of 20 runs
+qwen3.8-max · max — score 10.0, 2 accepted / 0 broken / 4 blind of 20 runs, $14.5 per task
+0 accepted, 2 broken by a counterexample, 1 blind, of 20 runs
+dsv4-flash · max — score 7.0, 0 accepted / 2 broken / 1 blind of 20 runs, $4.3 per task
+glm-5.2 · max — score 6.5, 0 accepted / 2 broken / 1 blind of 20 runs, $17.5 per task
+lang01 · claude-opus-5 — best 0, 0/5 gate, 4/5 ceiling
+lang01 · gpt-5.6-sol — best 0, 3/6 gate, 0/6 ceiling
+lang01 · claude-sonnet-5 — best 0, 0/5 gate, 1/5 ceiling
+lang01 · gpt-5.6-luna — best 0, 3/6 gate, 0/6 ceiling
+lang01 · kimi-k3 — best 0, 0/1 gate, 0/1 ceiling
+lang01 · qwen3.8-max — best 0, 0/1 gate, 0/1 ceiling
+lang01 · dsv4-flash — best 0, 0/1 gate, 0/1 ceiling
+lang01 · glm-5.2 — best 0, 0/1 gate, 0/1 ceiling
+lang02 · claude-opus-5 — best 90, 5/5 gate, 3/5 ceiling
+lang02 · gpt-5.6-sol — best 0, 1/6 gate, 0/6 ceiling
+lang02 · claude-sonnet-5 — best 0, 5/5 gate, 0/5 ceiling
+lang02 · gpt-5.6-luna — best 0, 4/6 gate, 0/6 ceiling
+lang02 · kimi-k3 — best 90, 1/1 gate, 1/1 ceiling
+lang02 · qwen3.8-max — best 0, 1/1 gate, 0/1 ceiling
+lang02 · dsv4-flash — best 0, 1/1 gate, 0/1 ceiling
+lang02 · glm-5.2 — best 0, 0/1 gate, 0/1 ceiling
+lang03 · claude-opus-5 — best 0, 4/5 gate, 0/5 ceiling
+lang03 · gpt-5.6-sol — best 0, 4/6 gate, 0/6 ceiling
+lang03 · claude-sonnet-5 — best 0, 1/5 gate, 0/5 ceiling
+lang03 · gpt-5.6-luna — best 0, 4/6 gate, 0/6 ceiling
+lang03 · kimi-k3 — best 0, 1/1 gate, 0/1 ceiling
+lang03 · qwen3.8-max — best 0, 0/1 gate, 0/1 ceiling
+lang03 · dsv4-flash — best 0, 0/1 gate, 0/1 ceiling
+lang03 · glm-5.2 — best 0, 0/1 gate, 0/1 ceiling
+lang04 · claude-opus-5 — best 0, 5/5 gate, 0/5 ceiling
+lang04 · gpt-5.6-sol — best 0, 2/6 gate, 0/6 ceiling
+lang04 · claude-sonnet-5 — best 0, 4/5 gate, 0/5 ceiling
+lang04 · gpt-5.6-luna — best 0, 5/6 gate, 0/6 ceiling
+lang04 · kimi-k3 — best 0, 1/1 gate, 0/1 ceiling
+lang04 · qwen3.8-max — best 0, 1/1 gate, 0/1 ceiling
+lang04 · dsv4-flash — best 0, 1/1 gate, 0/1 ceiling
+lang04 · glm-5.2 — best 0, 1/1 gate, 0/1 ceiling
+lang05 · claude-opus-5 — best 100, 5/5 gate, 4/5 ceiling
+lang05 · gpt-5.6-sol — best 0, 1/6 gate, 0/6 ceiling
+lang05 · claude-sonnet-5 — best 0, 5/5 gate, 0/5 ceiling
+lang05 · gpt-5.6-luna — best 0, 3/6 gate, 0/6 ceiling
+lang05 · kimi-k3 — best 0, 1/1 gate, 0/1 ceiling
+lang05 · qwen3.8-max — best 0, 1/1 gate, 0/1 ceiling
+lang05 · dsv4-flash — best 0, 1/1 gate, 0/1 ceiling
+lang05 · glm-5.2 — best 0, 1/1 gate, 0/1 ceiling
+lang06 · claude-opus-5 — best 60, 3/5 gate, 3/5 ceiling
+lang06 · gpt-5.6-sol — best 0, 1/6 gate, 0/6 ceiling
+lang06 · claude-sonnet-5 — best 0, 2/5 gate, 0/5 ceiling
+lang06 · gpt-5.6-luna — best 0, 2/6 gate, 0/6 ceiling
+lang06 · kimi-k3 — best 0, 0/1 gate, 0/1 ceiling
+lang06 · qwen3.8-max — best 0, 1/1 gate, 0/1 ceiling
+lang06 · dsv4-flash — best 0, 1/1 gate, 0/1 ceiling
+lang06 · glm-5.2 — best 0, 0/1 gate, 0/1 ceiling
+lang07 · claude-opus-5 — best 100, 5/5 gate, 1/5 ceiling
+lang07 · gpt-5.6-sol — best 100, 2/6 gate, 3/6 ceiling
+lang07 · claude-sonnet-5 — best 0, 4/5 gate, 0/5 ceiling
+lang07 · gpt-5.6-luna — best 0, 0/6 gate, 1/6 ceiling
+lang07 · kimi-k3 — best 0, 1/1 gate, 0/1 ceiling
+lang07 · qwen3.8-max — best 0, 1/1 gate, 0/1 ceiling
+lang07 · dsv4-flash — best 0, 1/1 gate, 0/1 ceiling
+lang07 · glm-5.2 — best 0, 0/1 gate, 0/1 ceiling
+fw01 · claude-opus-5 — best 0, 5/5 gate, 0/5 ceiling
+fw01 · gpt-5.6-sol — best 0, 6/6 gate, 0/6 ceiling
+fw01 · claude-sonnet-5 — best 0, 5/5 gate, 0/5 ceiling
+fw01 · gpt-5.6-luna — best 0, 5/6 gate, 0/6 ceiling
+fw01 · kimi-k3 — best 0, 1/1 gate, 0/1 ceiling
+fw01 · qwen3.8-max — best 0, 0/1 gate, 1/1 ceiling
+fw01 · dsv4-flash — best 0, 1/1 gate, 0/1 ceiling
+fw01 · glm-5.2 — best 0, 1/1 gate, 0/1 ceiling
+fw02 · claude-opus-5 — best 0, 2/5 gate, 0/5 ceiling
+fw02 · gpt-5.6-sol — best 0, 6/6 gate, 0/6 ceiling
+fw02 · claude-sonnet-5 — best 0, 1/5 gate, 0/5 ceiling
+fw02 · gpt-5.6-luna — best 0, 4/6 gate, 0/6 ceiling
+fw02 · kimi-k3 — best 0, 0/1 gate, 0/1 ceiling
+fw02 · qwen3.8-max — best 0, 0/1 gate, 1/1 ceiling
+fw02 · dsv4-flash — best 0, 0/1 gate, 0/1 ceiling
+fw02 · glm-5.2 — best 0, 0/1 gate, 0/1 ceiling
+fw03 · claude-opus-5 — best 100, 5/5 gate, 5/5 ceiling
+fw03 · gpt-5.6-sol — best 0, 6/6 gate, 0/6 ceiling
+fw03 · claude-sonnet-5 — best 0, 5/5 gate, 0/5 ceiling
+fw03 · gpt-5.6-luna — best 0, 6/6 gate, 0/6 ceiling
+fw03 · kimi-k3 — best 0, 1/1 gate, 0/1 ceiling
+fw03 · qwen3.8-max — best 0, 1/1 gate, 0/1 ceiling
+fw03 · dsv4-flash — best 0, 1/1 gate, 0/1 ceiling
+fw03 · glm-5.2 — best 0, 1/1 gate, 0/1 ceiling
+fw04 · claude-opus-5 — best 100, 5/5 gate, 4/5 ceiling
+fw04 · gpt-5.6-sol — best 100, 6/6 gate, 1/6 ceiling
+fw04 · claude-sonnet-5 — best 0, 5/5 gate, 0/5 ceiling
+fw04 · gpt-5.6-luna — best 0, 6/6 gate, 0/6 ceiling
+fw04 · kimi-k3 — best 0, 1/1 gate, 0/1 ceiling
+fw04 · qwen3.8-max — best 0, 0/1 gate, 1/1 ceiling
+fw04 · dsv4-flash — best 80, 1/1 gate, 1/1 ceiling
+fw04 · glm-5.2 — best 0, 1/1 gate, 0/1 ceiling
+fw05 · claude-opus-5 — best 60, 5/5 gate, 1/5 ceiling
+fw05 · gpt-5.6-sol — best 0, 5/6 gate, 0/6 ceiling
+fw05 · claude-sonnet-5 — best 0, 3/5 gate, 0/5 ceiling
+fw05 · gpt-5.6-luna — best 0, 6/6 gate, 0/6 ceiling
+fw05 · kimi-k3 — best 0, 1/1 gate, 0/1 ceiling
+fw05 · qwen3.8-max — best 0, 0/1 gate, 1/1 ceiling
+fw05 · dsv4-flash — best 0, 1/1 gate, 0/1 ceiling
+fw05 · glm-5.2 — best 0, 1/1 gate, 0/1 ceiling
+fw06 · claude-opus-5 — best 100, 5/5 gate, 5/5 ceiling
+fw06 · gpt-5.6-sol — best 100, 3/6 gate, 5/6 ceiling
+fw06 · claude-sonnet-5 — best 100, 1/5 gate, 5/5 ceiling
+fw06 · gpt-5.6-luna — best 70, 2/6 gate, 3/6 ceiling
+fw06 · kimi-k3 — best 100, 1/1 gate, 1/1 ceiling
+fw06 · qwen3.8-max — best 100, 1/1 gate, 1/1 ceiling
+fw06 · dsv4-flash — best 0, 0/1 gate, 1/1 ceiling
+fw06 · glm-5.2 — best 0, 0/1 gate, 1/1 ceiling
+fw07 · claude-opus-5 — best 0, 5/5 gate, 0/5 ceiling
+fw07 · gpt-5.6-sol — best 0, 1/6 gate, 0/6 ceiling
+fw07 · claude-sonnet-5 — best 0, 2/5 gate, 0/5 ceiling
+fw07 · gpt-5.6-luna — best 0, 0/6 gate, 2/6 ceiling
+fw07 · kimi-k3 — best 0, 0/1 gate, 0/1 ceiling
+fw07 · qwen3.8-max — best 0, 0/1 gate, 0/1 ceiling
+fw07 · dsv4-flash — best 0, 0/1 gate, 0/1 ceiling
+fw07 · glm-5.2 — best 0, 1/1 gate, 0/1 ceiling
+pf01 · claude-opus-5 — best 60, 5/5 gate, 1/5 ceiling
+pf01 · gpt-5.6-sol — best 0, 3/6 gate, 0/6 ceiling
+pf01 · claude-sonnet-5 — best 0, 2/5 gate, 0/5 ceiling
+pf01 · gpt-5.6-luna — best 0, 3/6 gate, 0/6 ceiling
+pf01 · kimi-k3 — best 0, 1/1 gate, 0/1 ceiling
+pf01 · qwen3.8-max — best 0, 0/1 gate, 0/1 ceiling
+pf01 · dsv4-flash — best 0, 1/1 gate, 0/1 ceiling
+pf01 · glm-5.2 — best 0, 0/1 gate, 0/1 ceiling
+pf02 · claude-opus-5 — best 0, 5/5 gate, 0/5 ceiling
+pf02 · gpt-5.6-sol — best 0, 0/6 gate, 0/6 ceiling
+pf02 · claude-sonnet-5 — best 0, 4/5 gate, 0/5 ceiling
+pf02 · gpt-5.6-luna — best 0, 2/6 gate, 0/6 ceiling
+pf02 · kimi-k3 — best 0, 0/1 gate, 0/1 ceiling
+pf02 · qwen3.8-max — best 0, 0/1 gate, 0/1 ceiling
+pf02 · dsv4-flash — best 0, 1/1 gate, 0/1 ceiling
+pf02 · glm-5.2 — best 0, 0/1 gate, 0/1 ceiling
+pf03 · claude-opus-5 — best 100, 4/5 gate, 5/5 ceiling
+pf03 · gpt-5.6-sol — best 100, 4/6 gate, 4/6 ceiling
+pf03 · claude-sonnet-5 — best 80, 5/5 gate, 5/5 ceiling
+pf03 · gpt-5.6-luna — best 80, 2/6 gate, 3/6 ceiling
+pf03 · kimi-k3 — best 100, 1/1 gate, 1/1 ceiling
+pf03 · qwen3.8-max — best 0, 0/1 gate, 0/1 ceiling
+pf03 · dsv4-flash — best 60, 1/1 gate, 1/1 ceiling
+pf03 · glm-5.2 — best 70, 1/1 gate, 1/1 ceiling
+build01 · claude-opus-5 — best 0, 5/5 gate, 0/5 ceiling
+build01 · gpt-5.6-sol — best 50, 4/6 gate, 1/6 ceiling
+build01 · claude-sonnet-5 — best 0, 5/5 gate, 0/5 ceiling
+build01 · gpt-5.6-luna — best 0, 4/6 gate, 0/6 ceiling
+build01 · kimi-k3 — best 60, 1/1 gate, 1/1 ceiling
+build01 · qwen3.8-max — best 0, 0/1 gate, 0/1 ceiling
+build01 · dsv4-flash — best 0, 0/1 gate, 0/1 ceiling
+build01 · glm-5.2 — best 0, 0/1 gate, 0/1 ceiling
+build02 · claude-opus-5 — best 60, 5/5 gate, 4/5 ceiling
+build02 · gpt-5.6-sol — best 70, 4/6 gate, 4/6 ceiling
+build02 · claude-sonnet-5 — best 60, 5/5 gate, 2/5 ceiling
+build02 · gpt-5.6-luna — best 40, 4/6 gate, 1/6 ceiling
+build02 · kimi-k3 — best 40, 1/1 gate, 1/1 ceiling
+build02 · qwen3.8-max — best 0, 0/1 gate, 0/1 ceiling
+build02 · dsv4-flash — best 0, 0/1 gate, 0/1 ceiling
+build02 · glm-5.2 — best 60, 1/1 gate, 1/1 ceiling
+build03 · claude-opus-5 — best 100, 5/5 gate, 5/5 ceiling
+build03 · gpt-5.6-sol — best 90, 6/6 gate, 6/6 ceiling
+build03 · claude-sonnet-5 — best 100, 5/5 gate, 3/5 ceiling
+build03 · gpt-5.6-luna — best 80, 4/6 gate, 6/6 ceiling
+build03 · kimi-k3 — best 0, 1/1 gate, 0/1 ceiling
+build03 · qwen3.8-max — best 100, 1/1 gate, 1/1 ceiling
+build03 · dsv4-flash — best 0, 1/1 gate, 0/1 ceiling
+build03 · glm-5.2 — best 0, 1/1 gate, 0/1 ceiling

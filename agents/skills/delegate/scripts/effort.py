@@ -29,6 +29,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -654,6 +655,17 @@ def compose_extract_brief(packet_text):
     )
 
 
+def delegate_path():
+    """Path to delegate.py. The sibling script wins; PATH is the fallback."""
+    sibling = os.path.join(os.path.dirname(os.path.abspath(__file__)), "delegate.py")
+    if os.path.isfile(sibling):
+        return sibling
+    found = shutil.which("delegate.py")
+    if found:
+        return found
+    raise EffortError("delegate.py: not beside effort.py and not on PATH")
+
+
 def extract_rows(packet_path, out_dir, lane=None):
     """Dispatch an LLM worker to write rows.json. Needs network; tests skip this."""
     if lane is None:
@@ -668,7 +680,7 @@ def extract_rows(packet_path, out_dir, lane=None):
     with open(brief_path, "w", encoding="utf-8", newline="\n") as f:
         f.write(compose_extract_brief(packet_text))
     cmd = [
-        "delegate.py", "dispatch",
+        sys.executable, delegate_path(), "dispatch",
         "--lane", lane,
         "--brief", brief_path,
         "--cwd", os.path.abspath(out_dir),

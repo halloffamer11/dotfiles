@@ -37,10 +37,15 @@ score-and-cost by effort for catalog models: SWE Refactor Bench, Artificial Anal
 Terminal-Bench 4.0. `scripts/effort.py` extracts them — `pack` is deterministic and proven against
 all three live pages, `check` rejects any number not on the page.
 
-**What is still missing before tier and trust can be set.** `effort.py extract`, the inference stage
-between those two, has never dispatched a real packet. Until it has, there is no structured data to
-score from, only two verified halves of a pipeline. That is the next piece of work, and it is small:
-one `extract` run against the SWE Refactor Bench packet, then `check` over the result.
+**The pipeline is proven end to end, 2026-09-09.** One `extract` run against the SWE Refactor Bench
+packet on `flash-high@agy` (121s, run `20260910T015628Z-flash-high@agy-940185dd`) returned 26 rows;
+`check` accepted 26 and rejected 0. Those 26 are every per-effort label the packet carries, and the
+twelve catalog rows — `gpt-5.6-sol` and `gpt-5.6-luna`, `none` through `max` — match the page value
+for value. All 26 came back `unlabelled`, which is the honest answer: swerb publishes no provenance
+badge. So there is now structured score-and-cost data to set tier from.
+
+`extract` could not run at all before this: it invoked a bare `delegate.py`, which is on nobody's
+PATH. It now resolves the sibling script beside `effort.py` and falls back to PATH.
 
 **And one field this can never answer.** `meter_weight` is a property of the ChatGPT Plus plan, not
 of the model. No benchmark reports it. Those ~30 values stay hand-set or locally measured whatever
@@ -57,5 +62,5 @@ the research says.
 - [ ] A generated `ultra` stanza carries `enabled: false`, with the reason in its `basis`
 - [ ] `discover.py --efforts` emits one shared `price` block across a model's efforts, not a prompt per lane
 - [ ] `tests/test_rank.py` covers a disabled lane that would otherwise be the pick
-- [ ] `effort.py extract` completes one real run end to end, so the pipeline is proven, not half-proven
+- [x] `effort.py extract` completes one real run end to end, so the pipeline is proven, not half-proven
 - [ ] Orin enumerates the codex efforts he wants and switches off the rest in one wizard run
