@@ -30,7 +30,6 @@ class Wizard:
                    if lane["tier"] == tier}
             for tier in range(1, 5)
         }
-        self._trust = {name: lane["trust"] for name, lane in lanes_doc["lanes"].items()}
 
     def result(self):
         return self._result
@@ -92,10 +91,6 @@ class Wizard:
                         self._marks[self.tier].remove(name)
                     else:
                         self._marks[self.tier].add(name)
-            elif key in ("1", "2", "3", "4", "5"):
-                name = self._active_name()
-                if name:
-                    self._trust[name] = int(key)
             elif key == "enter":
                 active, _ = self._tier_names()
                 if self.tier == 1 and any(name not in self._marks[1] for name in active):
@@ -149,7 +144,6 @@ class Wizard:
                 result_lanes = copy.deepcopy(self._original_lanes)
                 for name, lane in result_lanes["lanes"].items():
                     lane["tier"] = self._assigned[name]
-                    lane["trust"] = self._trust[name]
                 self._result = (result_lanes, copy.deepcopy(self.routing_doc))
                 self.screen = "done"
             elif key in ("n", "q"):
@@ -192,7 +186,7 @@ class Wizard:
             }
         if self.screen == "tier":
             epoch_names = (self.bench or {}).get("epoch_benchmarks", list(EPOCH_BENCHMARKS))
-            columns = ["mark", "lane", "model", "effort", "trust", *epoch_names, "Epoch mean rank"]
+            columns = ["mark", "lane", "model", "effort", *epoch_names, "Epoch mean rank"]
             if self.bench is not None and self.bench.get("aa_skipped") is None:
                 columns.extend([*self.bench["aa_columns"], "AA mean rank"])
             active, dimmed = self._tier_names()
@@ -203,14 +197,14 @@ class Wizard:
                 marked = name in self._marks[self.tier] if not is_dim else False
                 rows.append({
                     "cells": ["[x]" if marked else "[ ]", name, lane["model"], lane["effort"],
-                              str(self._trust[name]), *self._bench_cells(lane)],
+                              *self._bench_cells(lane)],
                     "marked": marked, "dimmed": is_dim,
                     "cursor": not is_dim and index == self.cursor,
                     "tag": f"tier {self._assigned[name]}" if is_dim else "",
                 })
             return {"screen": "tier", "title": f"Assign tier {self.tier}", "tier": self.tier,
                     "columns": columns, "rows": rows,
-                    "footer": "↑/↓ or j/k: move  space: mark  1-5: trust  enter: next  b: back  q: quit",
+                    "footer": "↑/↓ or j/k: move  space: mark  enter: next  b: back  q: quit",
                     "message": self.message}
         if self.screen == "routing":
             values = [(f"classTier.{name}", self.routing_doc["classTier"][name]) for name in CLASSES]
@@ -225,7 +219,7 @@ class Wizard:
         if self.screen == "confirm":
             rows = []
             for name in self.lanes_doc["lanes"]:
-                rows.append({"cells": [name, f"tier {self._assigned[name]}", f"trust {self._trust[name]}"],
+                rows.append({"cells": [name, f"tier {self._assigned[name]}", ""],
                              "marked": False, "dimmed": False, "cursor": False, "tag": ""})
             for name in CLASSES:
                 rows.append({"cells": [f"classTier.{name}", str(self.routing_doc["classTier"][name]), ""],
@@ -248,7 +242,7 @@ def _fit_table(view, width):
     columns = view["columns"]
     if not columns:
         return [], []
-    priority_names = ("mark", "lane", "trust", "Epoch mean rank")
+    priority_names = ("mark", "lane", "Epoch mean rank")
     priority = [columns.index(name) for name in priority_names if name in columns]
     order = priority + [i for i in range(len(columns)) if i not in priority]
     chosen = []

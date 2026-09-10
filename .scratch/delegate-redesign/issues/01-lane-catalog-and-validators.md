@@ -14,3 +14,22 @@ Tier and trust values are human-set. Nothing in this ticket computes them.
 - [x] A project routing file with one key overrides only that key; the rest falls back to global
 - [x] `note` fields are accepted everywhere and ignored by logic
 - [x] Tests cover each rejection and the override merge
+
+## Decisions 2026-09-10
+
+**q1a — `trust` is removed entirely.** It is not collected, not stored, and not
+used anywhere. Take the field out of the lane schema, out of the validators, out
+of the sample catalog, and out of every consumer. A lane file that still carries
+`trust` is rejected by the unknown-field rule, the same as any other stray key.
+This supersedes the "Tier and trust values are human-set" line above and the
+trust range check in the acceptance list: only `tier` stays human-set, and only
+a tier outside 1..4 is a range error.
+
+**q1b — no class defaults to tier 4, and that is by design.** Tier-4 lanes
+exist in the catalog (`fable-xhigh@claude` in the sample; `fable-xhigh@claude`,
+`astra-high@codex` and `sol-high@codex` in the stowed catalog), but no class in
+`routing.classTier` maps to 4: the highest default is `hard-impl` at 3. That
+missing default is deliberate and must not be "fixed" by raising a class tier.
+Tier 4 is reached by prompting instead, for example "/delegate and increase
+tiers +1 for this work since it is critical" or "/delegate and use tier 4
+models for hard implementation or research tasks". Keep it as it is.

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """bench.py — benchmark ranking report for the human who sets lane tiers.
 
-Evidence for the human's tier and trust decisions; never read by routing
+Evidence for the human's tier decisions; never read by routing
 or any other script, skill, or hook.
 
 Sources:
@@ -578,7 +578,7 @@ def render_report(
     lines = [
         f"# Lane benchmark ranking {date}",
         "",
-        "This report is evidence for the human's tier and trust edits and is read by no script.",
+        "This report is evidence for the human's tier edits and is read by no script.",
         "",
         f"Source: Epoch AI, Benchmarking Hub, {EPOCH_URL}, CC-BY 4.0, fetched {date}",
     ]
@@ -740,7 +740,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="bench.py",
         description=(
-            "Benchmark ranking report for the human's tier and trust decisions. "
+            "Benchmark ranking report for the human's tier decisions. "
             "Never read by routing."
         ),
     )

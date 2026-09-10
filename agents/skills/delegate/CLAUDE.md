@@ -3,7 +3,7 @@
 External worker routing lives in this directory. Read `SKILL.md` first, then use these files as the implementation authority:
 
 - `scripts/catalog.py`: the two configuration files (`~/.config/delegate/lanes.json`, `routing.json`, project override `.delegate/routing.json`), validators, `show`/`check`/`fmt`. `assets/samples/`: the starting catalog from the spec.
-- `scripts/rank.py`: the selection rule over the catalog and the live meters (tier ceiling, trust, pace margin).
+- `scripts/rank.py`: the selection rule over the catalog and the live meters (tier ceiling, pace, pace margin).
 - `scripts/delegate.py`: one run through a pinned ADS relay (`dispatch`), and rank-then-dispatch (`run`). Run directories under `~/.cache/delegate/runs/`, never reused.
 - `scripts/ads.sh`: installs and checks the relay layer, **halloffamer11/delegate-skills** (our fork of amElnagdy) at commit `f14dc1eeb27ae8c6282830566950f832ce366d02`, in `~/.local/share/delegate/ads`. `ads.sh install` is reproducible from that constant. The fork exists to carry the grok read-only fix (ticket 14).
 - `scripts/usage.py`: cached subscription-meter probes. `scripts/events.py`: the monitor ledger encoder (schema unchanged).

@@ -90,7 +90,7 @@ with tempfile.TemporaryDirectory() as td:
     doc1 = write_meters_doc(meters_path, m1)
 
     rows1 = rank.rank("impl", cat, doc1, ALL_HARNESSES)
-    pick1_ok = (rows1[0]["lane"] == "terra-high@codex" and rows1[0]["pick"] is True and rows1[0]["reason"] == "pick")
+    pick1_ok = (rows1[0]["lane"] == "grok46-high@grok" and rows1[0]["pick"] is True and rows1[0]["reason"] == "pick")
     eligible_names = [r["lane"] for r in rows1 if r["eligible"]]
     vetoed_names = [r["lane"] for r in rows1 if not r["eligible"]]
     eligible1_ok = set(eligible_names) == {"terra-high@codex", "sol-high@codex", "grok46-high@grok", "fable-xhigh@claude"}
@@ -111,14 +111,17 @@ with tempfile.TemporaryDirectory() as td:
     cli1_ok = (
         res1.returncode == 0 and
         lines1[0].startswith("# impl") and
-        "1. terra-high@codex" in lines1[1] and lines1[1].endswith("pick") and
+        "1. grok46-high@grok" in lines1[1] and lines1[1].endswith("pick") and
         "vetoed: ceiling (tier 1 < need 2)" in lines1[5] and
         "vetoed: ceiling (tier 1 < need 2)" in lines1[6]
     )
     record("case 1 CLI healthy meters", cli1_ok)
 
     # -------------------------------------------------------------
-    # 2. Steal inside a tier
+    # 2. No steal inside a tier (trust removed 2026-09-10)
+    # Sorting is (tier asc, pace desc), so the highest-paced lane in the tier is
+    # already eligible[0]. Nothing behind it in the same tier can out-pace it,
+    # so the steal rule can only ever fire across tiers (case 3).
     # grok pace 1.06 against codex 0.75
     m2 = [
         meter("codex", weekly=0.55, five_h=0.55, pace=0.75, status="ok"),
@@ -132,11 +135,11 @@ with tempfile.TemporaryDirectory() as td:
     pick2_ok = (
         rows2[0]["lane"] == "grok46-high@grok" and
         rows2[0]["pick"] is True and
-        rows2[0]["reason"] == "stolen by pace: 1.06 >= 0.75 + 0.2"
+        rows2[0]["reason"] == "pick"
     )
     terra2 = next(r for r in rows2 if r["lane"] == "terra-high@codex")
     terra2_ok = (terra2["eligible"] is True and terra2["pick"] is False and terra2["reason"] == "eligible")
-    record("case 2 rank() steal inside tier", pick2_ok and terra2_ok)
+    record("case 2 rank() no steal inside tier", pick2_ok and terra2_ok)
 
     res2 = subprocess.run(
         [sys.executable, RANK_PY, "impl", "--config-dir", cfg_dir, "--meters", meters_path, "--harnesses", ALL_HARNESSES_ARG],
@@ -147,10 +150,10 @@ with tempfile.TemporaryDirectory() as td:
     cli2_ok = (
         res2.returncode == 0 and
         "1. grok46-high@grok" in lines2[1] and
-        "stolen by pace: 1.06 >= 0.75 + 0.2" in lines2[1] and
+        lines2[1].endswith("pick") and
         "terra-high@codex" in lines2[2] and lines2[2].endswith("eligible")
     )
-    record("case 2 CLI steal inside tier", cli2_ok)
+    record("case 2 CLI no steal inside tier", cli2_ok)
 
     # -------------------------------------------------------------
     # 3. Steal by a higher tier
@@ -167,7 +170,7 @@ with tempfile.TemporaryDirectory() as td:
     pick3_ok = (
         rows3[0]["lane"] == "fable-xhigh@claude" and
         rows3[0]["pick"] is True and
-        "stolen by pace: 1.0 >= 0.75 + 0.2" in rows3[0]["reason"]
+        "stolen by pace: 1.0 >= 0.8 + 0.2" in rows3[0]["reason"]
     )
     record("case 3 rank() steal by higher tier", pick3_ok)
 
@@ -278,7 +281,7 @@ with tempfile.TemporaryDirectory() as td:
     doc6_all = write_meters_doc(meters_path, m6_all_unknown)
     rows6_all = rank.rank("impl", cat, doc6_all, ALL_HARNESSES)
     all_unknown6_ok = (
-        rows6_all[0]["lane"] == "terra-high@codex" and
+        rows6_all[0]["lane"] == "grok46-high@grok" and
         rows6_all[0]["pick"] is True and
         rows6_all[0]["reason"] == "pick"
     )
@@ -291,7 +294,7 @@ with tempfile.TemporaryDirectory() as td:
     )
     cli6_ok = (
         res6.returncode == 0 and
-        "1. terra-high@codex" in res6.stdout and
+        "1. grok46-high@grok" in res6.stdout and
         "pick" in res6.stdout
     )
     record("case 6 CLI unknown meter", cli6_ok)
@@ -344,8 +347,8 @@ with tempfile.TemporaryDirectory() as td:
     record("case 8 CLI everything vetoed", cli8_ok)
 
     # -------------------------------------------------------------
-    # 9. scout (need 1): flash-high@agy (trust 4) beats luna-low@codex (trust 3)
-    # Part A: equal paces -> flash wins
+    # 9. scout (need 1): tier 1 holds flash-high@agy and luna-low@codex
+    # Part A: equal paces -> the tie falls to lane name, so flash wins
     m9a = [
         meter("codex", weekly=1.00, five_h=1.00, pace=1.00, status="ok"),
         meter("agy-gemini", weekly=1.00, five_h=1.00, pace=1.00, status="ok"),
@@ -367,7 +370,7 @@ with tempfile.TemporaryDirectory() as td:
     rows9b = rank.rank("scout", cat, doc9b, ALL_HARNESSES)
     scout9b_ok = (rows9b[0]["lane"] == "flash-high@agy" and rows9b[0]["pick"] is True)
 
-    # Part C: with luna pace 3.60 and flash 3.27, luna steals
+    # Part C: with luna pace 3.60 and flash 3.27, luna leads its tier on pace
     m9c = [
         meter("codex", weekly=0.90, five_h=0.90, pace=3.60, status="ok"),
         meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
@@ -379,9 +382,9 @@ with tempfile.TemporaryDirectory() as td:
     scout9c_ok = (
         rows9c[0]["lane"] == "luna-low@codex" and
         rows9c[0]["pick"] is True and
-        "stolen by pace: 3.6 >= 3.27 + 0.2" in rows9c[0]["reason"]
+        rows9c[0]["reason"] == "pick"
     )
-    record("case 9 rank() scout tie-break and steal", scout9a_ok and scout9b_ok and scout9c_ok)
+    record("case 9 rank() scout tie-break and pace order", scout9a_ok and scout9b_ok and scout9c_ok)
 
     res9 = subprocess.run(
         [sys.executable, RANK_PY, "scout", "--config-dir", cfg_dir, "--meters", meters_path, "--harnesses", ALL_HARNESSES_ARG],
@@ -392,9 +395,9 @@ with tempfile.TemporaryDirectory() as td:
     cli9_ok = (
         res9.returncode == 0 and
         "1. luna-low@codex" in lines9[1] and
-        "stolen by pace: 3.6 >= 3.27 + 0.2" in lines9[1]
+        lines9[1].endswith("pick")
     )
-    record("case 9 CLI scout steal", cli9_ok)
+    record("case 9 CLI scout pace order", cli9_ok)
 
     # -------------------------------------------------------------
     # 10. Project override: fake git root with .delegate/routing.json
@@ -445,7 +448,7 @@ with tempfile.TemporaryDirectory() as td:
     )
     data12 = json.loads(res12.stdout)
     required_row_keys = {
-        "lane", "harness", "model", "effort", "tier", "trust", "meter",
+        "lane", "harness", "model", "effort", "tier", "meter",
         "pace", "r", "remaining_weekly", "meter_status", "eligible", "pick", "reason"
     }
     top_keys_ok = all(k in data12 for k in ("class", "need", "margin", "gate", "pick", "rows"))

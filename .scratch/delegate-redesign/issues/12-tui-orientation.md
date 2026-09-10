@@ -2,9 +2,9 @@
 
 **What to build:** Orin ran the TUI wizard for the first time on 2026-09-09 and it worked — six lanes reassigned, `classTier.review` raised, both files valid. What it lacks is anything that explains the decision it is asking for. Every screen shows values and expects the human to already hold the definitions in their head. Four additions, all explanatory, none changing what the wizard writes.
 
-**A start screen.** The wizard currently opens on harness discovery, which answers a question nobody asked. Before it, a screen that says in a few lines what this tool does: you are assigning each lane a tier and a trust, from the best tier down, with benchmark numbers beside each row to inform the tier; nothing is written until the confirm screen; `q` leaves without writing. Name the two files it will touch. Any key continues.
+**A start screen.** The wizard currently opens on harness discovery, which answers a question nobody asked. Before it, a screen that says in a few lines what this tool does: you are assigning each lane a tier, from the best tier down, with benchmark numbers beside each row to inform the tier; nothing is written until the confirm screen; `q` leaves without writing. Name the two files it will touch. Any key continues.
 
-**Tier and trust definitions where the decision is made.** Put them on the start screen and keep a one-line form in the footer of every tier screen. Tier is capability, 1 to 4, and it is a ceiling: a class needing tier 3 can use a tier 3 or 4 lane and nothing lower. Trust is the human's ordering inside a tier, 1 to 5, from experience rather than benchmarks — it breaks ties that the numbers cannot. Neither is computed; both are the human's judgement, which is the whole reason this screen exists.
+**The tier definition where the decision is made.** Put it on the start screen and keep a one-line form in the footer of every tier screen. Tier is capability, 1 to 4, and it is a ceiling: a class needing tier 3 can use a tier 3 or 4 lane and nothing lower. It is not computed; it is the human's judgement, which is the whole reason this screen exists. Lanes alike on tier are equivalent, and ranking separates them by pace.
 
 **A tier reference table on the routing screen.** When the human sets `classTier.review` to 3, nothing on screen says which lanes that admits. Show a compact map of tier to the lanes assigned to it in this session, so the routing numbers are read against real models rather than in the abstract. It must reflect the assignments just made, not the incoming catalog.
 
@@ -15,7 +15,7 @@
 **Status:** open, raised by Orin 2026-09-09 from the first live run of the wizard.
 
 - [ ] A start screen states the task, names both files, and says nothing is written before confirm
-- [ ] Tier and trust are defined on the start screen and recalled in the tier screens' footer
+- [ ] Tier is defined on the start screen and recalled in the tier screens' footer
 - [ ] The routing screen shows a tier-to-lanes map built from this session's assignments
 - [ ] Margin and gate carry a one-line explanation each on the routing screen
 - [ ] `tests/test_setup_tui.py` covers the start screen in the key sequence and asserts the routing view carries the tier map

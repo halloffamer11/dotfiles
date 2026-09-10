@@ -40,8 +40,10 @@ recommendation · key assumptions · failure modes · confidence ·
 what would change my mind.
 
 ## 4. Adjudicate
-Adjudicator: the highest-tier, highest-trust available lane in
-`~/.config/delegate/lanes.json` (reached via the delegate skill if that is not you).
+Adjudicator: the lane that `python3 ~/.claude/skills/delegate/scripts/rank.py review`
+picks (reached via the delegate skill if that is not you). Ask the ranker rather
+than reading `~/.config/delegate/lanes.json` yourself, so this stays correct as
+the selection rule changes.
 - Judge against the brief's success criteria, never by vote count.
 - Name each real disagreement as a crux: what it turns on, what evidence
   would resolve it.

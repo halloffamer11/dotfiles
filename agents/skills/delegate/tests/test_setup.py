@@ -71,7 +71,8 @@ def run_setup(config_dir, discover_path, answers, *extra):
 
 
 def default_answers(lane_count):
-    return "\n" * (lane_count * 2 + 1) + "y\n"
+    # one blank per lane (tier), plus one for the "keep routing as shown?" prompt
+    return "\n" * (lane_count + 1) + "y\n"
 
 
 def load_written(config_dir):
@@ -109,7 +110,6 @@ def case_all_harnesses_write_canonical_samples():
         expected = sample_proposal(catalog.HARNESSES)
         all_sample_values = all(
             lanes["lanes"][name]["tier"] == sample["tier"]
-            and lanes["lanes"][name]["trust"] == sample["trust"]
             for name, sample in lanes_sample["lanes"].items()
         )
         catalog.check_file(os.path.join(cfg, "lanes.json"))
@@ -149,7 +149,6 @@ def case_existing_values_are_prompt_defaults():
         os.makedirs(cfg)
         existing = copy.deepcopy(lanes_sample)
         existing["lanes"]["terra-high@codex"]["tier"] = 3
-        existing["lanes"]["terra-high@codex"]["trust"] = 2
         catalog.write_json(os.path.join(cfg, "lanes.json"), existing)
         catalog.write_json(os.path.join(cfg, "routing.json"), routing_sample)
         discover_path = os.path.join(td, "discover.json")
@@ -159,9 +158,7 @@ def case_existing_values_are_prompt_defaults():
         return (
             result.returncode == 0
             and "tier [3]:" in result.stdout
-            and "trust [2]:" in result.stdout
-            and lanes["lanes"]["terra-high@codex"]["tier"] == 3
-            and lanes["lanes"]["terra-high@codex"]["trust"] == 2,
+            and lanes["lanes"]["terra-high@codex"]["tier"] == 3,
             f"code={result.returncode}, stdout={result.stdout!r}",
         )
 
@@ -171,12 +168,11 @@ def case_one_lane_values_change_only_that_lane():
         cfg = os.path.join(td, "config")
         discover_path = os.path.join(td, "discover.json")
         write_discover(discover_path, catalog.HARNESSES)
-        answers = "4\n1\n" + "\n" * 11 + "y\n"
+        answers = "4\n" + "\n" * 6 + "y\n"
         result = run_setup(cfg, discover_path, answers, "--no-bench")
         lanes, _routing = load_written(cfg)
         changed = sample_proposal(catalog.HARNESSES)
         changed["lanes"]["fable-xhigh@claude"]["tier"] = 4
-        changed["lanes"]["fable-xhigh@claude"]["trust"] = 1
         return lanes == changed and result.returncode == 0, f"code={result.returncode}, lanes={lanes == changed}"
 
 
@@ -227,7 +223,7 @@ def case_out_of_range_retries_then_writes_value():
         cfg = os.path.join(td, "config")
         discover_path = os.path.join(td, "discover.json")
         write_discover(discover_path, catalog.HARNESSES)
-        answers = "9\n3\n" + "\n" * 12 + "y\n"
+        answers = "9\n3\n" + "\n" * 6 + "y\n"
         result = run_setup(cfg, discover_path, answers, "--no-bench")
         lanes, _routing = load_written(cfg)
         return (
@@ -257,7 +253,7 @@ def case_routing_edits_keep_other_classes():
         cfg = os.path.join(td, "config")
         discover_path = os.path.join(td, "discover.json")
         write_discover(discover_path, catalog.HARNESSES)
-        answers = "\n" * 12 + "n\n" + "\n" * 3 + "3\n\n0.3\n\n" + "y\n"
+        answers = "\n" * 6 + "n\n" + "\n" * 3 + "3\n\n0.3\n\n" + "y\n"
         result = run_setup(cfg, discover_path, answers, "--no-bench")
         _lanes, routing = load_written(cfg)
         unchanged = all(

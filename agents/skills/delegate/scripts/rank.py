@@ -15,9 +15,11 @@ The selection rule:
      ceiling, gate, cli).
   3. Sort eligible lanes by:
        tier ascending,
-       trust descending,
        pace descending,
+       lane name ascending,
        lanes with unknown pace (None) sorted last.
+     Two lanes alike on tier and pace are equivalent, so the tie falls to lane
+     name: an arbitrary factor, chosen only to make the pick deterministic.
   4. Initial pick is eligible[0].
   5. Steal rule: evaluate remaining eligible lanes in sorted order. If a lane's
      pace exceeds the current pick's pace by at least routing.margin, it steals
@@ -101,7 +103,6 @@ def rank(cls, cat, meters, present, effort=None):
             meter_status = "unknown"
 
         tier = lane_def.get("tier")
-        trust = lane_def.get("trust")
         harness = lane_def.get("harness")
         model = lane_def.get("model")
         lane_effort = lane_def.get("effort")
@@ -122,7 +123,6 @@ def rank(cls, cat, meters, present, effort=None):
             "model": model,
             "effort": lane_effort,
             "tier": tier,
-            "trust": trust,
             "meter": meter_name,
             "pace": pace,
             "r": r,
@@ -141,9 +141,8 @@ def rank(cls, cat, meters, present, effort=None):
     def sort_key(item):
         unknown = 1 if item["pace"] is None else 0
         t = item["tier"] if item["tier"] is not None else 99
-        tr = item["trust"] if item["trust"] is not None else 0
         p = item["pace"] if item["pace"] is not None else 0.0
-        return (unknown, t, -tr, -p)
+        return (unknown, t, -p, item["lane"])
 
     eligible_rows.sort(key=sort_key)
 
@@ -192,7 +191,6 @@ def format_rows(rows):
         line = (
             f"{idx}. {lane_padded} "
             f"tier={r['tier']} "
-            f"trust={r['trust']} "
             f"pace={pace_str} "
             f"r={r_str} "
             f"{status_str} "

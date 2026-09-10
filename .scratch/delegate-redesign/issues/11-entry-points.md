@@ -10,7 +10,7 @@ The wrapper reads `$ARGUMENTS` as prose constraints, not flags. It resolves the 
 
 `disable-model-invocation: true` **stays** on all four wrappers. They are Orin's manual path. The model never fires them.
 
-**The agent needs the same routing without the wrapper.** `/delegate` is model-invocable and gains the same prose constraint reading: a harness to prefer or avoid, models to exclude, a ceiling on effort, taken from the user's own words in the surrounding request. Ranking is otherwise unchanged — the tier ceiling, trust order, and pace margin still decide. Both paths reach `delegate.py`; neither is a special case of the other.
+**The agent needs the same routing without the wrapper.** `/delegate` is model-invocable and gains the same prose constraint reading: a harness to prefer or avoid, models to exclude, a ceiling on effort, taken from the user's own words in the surrounding request. Ranking is otherwise unchanged — the tier ceiling, pace order, and pace margin still decide. Both paths reach `delegate.py`; neither is a special case of the other.
 
 **Setup has no working entry point.** `SKILL.md` claims "`/delegate setup` is the wizard that builds or revises it". That command does not exist. Typing it passes the word `setup` as `$ARGUMENTS` to `/delegate`, and the body has no instruction that does anything with it, so it silently does nothing. Fix both halves: document the direct command `python3 ~/.claude/skills/delegate/scripts/setup.py`, and teach the `/delegate` body to run the wizard when the arguments ask for setup, so the documented command becomes true rather than deleted.
 

@@ -185,7 +185,6 @@ def ask_lanes(lanes_doc):
         print(f"  meter: {lane['meter']}")
         print(f"  basis: {lane['basis']}")
         lane["tier"] = ask_int("tier", lane["tier"], 1, 4)
-        lane["trust"] = ask_int("trust", lane["trust"], 1, 5)
 
 
 def show_routing(routing_doc):
@@ -211,7 +210,7 @@ def confirm_and_write(lanes_doc, routing_doc, lanes_path, routing_path):
     print(lanes_path)
     print(routing_path)
     for name, lane in lanes_doc["lanes"].items():
-        print(f"{name}: tier {lane['tier']} trust {lane['trust']}")
+        print(f"{name}: tier {lane['tier']}")
     answer = read_answer("write both files? [y/N] ").strip()
     if answer not in ("y", "yes"):
         print("nothing written")

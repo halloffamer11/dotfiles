@@ -679,7 +679,7 @@ def main():
         terra_line = next((ln for ln in res21.stdout.splitlines() if "terra-high@codex" in ln), "")
         ok21 = (
             res21.returncode == 0 and
-            "tier=2 trust=5" in terra_line and
+            "tier=2" in terra_line and
             dir21 is not None
         )
         if ok21:
@@ -689,7 +689,7 @@ def main():
                 "--effort" in argv21 and argv21[argv21.index("--effort") + 1] == "low" and
                 disp21.get("effort") == "low"
             )
-        record("21. run impl --effort low keeps catalog tier/trust", ok21, f"rc={res21.returncode} terra={terra_line} stderr={res21.stderr}")
+        record("21. run impl --effort low keeps catalog tier", ok21, f"rc={res21.returncode} terra={terra_line} stderr={res21.stderr}")
 
         gated_meters = write_meters_doc(os.path.join(tmpdir, "gated_meters.json"), [
             meter("codex", weekly=0.05, five_h=0.05, pace=0.75, status="unavailable"),

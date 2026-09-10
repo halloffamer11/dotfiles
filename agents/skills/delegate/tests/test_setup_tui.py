@@ -89,8 +89,8 @@ try:
            and models[:2] == ["claude-fable-5-1", "gpt-5.6-sol"]
            and models[-1] == "gemini-3.8-flash-high"
            and "98.0" in fable["cells"] and "90.0" in sol["cells"]
-           and all(x == "—" for x in flash["cells"][5:10])
-           and flash["cells"][10].startswith("—"), str(v))
+           and all(x == "—" for x in flash["cells"][4:9])
+           and flash["cells"][9].startswith("—"), str(v))
 except Exception as e:
     record("1 tier 4 selection and benchmark order", False, repr(e))
 
@@ -127,11 +127,10 @@ try:
     w.handle("4")
     finish(w)
     lanes, routing = w.result()
-    expected = copy.deepcopy(LANES)
-    expected["lanes"]["grok46-high@grok"]["trust"] = 4
-    record("4 trust edit changes one lane", lanes == expected and routing == ROUTING)
+    record("4 digit keys are inert on the tier screen",
+           lanes == LANES and routing == ROUTING)
 except Exception as e:
-    record("4 trust edit changes one lane", False, repr(e))
+    record("4 digit keys are inert on the tier screen", False, repr(e))
 
 try:
     w = wizard()

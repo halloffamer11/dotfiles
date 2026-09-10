@@ -114,17 +114,14 @@ record(
     f"{msg0} | {msg5}",
 )
 
-# 2.4 trust 0 and trust 6
+# 2.4 a leftover trust key is rejected as an unknown field (removed 2026-09-10)
 doc = copy.deepcopy(lanes_sample)
-doc["lanes"]["fable-xhigh@claude"]["trust"] = 0
-msg0 = check_catalog_error(catalog.validate_lanes, doc)
-doc["lanes"]["fable-xhigh@claude"]["trust"] = 6
-msg6 = check_catalog_error(catalog.validate_lanes, doc)
+doc["lanes"]["fable-xhigh@claude"]["trust"] = 5
+msg = check_catalog_error(catalog.validate_lanes, doc)
 record(
-    "reject: trust 0 and trust 6",
-    bool(msg0 and "fable-xhigh@claude" in msg0 and "trust" in msg0 and "1 to 5" in msg0 and
-         msg6 and "fable-xhigh@claude" in msg6 and "trust" in msg6 and "1 to 5" in msg6),
-    f"{msg0} | {msg6}",
+    "reject: leftover trust key",
+    bool(msg and "fable-xhigh@claude" in msg and "unknown field" in msg and "trust" in msg),
+    f"{msg}",
 )
 
 # 2.5 tier given as true

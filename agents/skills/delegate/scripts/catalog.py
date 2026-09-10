@@ -177,11 +177,11 @@ def validate_lanes(doc, source="lanes.json"):
 
     allowed_lane_fields = {
         "harness", "model", "effort", "meter", "meter_weight", "timeout",
-        "price", "tier", "trust", "basis", "note"
+        "price", "tier", "basis", "note"
     }
     required_lane_fields = (
         "harness", "model", "effort", "meter", "meter_weight", "timeout",
-        "price", "tier", "trust", "basis"
+        "price", "tier", "basis"
     )
     price_keys = ("in", "cache_read", "cache_write", "out")
 
@@ -257,12 +257,6 @@ def validate_lanes(doc, source="lanes.json"):
         if type(tier) is not int or tier < 1 or tier > 4:
             raise CatalogError(
                 f"{source}: lane '{lane_name}': tier must be a whole number from 1 to 4, got {tier!r}"
-            )
-
-        trust = lane["trust"]
-        if type(trust) is not int or trust < 1 or trust > 5:
-            raise CatalogError(
-                f"{source}: lane '{lane_name}': trust must be an integer from 1 to 5, got {trust!r}"
             )
 
         if not isinstance(lane["basis"], str):
@@ -463,11 +457,11 @@ def show_catalog(cwd=None, config_dir=None, as_json=False):
     print("\n# lanes")
     sorted_lanes = sorted(
         cat["lanes"].items(),
-        key=lambda item: (-item[1]["tier"], -item[1]["trust"], item[0]),
+        key=lambda item: (-item[1]["tier"], item[0]),
     )
     for name, l in sorted_lanes:
         print(
-            f"{name}  {l['tier']}  {l['trust']}  {l['harness']}  {l['model']}  "
+            f"{name}  {l['tier']}  {l['harness']}  {l['model']}  "
             f"{l['effort']}  {l['meter']}  {l['meter_weight']}  {l['timeout']}  {l['basis']}"
         )
 

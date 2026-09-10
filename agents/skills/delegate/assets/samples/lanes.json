@@ -47,7 +47,6 @@
         "out": 50
       },
       "tier": 4,
-      "trust": 5,
       "basis": "frontier; protect: orchestrator meter"
     },
     "sol-high@codex": {
@@ -64,7 +63,6 @@
         "out": 20
       },
       "tier": 3,
-      "trust": 5,
       "basis": "hardest impl and adversarial review"
     },
     "terra-high@codex": {
@@ -81,7 +79,6 @@
         "out": 12
       },
       "tier": 2,
-      "trust": 5,
       "basis": "preferred reviewer and implementor"
     },
     "grok46-high@grok": {
@@ -98,8 +95,7 @@
         "out": 6
       },
       "tier": 2,
-      "trust": 3,
-      "basis": "sink for terra-grade work; not trusted alone"
+      "basis": "sink for terra-grade work; not a lone reviewer"
     },
     "luna-low@codex": {
       "harness": "codex",
@@ -115,7 +111,6 @@
         "out": 1.2
       },
       "tier": 1,
-      "trust": 3,
       "basis": "benchmarks overstate it (Orin)"
     },
     "flash-high@agy": {
@@ -132,7 +127,6 @@
         "out": 3.75
       },
       "tier": 1,
-      "trust": 4,
       "basis": "cheap floor; fabricated citations in 3 impl briefs (ledger)"
     }
   }
