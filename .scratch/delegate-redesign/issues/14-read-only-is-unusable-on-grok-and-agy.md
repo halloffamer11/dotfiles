@@ -77,9 +77,12 @@ corrected too. This also makes grok match `codex-delegate`, which leans on its s
 
 ### Still open
 
-- **agy: fixed locally, not pinned, not pushed** (see the section below). The claim that agy exposes
-  no sandbox flag was wrong — agy 1.1.28 has `--sandbox`, and the fix is the same flag swap grok
-  needed. **This matters more than it looks: `agy` is the only worker CLI installed on omarchy.**
+- **agy: fixed and pushed, still not pinned, so still broken at runtime** (see the section below).
+  The claim that agy exposes no sandbox flag was wrong — agy 1.1.28 has `--sandbox`, and the fix is
+  the same flag swap grok needed. The claim that `agy` is the only worker CLI on omarchy was also
+  wrong: omarchy has all four. That reading came from `ssh omarchy 'command -v codex'`, a
+  non-interactive shell that never activates mise, so every mise-managed tool reported missing. Use
+  `ssh omarchy 'bash -lc "..."'`.
 - The three legibility items above — `blocked` instead of `partial` at the gate, refusing a
   read-only dispatch to a lane with no working read-only mode, and the `map_result` fixture test —
   are unaffected by the upstream fix and still want doing. They are what makes the *next* failure of
@@ -101,10 +104,23 @@ account of itself.
 
 `node test/relay-smoke.mjs --only agy` is all green, including the rewritten read-only assertions.
 
-**Where it lives:** commit `69b2eda` on branch `fix/agy-read-only-plan-mode` in the local ADS clone
-only. Not pushed, and **not pinned** — that branch is based on `master`, so it does not carry the
-grok fix `f14dc1e`, and moving `ADS_COMMIT` to it as it stands would regress grok. `ads.sh` is still
-pinned at `f14dc1e`, so the `--write` workaround is still what agy dispatches need today.
+**Where it lives:** pushed as **PR #120** against `amElnagdy/delegate-skills`, from our fork
+`halloffamer11/delegate-skills`, branch `fix/agy-read-only-plan-mode` @ `75d1968` — commit `69b2eda`
+plus three test assertions. It is **not pinned**, and that is what matters day to day. Verified
+2026-09-10:
 
-**Waiting on Orin:** whether to build an integration branch carrying both fixes and re-pin to it,
-and whether to push the agy branch to the fork as its own PR alongside #119.
+    ads.sh:10                     ADS_COMMIT=f14dc1e…        (the grok fix only)
+    relay.mjs:443 @ f14dc1e       if (opts.readOnly) argv.push("--mode", "plan");
+
+So a read-only agy dispatch still dies at its first tool call, and `--write` is still the workaround
+agy dispatches need today. The two fork branches are deliberately independent — one concern per PR,
+per upstream CONTRIBUTING — so making it live means combining them into one commit and repointing
+`ADS_COMMIT`.
+
+**Hazard on the shared clone:** `ads.sh install` runs `git checkout --detach $ADS_COMMIT` against
+`~/.local/share/delegate/ads`. That moves the tree under any agent working in it — it silently
+reverted edits once already, and made an "all green" run meaningless because it tested the pinned
+commit rather than the change.
+
+**Waiting on Orin:** whether to build an integration branch carrying both fixes and re-pin to it.
+Pushing is done — #119 (grok) and #120 (agy) are both open.
