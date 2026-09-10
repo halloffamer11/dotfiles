@@ -83,5 +83,17 @@ than copied.
 - [ ] `tests/test_bench.py` covers a model with two lanes whose efforts were measured differently, from a fixture, no network
 - [ ] The tier screen for the six astra lanes shows a figure only where one was measured at that effort
 
+## The consuming side is already written 2026-09-10
+
+`bench_page.py` reads a figure's own effort and attributes it per lane, and its
+`_cell_figures` accepts both shapes: the current cell carrying `performance`
+and `effort`, and the contract's cell keyed by measured effort with `unknown` a
+literal key. So `bench.py` can be changed to emit the new shape without
+touching the page, and `tests/test_bench_page.py` already asserts the new shape
+renders — every effort shown in effort order, each attributed on its own, and
+an Artificial Analysis figure attributed by `aa[...]["effort"]`. That test is
+the page-side half of this ticket's last box; the wizard's tier screen is the
+other half and is untouched.
+
 **Status:** open, found 2026-09-10. Blocks a live tier pass: the numbers the
 wizard offers for that decision are currently wrong.

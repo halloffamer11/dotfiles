@@ -15,19 +15,27 @@ The delegate redesign is the only live thread. Spec
 `.scratch/delegate-redesign/issues/`, each carrying its own decisions and a
 "Landed" note; skill context `agents/skills/delegate/CLAUDE.md`.
 
-**Branch `delegate-lane-catalog` is unmerged**, 13 commits ahead of `main` and 2
-behind, suite green at 347 assertions. Tickets 01-16 are implemented. `main` still
-has none of it, and `~/.claude/skills/delegate` symlinks to the **main** checkout —
-so the installed skill has no `discover.py` and no pre-screen, and the four
-`/delegate-*` wrappers cannot be exercised until this merges. Merging conflicts on
-this file only.
+**Branch `bench-aa-effort-slugs` is unmerged**, 21 commits ahead of `main` and 2
+behind, suite green at 355 assertions across 12 files. It contains
+`delegate-lane-catalog`, which is 24 commits behind it; that branch is history now,
+not a second thread. Tickets 01-16 are implemented. `main` still has none of it, and
+`~/.claude/skills/delegate` symlinks to the **main** checkout — so the installed
+skill has no `discover.py` and no pre-screen, and the four `/delegate-*` wrappers
+cannot be exercised until this merges. Merging conflicts on this file only.
 
 **Open, in priority order:**
 
-1. **Ticket 14** — two real gaps: a cancelled-at-the-gate run returns `partial`
+1. **Ticket 17** — a benchmark figure lands on every lane of its model, whatever
+   effort it was measured at, so the wizard's tier screen shows all six astra lanes
+   the same three scores. The page is fixed and reads each figure's own effort; the
+   wizard is not, because `bench.py` still groups by model. This blocks a live tier
+   pass, and it blocks adding the 14 missing codex lanes (sol x5, terra x5, luna x4),
+   which would multiply the wrong attribution. The agreed data contract is in the
+   ticket.
+2. **Ticket 14** — two real gaps: a cancelled-at-the-gate run returns `partial`
    rather than `blocked` naming the gate, and the cancelled-tool-call regression
    test through `map_result` does not exist. The agy box is satisfied by the ADS pin.
-2. **Chunk dispatch does not fit one agy window.** `effort.py` splits a large packet
+3. **Chunk dispatch does not fit one agy window.** `effort.py` splits a large packet
    correctly, but dispatches the chunks in sequence: both live Artificial Analysis
    runs on 2026-09-10 failed at chunk 6 of 7 when the agy **5-hour** meter hit 0%
    (the weekly had just refilled to 95% — the 5h window is the binding constraint,
@@ -45,11 +53,11 @@ this file only.
   `~/.claude/hooks/delegate-gate.py` names `{SKILL_DIR}/delegate.py`, which moved to
   `scripts/delegate.py`, so the hook advises every session to run a path that does
   not exist; and `export DELEGATE_BALANCE=1` is still line 1 of `~/.zshrc.local`.
-- Decide which catalog is authoritative: `stow/delegate/.config/delegate/lanes.json`
-  says `sol-high@codex` is tier 4, the live `~/.config/delegate/lanes.json` says
-  tier 3, and the stowed one alone carries `published_as: ["Fable 5.1"]` on the
-  fable lane (ticket 16). The live file is a regular file, not a stow symlink, so
-  neither drives the other.
+- Reconcile the live catalog with the stowed one, now that the stowed file is the
+  authority (see Settled). The live `~/.config/delegate/lanes.json` is a regular
+  file, not a stow symlink, and still differs: `sol-high@codex` tier 3 against the
+  stowed tier 4, and no `published_as: ["Fable 5.1"]` on the fable lane. Replacing
+  it is a mutating command in Orin's own home, so it is his to run.
 - Decide whether the `~/.claude/CLAUDE.md` Delegation section collapses to one line
   as ticket 09 asks, which would drop the `why-claude` and "a result is a claim"
   rules.
@@ -65,12 +73,13 @@ provenance research behind that choice:
 `.scratch/delegate-redesign/research/2026-09-09-effort-data-sources.md`. Accepted
 rows and their packets are kept as evidence in `.scratch/delegate-redesign/_data/`.
 
-Coverage is uneven and the two sources are not interchangeable: swerb reaches only
+Coverage is uneven and the three sources are not interchangeable: swerb reaches only
 `gpt-5.6-sol` and `gpt-5.6-luna` but publishes slugs; Artificial Analysis and
-Terminal-Bench are wider but publish display names (ticket 16) and their `cost_usd`
-is a whole-run figure, not swerb's per-task one, so never compare costs across
-sources. The AA key is at `~/.config/delegate/aa-key`, mode 600, outside the repo and
-in `.gitignore` — never stow it; this repo is public.
+Terminal-Bench are wider but publish display names (ticket 16). Cost is per-task on
+swerb and on Artificial Analysis, but Terminal-Bench's `display_cost` is a whole-run
+figure. Even the two per-task numbers measure different task sets, so never compare
+costs across sources. The AA key is at `~/.config/delegate/aa-key`, mode 600, outside
+the repo and in `.gitignore` — never stow it; this repo is public.
 
 `flash-high@agy` has no rows in any approved source, so its tier is a judgement from
 its `basis` note rather than from numbers. The AA figures for `gpt-5.6-sol`,
@@ -85,6 +94,9 @@ run high; the report prints that caveat per model.
 - `trust` is gone from the design entirely. Ranking sorts
   `(tier asc, pace desc, lane name asc)`; the name term is an arbitrary deterministic
   tie-break, so a steal only ever crosses tiers (tickets 01 and 02).
+- `stow/delegate/.config/delegate/lanes.json` is the authoritative catalog; the live
+  `~/.config/delegate/lanes.json` follows it, never the other way (Orin,
+  2026-09-10).
 - `ultra` lanes are generated disabled: no source scores them, and automatic task
   delegation contradicts the worker preamble (ticket 15).
 

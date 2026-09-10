@@ -398,15 +398,16 @@ try:
     future["lanes"] = {"sol-high@codex": {"cells": {}, "mean": 1.0, "mean_s": "1.0 (n=1)", "n": 1}}
     page = bench_page.render(future, LANES, None)
     table = page[page.find('<table class="scores">'):]
-    row = table[table.find("gpt-5.6-sol"):table.find("</tr>", table.find("gpt-5.6-sol"))]
+    at = table.find("gpt-5.6-sol")
+    row = table[table.rfind("<tr", 0, at):table.find("</tr>", at)]  # from <tr>, so td 0 is the model
     tds = re.findall(r"<td[^>]*>.*?</td>", row, re.S)
     deepswe, frontier, aa_cell = tds[2], tds[3], tds[-1]
     record("the post-fix cell shape reads: every effort's figure shown, in effort order, "
            "each attributed on its own, and the AA effort attributed too",
            deepswe.count('<span class="fig') == 3
-           and re.findall(r"at (high|max)|effort not stated", deepswe) == ["high", "max", "effort not stated"]
+           and re.findall(r'<span class="at">([^<]*)</span>', deepswe)
+           == ["at high", "at max, not carried", "effort not stated"]
            and deepswe.count('class="fig attributed"') == 1 and 'title="sol-high@codex"' in deepswe
-           and "at max, not carried" in deepswe
            and frontier.count('class="fig unattributed"') == 1 and "at xhigh, not carried" in frontier
            and 'class="fig attributed" title="sol-high@codex">61<span class="at">at high' in aa_cell
            and "Artificial Analysis</th>" in table,
