@@ -270,6 +270,29 @@ def case_routing_edits_keep_other_classes():
         )
 
 
+def case_effort_rows_says_the_prompt_interface_has_no_prescreen():
+    """--effort-rows is TUI-only. A pipe or --plain reads it and does nothing
+    with it, and the instruction a human is handed names the flag, so silence
+    would read as "the pre-screen ran and proposed nothing off"."""
+    with tempfile.TemporaryDirectory() as td:
+        cfg = os.path.join(td, "config")
+        discover_path = os.path.join(td, "discover.json")
+        write_discover(discover_path, catalog.HARNESSES)
+        rows_path = os.path.join(td, "rows.json")
+        with open(rows_path, "w", encoding="utf-8") as f:
+            json.dump([{"source": "t", "model": "gpt-5.6-luna", "effort": "low",
+                        "benchmark": "b", "score": 4.0, "cost_usd": 1.7,
+                        "uncertain": False}], f)
+        result = run_setup(cfg, discover_path, default_answers(len(lanes_sample["lanes"])),
+                           "--no-bench", "--effort-rows", rows_path)
+        said = "--effort-rows" in result.stdout and "pre-screen" in result.stdout
+        wrote = os.path.isfile(os.path.join(cfg, "lanes.json"))
+        lanes, _routing = load_written(cfg)
+        untouched = all("enabled" not in lane for lane in lanes["lanes"].values())
+        return (said and wrote and untouched,
+                f"said={said} wrote={wrote} untouched={untouched} stdout={result.stdout[:300]!r}")
+
+
 for name, case in (
     ("all harnesses write canonical samples", case_all_harnesses_write_canonical_samples),
     ("subset filters lanes and meters", case_subset_filters_lanes_and_meters),
@@ -280,6 +303,8 @@ for name, case in (
     ("out of range retries then writes value", case_out_of_range_retries_then_writes_value),
     ("EOF aborts without writing", case_eof_aborts_without_writing),
     ("routing edits keep other classes", case_routing_edits_keep_other_classes),
+    ("effort rows say the prompt interface has no pre-screen",
+     case_effort_rows_says_the_prompt_interface_has_no_prescreen),
 ):
     try:
         ok, detail = case()

@@ -262,6 +262,14 @@ def main(argv=None):
         lanes_doc, routing_doc, lanes_path, routing_path = load_or_propose(config_dir, discovered)
         plain = args.plain or not sys.stdin.isatty() or not sys.stdout.isatty()
         if plain:
+            if args.effort_rows:
+                # The pre-screen is a selectable screen; there is no prompt-driven
+                # form of it yet. Saying so is the point: the instruction a human
+                # is given names --effort-rows, and a flag that reads as accepted
+                # while nothing acts on it is worse than one that is refused.
+                print("note: --effort-rows drives the pre-screen, which the prompt-driven "
+                      "interface does not have; no lane will be proposed off. Run on a "
+                      "terminal without --plain to use it.")
             show_bench(args, lanes_doc, routing_doc)
             ask_lanes(lanes_doc)
             ask_routing(routing_doc)
