@@ -25,11 +25,32 @@ Also worth recording: grok's advertised tool list in that run was `run_terminal_
 
 **Blocked by:** nothing.
 
+**Half fixed, 2026-09-09 (commit 81011aa).** `ads.sh` now pins our fork
+`halloffamer11/delegate-skills` at `f14dc1eeb27ae8c6282830566950f832ce366d02`, where grok's
+read-only is `--sandbox read-only --always-approve`. The sandbox is kernel-enforced
+(Seatbelt/Landlock) and denies grok's own write tools and shell redirects with EPERM, so it is a
+stronger guarantee than the advisory plan mode it replaced, not a weaker one. **grok read-only
+works.** The installed ADS at `~/.local/share/delegate/ads` is on that commit.
+
+**agy is still broken.** Its relay still maps `--read-only` to `--mode plan` (relay.mjs line 443),
+which auto-denies every permission headlessly. Until that is fixed, an agy run that needs tools must
+be dispatched with `--write` — which maps to `--dangerously-skip-permissions` — and confined by its
+`--cwd`. Four agy research and implementation dispatches were run that way on 2026-09-09 and all
+returned clean, so the workaround is proven, but it is full auto-approve and the confinement is the
+`--cwd`, nothing else.
+
+**Cost of not finishing this.** The session that hit it applied the grok workaround for a defect
+already fixed on disk, because this ticket and the skill's context file both still said grok was
+broken. A half-fixed defect that documentation still reports as fully broken is worse than either
+state alone.
+
 **Status:** open, raised by Orin 2026-09-09: "debug why they failed. this is a defect in the delegate skill itself."
 
 - [ ] A cancelled-at-the-gate run returns `blocked` with a reason naming the permission gate, not `partial`
 - [ ] A read-only dispatch to a lane with no working read-only mode is refused before the relay starts, with the reason
-- [x] The relay's meaning of `--read-only` per harness is written down in the skill's own context file, since it differs and the difference is load-bearing (commit 31154e5)
+- [x] The relay's meaning of `--read-only` per harness is written down in the skill's own context file, since it differs and the difference is load-bearing (commit 31154e5), and corrected for the fork pin on branch `effort-data-tooling`
+- [x] grok read-only executes tools: fork pin `f14dc1e`, sandbox-enforced rather than plan mode (commit 81011aa)
+- [ ] agy read-only executes tools, or `--read-only` on agy is refused before dispatch
 - [x] An upstream issue or PR against amElnagdy/delegate-skills asks for a middle permission setting, linked from this ticket
 - [ ] A regression test drives the cancelled-tool-call event shape through `map_result` from a fixture
 

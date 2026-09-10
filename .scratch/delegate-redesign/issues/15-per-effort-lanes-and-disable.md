@@ -31,6 +31,21 @@ model.
 
 Generating the lanes is `discover.py`'s job (ticket 13): it already lists every model each harness offers, and knows which have no lane. Extend it to emit a lane stanza per effort for a named model, printed for the human to paste, not written to the catalog. Meter, weight, timeout and price still need a human.
 
+**The data question is answered** (`../research/2026-09-09-effort-data-sources.md`, and
+`agents/skills/delegate/assets/sources.json` for the approved sources). Three sources carry
+score-and-cost by effort for catalog models: SWE Refactor Bench, Artificial Analysis, and
+Terminal-Bench 4.0. `scripts/effort.py` extracts them — `pack` is deterministic and proven against
+all three live pages, `check` rejects any number not on the page.
+
+**What is still missing before tier and trust can be set.** `effort.py extract`, the inference stage
+between those two, has never dispatched a real packet. Until it has, there is no structured data to
+score from, only two verified halves of a pipeline. That is the next piece of work, and it is small:
+one `extract` run against the SWE Refactor Bench packet, then `check` over the result.
+
+**And one field this can never answer.** `meter_weight` is a property of the ChatGPT Plus plan, not
+of the model. No benchmark reports it. Those ~30 values stay hand-set or locally measured whatever
+the research says.
+
 **Blocked by:** 13 (discovery), 12 (the wizard screens this adds a toggle to).
 
 **Status:** open, raised by Orin 2026-09-09: "we should have each level. so luna-low, luna-med, luna-high would all be lanes. add an option to disable or turn off certain lanes."
@@ -42,4 +57,5 @@ Generating the lanes is `discover.py`'s job (ticket 13): it already lists every 
 - [ ] A generated `ultra` stanza carries `enabled: false`, with the reason in its `basis`
 - [ ] `discover.py --efforts` emits one shared `price` block across a model's efforts, not a prompt per lane
 - [ ] `tests/test_rank.py` covers a disabled lane that would otherwise be the pick
+- [ ] `effort.py extract` completes one real run end to end, so the pipeline is proven, not half-proven
 - [ ] Orin enumerates the codex efforts he wants and switches off the rest in one wizard run
