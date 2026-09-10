@@ -331,19 +331,21 @@ try:
            and "sol-high@codex" in t4
            and "sol-high@codex" not in t_incoming
            and prefixes[:4] == ["tier 1", "tier 2", "tier 3", "tier 4"]
-           and any("margin:" in line for line in legend)
-           and any("gate:" in line for line in legend)
-           and any("0.2" in line for line in legend)
-           and any("10%" in line for line in legend))
+           # margin and gate lead, so a short window keeps them
+           and legend[0].startswith("margin ")
+           and any(line.startswith("margin 0.2 ") for line in legend)
+           and any(line.startswith("gate 0.1 ") for line in legend)
+           and any("pace" in line for line in legend)
+           and any("10% remaining" in line for line in legend))
     w.handle("enter")
     confirm_legend = w.view().get("legend") or []
     record("14 confirm legend explains classTier, margin and gate",
            w.screen == "confirm"
            and any("classTier:" in line for line in confirm_legend)
-           and any("margin:" in line for line in confirm_legend)
-           and any("gate:" in line for line in confirm_legend)
-           and any("0.2" in line for line in confirm_legend)
-           and any("10%" in line for line in confirm_legend))
+           and any(line.startswith("margin 0.2 ") for line in confirm_legend)
+           and any(line.startswith("gate 0.1 ") for line in confirm_legend)
+           and any("10% remaining" in line for line in confirm_legend)
+           and all(len(line) <= 79 for line in confirm_legend))
     w.handle("y")
     lanes, routing = w.result()
     record("15 key sequence write path is unchanged",
@@ -353,7 +355,7 @@ except Exception as e:
     record("13 routing legend maps this session's assignments", False, repr(e))
 
 
-VIEW_KEYS = {"screen", "title", "tier", "columns", "rows", "footer", "message", "body", "legend"}
+VIEW_KEYS = {"screen", "title", "tier", "columns", "rows", "footer", "message", "body", "legend", "steps"}
 
 
 def row_for(view, lane):
@@ -721,5 +723,61 @@ except OSError as e:
     print(f"SKIP pty smoke: {e}")
 except Exception as e:
     record("10 pty smoke", False, repr(e))
+
+try:
+    # every screen with a predecessor can reach it. discovery advanced on any key,
+    # so `b` there moved FORWARD, which is the one thing a back key must not do.
+    w = wizard()
+    w.handle("enter")
+    assert w.screen == "discovery", w.screen
+    w.handle("b")
+    back_to_start = w.screen == "start"
+
+    w.handle("enter"); w.handle("enter")
+    assert w.screen == "prescreen", w.screen
+    w.handle("b")
+    back_to_discovery = w.screen == "discovery"
+
+    w.handle("enter"); w.handle("enter")
+    assert w.screen == "tier" and w.tier == 4, (w.screen, w.tier)
+    w.handle("b")
+    back_to_prescreen = w.screen == "prescreen"
+
+    record("every screen with a predecessor has a working back key",
+           back_to_start and back_to_discovery and back_to_prescreen,
+           f"start={back_to_start} discovery={back_to_discovery} prescreen={back_to_prescreen}")
+except Exception as e:
+    record("every screen with a predecessor has a working back key", False, repr(e))
+
+
+try:
+    # the step marker brackets exactly the screen you are on, and fits 80 columns
+    w = wizard()
+    marks = []
+    for _ in range(9):
+        v = w.view()
+        if v["screen"] in ("routing", "confirm", "done", "quit"):
+            marks.append((v["screen"], v["steps"]))
+            break
+        marks.append((v["screen"], v["steps"]))
+        w.handle("enter")
+
+    expected = {"start": "[start]", "discovery": "[harnesses]", "prescreen": "[carry]",
+                "routing": "[routing]"}
+    ok = all(len(m) <= 79 for _, m in marks)
+    ok = ok and all(m.count("[") == 1 and m.count("]") == 1 for _, m in marks)
+    for screen, m in marks:
+        if screen in expected:
+            ok = ok and expected[screen] in m
+    tier_marks = [m for sc, m in marks if sc == "tier"]
+    ok = ok and ["[T4]" in tier_marks[0], "[T3]" in tier_marks[1]] == [True, True]
+    # the terminal screens have no step to be at
+    w2 = wizard(); w2.handle("q")
+    ok = ok and w2.view()["steps"] == ""
+    record("step marker brackets the current screen and fits 80 columns", ok,
+           f"marks={marks[:3]}")
+except Exception as e:
+    record("step marker brackets the current screen and fits 80 columns", False, repr(e))
+
 
 sys.exit(1 if fails else 0)

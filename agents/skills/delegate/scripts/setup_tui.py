@@ -9,8 +9,7 @@ from catalog import CLASSES, EFFORTS, HARNESSES
 # column 79 is clipped. Keep each one under that; a legend cut mid-sentence
 # explains nothing.
 TIER_ONELINER = "Tier: capability 1-4, a ceiling — needing 3 means tier 3 or 4, never lower."
-MARGIN_LEGEND = "margin: pace a lower lane must beat the pick by to steal the job (0.2 = by 0.2)"
-GATE_LEGEND = "gate: meter-remaining floor; a lane below it is skipped (0.1 = under 10%)"
+PACE_LEGEND = "pace = unspent quota vs time left in the week. Above 1.0 it will expire unused."
 CLASSTIER_LEGEND = "classTier: a class needing N uses a lane of tier N or higher, never lower."
 TIER_FOOTER = "↑/↓/j/k: move  space: mark  x: on/off  enter: next  b: back  o: bench  q: quit"
 TIER_OFF_LEGEND = "dim: assigned a higher tier.  tag off: switched off (still takes a tier)."
@@ -105,6 +104,21 @@ def propose_enabled(lanes_doc, effort_rows):
         else:
             out[name] = (True, "not dominated")
     return out
+
+
+# The run in order, for the marker on every screen. Tier is four screens, counted
+# down from the best, so they are listed individually rather than as one step.
+STEPS = (
+    ("start", "start"),
+    ("discovery", "harnesses"),
+    ("prescreen", "carry"),
+    ("tier4", "T4"),
+    ("tier3", "T3"),
+    ("tier2", "T2"),
+    ("tier1", "T1"),
+    ("routing", "routing"),
+    ("confirm", "confirm"),
+)
 
 
 class Wizard:
@@ -202,7 +216,14 @@ class Wizard:
             self.screen = "discovery"
             return
         if self.screen == "discovery":
-            self._enter_prescreen()
+            # every other screen with a predecessor has `b`; this one advanced on
+            # any key, so `b` moved forward, which is the one thing it must not do
+            if key == "b":
+                self.screen = "start"
+                self.cursor = 0
+                self.message = ""
+            else:
+                self._enter_prescreen()
             return
         if self.screen == "prescreen":
             names = self._lane_names()
@@ -330,6 +351,7 @@ class Wizard:
             "columns": columns or [], "rows": rows or [],
             "footer": footer, "message": self.message,
             "body": body or [], "legend": legend or [],
+            "steps": self._step_marker(),
         }
 
     def _tier_map_lines(self):
@@ -363,6 +385,33 @@ class Wizard:
         remaining = total - len(chosen)
         suffix = f" (+{remaining} more)" if remaining else ""
         return self._fit(prefix + ", ".join(chosen) + suffix)
+
+    def _margin_legend(self):
+        value = self.routing_doc["margin"]
+        return [
+            f"margin {value} — a lane further down the order takes the job instead of",
+            f"  the top pick only when its pace beats the pick's by more than {value}.",
+        ]
+
+    def _gate_legend(self):
+        value = self.routing_doc["gate"]
+        percent = f"{value * 100:g}%"
+        return [
+            f"gate {value} — a lane is skipped outright once its meter drops below",
+            f"  {percent} remaining, however capable it is.",
+        ]
+
+    def _step_marker(self):
+        """`start · harnesses · carry · T4 · [T3] · T2 · T1 · routing · confirm`.
+
+        The bracketed step is the current one. Returns "" on the terminal screens,
+        which have no step to be at.
+        """
+        if self.screen in ("done", "quit"):
+            return ""
+        here = f"tier{self.tier}" if self.screen == "tier" else self.screen
+        parts = [f"[{label}]" if key == here else label for key, label in STEPS]
+        return " · ".join(parts)
 
     def _discovery_notices(self):
         """Drift notices for the start screen.
@@ -423,7 +472,7 @@ class Wizard:
                 rows=[{"cells": [name, "found" if name in self.discovered else "missing"],
                        "marked": False, "dimmed": name not in self.discovered,
                        "cursor": False, "tag": ""} for name in HARNESSES],
-                footer="any key: continue  q: quit",
+                footer="any key: continue  b: back  q: quit",
             )
         if self.screen == "prescreen":
             names = self._lane_names()
@@ -497,7 +546,11 @@ class Wizard:
                 "routing", "Routing",
                 columns=["setting", "value"], rows=rows,
                 footer="↑/↓ or j/k: move  +/-: adjust  enter: confirm  b: back  q: quit",
-                legend=[*self._tier_map_lines(), MARGIN_LEGEND, GATE_LEGEND],
+                # margin and gate first: they explain the values being edited on
+                # this screen, so they are what must survive a short window. The
+                # tier map is reference and gives way before they do.
+                legend=[*self._margin_legend(), *self._gate_legend(),
+                        PACE_LEGEND, *self._tier_map_lines()],
             )
         if self.screen == "confirm":
             rows = []
@@ -520,7 +573,8 @@ class Wizard:
                 "confirm", "Confirm changes",
                 columns=["item", "value", ""], rows=rows,
                 footer="y: write  n/q: quit without writing  b: back",
-                legend=[CLASSTIER_LEGEND, MARGIN_LEGEND, GATE_LEGEND, CONFIRM_OFF_LEGEND],
+                legend=[CLASSTIER_LEGEND, *self._margin_legend(),
+                        *self._gate_legend(), CONFIRM_OFF_LEGEND],
             )
         return self._frame(self.screen, "Delegate setup")
 
@@ -586,7 +640,19 @@ def run_curses(wizard):
             body = view.get("body") or []
             legend = view.get("legend") or []
             footer_y = height - 3
-            legend_y = footer_y - len(legend)
+            steps = view.get("steps") or ""
+            steps_y = footer_y - 1 if steps else footer_y
+            # The table is the thing you act on, so it keeps its room and the
+            # legend gives way. The clear margin and gate wording runs to nine
+            # lines on the routing screen, which at 80x16 left the table none.
+            table_floor = 2 + (1 if view["columns"] else 0) + min(len(view["rows"]), 4)
+            if legend and steps_y - len(legend) < table_floor:
+                keep = max(0, steps_y - table_floor)
+                if keep < len(legend):
+                    legend = legend[:keep]
+                    if keep:
+                        legend[-1] = "… enlarge the window for the rest"
+            legend_y = steps_y - len(legend)
             y = 2
             for line in body:
                 if y >= legend_y:
@@ -622,6 +688,8 @@ def run_curses(wizard):
                     y += 1
             for offset, line in enumerate(legend):
                 put(legend_y + offset, line)
+            if steps:
+                put(steps_y, steps, curses.A_BOLD)
             put(footer_y, view["footer"])
             put(height - 2, view["message"], curses.A_BOLD)
             stdscr.refresh()

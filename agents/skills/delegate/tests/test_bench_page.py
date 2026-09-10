@@ -117,4 +117,46 @@ try:
 except Exception as e:
     record("write returns path and persists HTML", False, repr(e))
 
+try:
+    import re
+    import xml.etree.ElementTree as ET
+
+    rows = [
+        {"source": "t", "model": "m-a", "effort": "low", "benchmark": "B1",
+         "score": 10.0, "cost_usd": 1.0, "uncertain": False},
+        {"source": "t", "model": "m-a", "effort": "high", "benchmark": "B1",
+         "score": 20.0, "cost_usd": 2.0, "uncertain": False},
+        {"source": "t", "model": "m-b", "effort": "low", "benchmark": "B2",
+         "score": 5.0, "cost_usd": 3.0, "uncertain": False},
+        # excluded: uncertain, and a zero cost that cannot be placed on the axis
+        {"source": "t", "model": "m-c", "effort": "low", "benchmark": "B1",
+         "score": 9.0, "cost_usd": 9.0, "uncertain": True},
+        {"source": "t", "model": "m-d", "effort": "low", "benchmark": "B1",
+         "score": 9.0, "cost_usd": 0, "uncertain": False},
+    ]
+    page = bench_page.render(None, LANES, rows)
+    svgs = re.findall(r"<svg.*?</svg>", page, re.S)
+    for svg in svgs:
+        ET.fromstring(svg)          # raises if the markup is malformed
+    points = page.count("<circle")
+    ok = (
+        len(svgs) == 2                      # one plot per benchmark, B1 and B2
+        and points == 3                     # uncertain and zero-cost rows dropped
+        and "dominates" in page
+        and "cost is not comparable" in page
+    )
+    record("plot draws one well-formed svg per benchmark, skipping unusable rows",
+           ok, f"svgs={len(svgs)} points={points}")
+except Exception as e:
+    record("plot draws one well-formed svg per benchmark, skipping unusable rows", False, repr(e))
+
+
+try:
+    page = bench_page.render(None, LANES, [])
+    record("plot says so when no row carries both a score and a cost",
+           "nothing to plot" in page and "<svg" not in page)
+except Exception as e:
+    record("plot says so when no row carries both a score and a cost", False, repr(e))
+
+
 sys.exit(1 if fails else 0)
