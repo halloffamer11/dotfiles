@@ -22,8 +22,9 @@ prefix = "ctrl+b"
 #   cmd+[ ]              agents
 #   cmd+shift+[ ]        workspaces
 #   cmd+ctrl+[ ]         tabs      (needs the goto_split unbind in ghostty/config)
-#   cmd+ctrl+shift+[ ]   panes
-# Avoid: cmd+alt+[ ] and cmd+1..9 (Hyprland), plain ctrl+alt+<letter> (C0 collisions).
+#   cmd+alt+[ ]          panes     (needs a Hyprland unbind on Omarchy)
+# Avoid: cmd+1..9 (Hyprland), plain ctrl+alt+<letter> (C0 collisions).
+# cmd+alt+[ ] is Hyprland's by default on Omarchy; unbind it there (ticket 15).
 # Verify any new chord against:
 #   hyprctl binds  |  ghostty +list-keybinds --default
 focus_pane_left = ["prefix+h", "cmd+alt+h"]
@@ -37,8 +38,8 @@ next_tab = ["prefix+n", "cmd+ctrl+]"]
 
 zoom = ["prefix+z", "cmd+alt+backslash"]
 
-cycle_pane_previous = "cmd+ctrl+shift+["
-cycle_pane_next = "cmd+ctrl+shift+]"
+cycle_pane_previous = "cmd+alt+["
+cycle_pane_next = "cmd+alt+]"
 
 previous_agent = ["prefix+comma", "cmd+["]
 next_agent = ["prefix+period", "cmd+]"]
