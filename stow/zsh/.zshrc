@@ -62,7 +62,3 @@ fi
 if [ -f "$HOME/.zshrc.local" ]; then
 	source "$HOME/.zshrc.local"
 fi
-
-
-# Added by Antigravity CLI installer
-export PATH="/home/ojh/.local/bin:$PATH"
