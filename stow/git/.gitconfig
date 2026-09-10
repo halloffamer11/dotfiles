@@ -6,3 +6,6 @@
 	autoStash = true
 [rerere]
 	enabled = true
+[user]
+	name = dreiss
+	email = ojhall11@gmail.com
