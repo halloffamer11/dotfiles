@@ -240,11 +240,16 @@ class Wizard:
         return self._result
 
     def _mean(self, lane_name):
+        """This lane's mean rank over its own figures, never its model's.
+
+        A model's figures are spread over the efforts a source measured, and
+        only the ones measured at this lane's effort say anything about this
+        lane (ticket 17).
+        """
         if self.bench is None:
             return None
-        model = self.lanes_doc["lanes"][lane_name]["model"]
-        rec = self.bench.get("models", {}).get(model)
-        return rec["epoch"]["mean"] if rec else None
+        rec = self.bench.get("lanes", {}).get(lane_name)
+        return rec["mean"] if rec else None
 
     def _tier_names(self):
         active = [name for name in self.lanes_doc["lanes"] if name not in self._assigned]
@@ -421,25 +426,55 @@ class Wizard:
                 self.screen = "routing"
                 self.cursor = 0
 
-    def _bench_cells(self, lane):
+    def _bench_columns(self):
+        """The benchmark columns worth their width: the ones some lane on this
+        screen has a figure for.
+
+        Now that a figure reaches only the lane that ran its effort, most
+        columns are empty for most lanes, and an all-dash column costs the
+        width the columns with data need — at 80 the fit dropped every
+        benchmark and left the mean rank alone (ticket 17).
+        """
         epoch_names = (self.bench or {}).get("epoch_benchmarks", list(EPOCH_BENCHMARKS))
-        model_rec = (self.bench or {}).get("models", {}).get(lane["model"])
-        if model_rec:
-            epoch = model_rec["epoch"]
-            values = [
-                "—" if name not in epoch["cells"] else f'{epoch["cells"][name]["performance"] * 100:.1f}'
-                for name in epoch_names
-            ]
-            values.append(epoch["mean_s"])
-        else:
-            values = ["—"] * len(epoch_names) + ["—"]
-        if self.bench is not None and self.bench.get("aa_skipped") is None:
-            aa_names = self.bench["aa_columns"]
-            aa = model_rec.get("aa") if model_rec else None
+        aa_names = (list(self.bench["aa_columns"])
+                    if self.bench is not None and self.bench.get("aa_skipped") is None
+                    else [])
+        if self.bench is None:
+            return list(epoch_names), aa_names
+        lanes = self.bench.get("lanes") or {}
+        measured, aa_measured = set(), set()
+        for name in self.lanes_doc["lanes"]:
+            rec = lanes.get(name) or {}
+            measured.update((rec.get("cells") or {}).keys())
+            aa = rec.get("aa") or {}
+            aa_measured.update(k for k, v in (aa.get("cols") or {}).items() if v is not None)
+        kept = [n for n in epoch_names if n in measured]
+        kept_aa = [n for n in aa_names if n in aa_measured]
+        return (kept or list(epoch_names)), (kept_aa or aa_names)
+
+    def _bench_cells(self, lane_name, epoch_names, aa_names):
+        """This lane's figures, and only its own.
+
+        A figure measured at another effort was produced by another lane of
+        the same model; printing it here made all six astra lanes read the
+        same three scores, so the tier they were being sorted into was a
+        judgement on numbers none of them had produced (ticket 17). An empty
+        column and `— (n=0)` are the honest reading: nobody measured this
+        model at this effort.
+        """
+        rec = (self.bench or {}).get("lanes", {}).get(lane_name)
+        cells = (rec or {}).get("cells") or {}
+        values = [
+            "—" if name not in cells else f'{cells[name]["performance"] * 100:.1f}'
+            for name in epoch_names
+        ]
+        values.append((rec or {}).get("mean_s") or "—")
+        if aa_names:
+            aa = (rec or {}).get("aa")
             for name in aa_names:
                 value = aa["cols"].get(name) if aa else None
                 values.append("—" if value is None else (str(int(value)) if value == int(value) else f"{value:.1f}"))
-            values.append(aa["mean_s"] if aa else "—")
+            values.append((aa or {}).get("mean_s") or "—")
         return values
 
     def _frame(self, screen, title, *, tier=None, columns=None, rows=None,
@@ -633,10 +668,10 @@ class Wizard:
                 elastic="why",
             )
         if self.screen == "tier":
-            epoch_names = (self.bench or {}).get("epoch_benchmarks", list(EPOCH_BENCHMARKS))
+            epoch_names, aa_names = self._bench_columns()
             columns = ["mark", "lane", "model", "effort", *epoch_names, "Epoch mean rank"]
-            if self.bench is not None and self.bench.get("aa_skipped") is None:
-                columns.extend([*self.bench["aa_columns"], "AA mean rank"])
+            if aa_names:
+                columns.extend([*aa_names, "AA mean rank"])
             active, dimmed = self._tier_names()
             rows = []
             for index, name in enumerate(active + dimmed):
@@ -656,7 +691,7 @@ class Wizard:
                 tag = "off" if is_off else ""
                 rows.append({
                     "cells": [box, name, lane["model"], lane["effort"],
-                              *self._bench_cells(lane)],
+                              *self._bench_cells(name, epoch_names, aa_names)],
                     "marked": marked, "dimmed": is_assigned or is_off,
                     "cursor": not is_assigned and index == self.cursor,
                     "tag": tag,

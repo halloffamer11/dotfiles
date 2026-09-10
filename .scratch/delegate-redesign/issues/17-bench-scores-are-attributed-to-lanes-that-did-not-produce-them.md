@@ -74,14 +74,14 @@ than copied.
    effort, not the model's, or the mean is a mean of things that never happened
    together.
 
-- [ ] A benchmark figure reaches a lane only when the measured effort equals the lane's effort
-- [ ] A figure whose effort is unstated reaches no lane, and is still visible somewhere
-- [ ] The mean rank and its `n=` count only figures attributed to that lane
-- [ ] `LANE_EFFORT_ORDER` covers every effort in `catalog.EFFORTS` that a source can report
-- [ ] An Artificial Analysis figure carries the effort it was measured at, through `collect()`
-- [ ] Every effort Epoch measured for one model and benchmark survives collection, not just one pick
-- [ ] `tests/test_bench.py` covers a model with two lanes whose efforts were measured differently, from a fixture, no network
-- [ ] The tier screen for the six astra lanes shows a figure only where one was measured at that effort
+- [x] A benchmark figure reaches a lane only when the measured effort equals the lane's effort
+- [x] A figure whose effort is unstated reaches no lane, and is still visible somewhere
+- [x] The mean rank and its `n=` count only figures attributed to that lane
+- [x] `LANE_EFFORT_ORDER` covers every effort in `catalog.EFFORTS` that a source can report
+- [x] An Artificial Analysis figure carries the effort it was measured at, through `collect()`
+- [x] Every effort Epoch measured for one model and benchmark survives collection, not just one pick
+- [x] `tests/test_bench.py` covers a model with two lanes whose efforts were measured differently, from a fixture, no network
+- [x] The tier screen for the six astra lanes shows a figure only where one was measured at that effort
 
 ## The consuming side is already written 2026-09-10
 
@@ -95,5 +95,70 @@ an Artificial Analysis figure attributed by `aa[...]["effort"]`. That test is
 the page-side half of this ticket's last box; the wizard's tier screen is the
 other half and is untouched.
 
-**Status:** open, found 2026-09-10. Blocks a live tier pass: the numbers the
-wizard offers for that decision are currently wrong.
+## Landed 2026-09-10
+
+Attribution is one rule, `bench.effort_attributes(measured, lane_effort)`:
+equality, with `unknown` matching nothing, because a source that stated no
+effort has not said which lane it measured. `bench.py`, the wizard and the page
+all read it from there.
+
+`epoch.cells[benchmark]` is now keyed by measured effort with `unknown` a
+literal key, so every effort a source measured survives collection instead of
+one pick standing for the model. `models[...]` keeps the model-level view — the
+one figure per benchmark that a comparison against models nobody runs needs,
+picked by `model_figure` — and a new `lanes[lane_name]` view holds only the
+figures measured at that lane's own effort, with `mean`, `mean_s` and `n` over
+those alone. Its ranks compare lane against lane, each at its own effort, so a
+rank is over figures that could have happened together; a lane with no figure on
+a benchmark is absent from that benchmark's ranking rather than ranked last. The
+Artificial Analysis figure carries `effort` through `collect()` and is
+attributed by the same rule.
+
+Two latent bugs fell out of it. `LANE_EFFORT_ORDER` stopped at `xhigh`, so a
+max-effort figure could never be preferred and the distance between two efforts
+was measured on a scale missing its top half. `catalog.MODEL_EFFORT_SUFFIXES`
+had no `-max` or `-ultra`, so an Artificial Analysis row named
+`gpt-6-astra-max` matched no lane model at all and the figure was dropped in
+silence; the table is now longest-suffix-first and covers `EFFORTS`.
+
+Extending that order needed a second one beside it: `EFFORT_PREFERENCE`, the
+order in which an effort may stand for a model, which is the strength order
+without `ultra`. Otherwise a model with an ultra lane had its notes read
+`lane effort ultra` for a lane that is generated disabled and that no source
+scores.
+
+The wizard's tier screen reads the lane view, and shows only the benchmark
+columns some lane on screen has a figure for: with most cells now empty, an
+all-dash column cost the width the columns with data need — at 80 the fit
+dropped every benchmark and left the mean rank alone.
+
+Measured against live Epoch with the live catalog plus `astra-max` and
+`astra-ultra`, which is the screen the report came from:
+
+    gpt-6-astra   DeepSWE      xhigh    74.1
+                  FrontierCode max      53.3
+                  APEX-Agents  unstated 46.7
+
+    astra-xhigh@codex   DeepSWE 74.1                1.0 (n=1)
+    astra-max@codex     FrontierCode 53.3           1.0 (n=1)
+    astra-high@codex    (nothing measured at high)  — (n=0)
+    astra-low@codex     (nothing at low)            — (n=0)
+    astra-medium@codex  (nothing at medium)         — (n=0)
+    astra-ultra@codex   (nothing at ultra)          — (n=0)
+
+Before this, all six read `74.1  53.3  46.7  1.3 (n=3)`. The APEX-Agents figure
+states no effort, so it reaches no lane; it stays in the model view, on the
+page, and in a report note that names it.
+
+Still open, and design rather than data: at 80 columns the fit drops the score
+columns before `model` and `lane`, so the screen the scores are for still
+shows only the mean rank. Column priority belongs with the tier screen's other
+open question (mark versus on/off, and greying a lane already taken at a higher
+tier), which is Orin's to settle first.
+
+Tests: 12 new assertions — 10 in `tests/test_bench.py` driving `collect()` from
+a CSV fixture over two lanes on one model at different efforts, 2 in
+`tests/test_catalog.py` over the suffix table. Suite 367, 0 failures.
+
+**Status:** landed 2026-09-10 on `bench-aa-effort-slugs`. Found the same day
+from the wizard's own tier screen.

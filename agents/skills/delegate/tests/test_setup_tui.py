@@ -78,7 +78,8 @@ def finish(w):
 try:
     collected = data()
     record("collect returns documented keys",
-           set(collected) == {"models", "epoch_benchmarks", "aa_columns", "aa_skipped", "notes"})
+           set(collected) == {"models", "lanes", "epoch_benchmarks", "aa_columns",
+                              "aa_skipped", "notes"}, str(sorted(collected)))
 except Exception as e:
     record("collect returns documented keys", False, repr(e))
 
@@ -91,11 +92,17 @@ try:
     fable = next(r for r in active if r["cells"][1] == "fable-xhigh@claude")
     sol = next(r for r in active if r["cells"][1] == "sol-high@codex")
     flash = next(r for r in active if r["cells"][1] == "flash-high@agy")
+    # a lane is ranked on its own figures: sol runs high and was measured at
+    # high, so it leads; fable runs xhigh and its model was only measured at
+    # max, so it has no figure here at all, the same as flash, which nobody
+    # measured. The old screen showed fable the max figure (ticket 17).
     record("1 tier 4 selection and benchmark order",
            v["tier"] == 4 and fable["marked"]
-           and models[:2] == ["claude-fable-5-1", "gpt-5.6-sol"]
-           and models[-1] == "gemini-3.8-flash-high"
-           and "98.0" in fable["cells"] and "90.0" in sol["cells"]
+           and models[:2] == ["gpt-5.6-sol", "gpt-5.6-terra"]
+           and models[-2:] == ["claude-fable-5-1", "gemini-3.8-flash-high"]
+           and "90.0" in sol["cells"] and sol["cells"][9] == "1.0 (n=5)"
+           and all(x == "—" for x in fable["cells"][4:9])
+           and fable["cells"][9] == "— (n=0)"
            and all(x == "—" for x in flash["cells"][4:9])
            and flash["cells"][9].startswith("—"), str(v))
 except Exception as e:

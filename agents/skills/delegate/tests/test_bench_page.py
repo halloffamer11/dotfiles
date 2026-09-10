@@ -366,7 +366,10 @@ except Exception as e:
 try:
     collected = bench.collect(LANES, epoch_csv=FIXTURE, key_file=None)
     doctored = copy.deepcopy(collected)
-    doctored["models"]["gpt-5.6-sol"]["epoch"]["cells"]["DeepSWE"]["effort"] = "unknown"
+    # the source stated no effort: `unknown` is the cell's key, not a value
+    cell = doctored["models"]["gpt-5.6-sol"]["epoch"]["cells"]["DeepSWE"]
+    doctored["models"]["gpt-5.6-sol"]["epoch"]["cells"]["DeepSWE"] = {
+        bench.UNKNOWN_EFFORT: dict(cell[next(iter(cell))])}
     page = bench_page.render(doctored, LANES, None)
     table = page[page.find('<table class="scores">'):]
     sol = table[table.find("gpt-5.6-sol"):table.find("</tr>", table.find("gpt-5.6-sol"))]

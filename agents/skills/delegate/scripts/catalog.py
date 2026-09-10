@@ -38,10 +38,16 @@ ROUTING_VERSION = "delegate-routing.v1"
 # denotes which of our lane models — so it lives here, beside the lane, where a
 # human can read and correct it: the optional lane field `published_as`.
 NORM_SEP = re.compile(r"[-_. ]+")
+# Longest first, so `-xhigh` is not read as `-high`. Every effort in EFFORTS
+# belongs here: a source names a row `gpt-6-astra-max` as readily as
+# `gpt-6-astra-high`, and while `-max` and `-ultra` were missing such a row
+# matched no lane model at all and the figure was dropped (ticket 17).
 MODEL_EFFORT_SUFFIXES = (
     ("-xhigh", "xhigh"),
-    ("-high", "high"),
     ("-medium", "medium"),
+    ("-ultra", "ultra"),
+    ("-high", "high"),
+    ("-max", "max"),
     ("-low", "low"),
 )
 

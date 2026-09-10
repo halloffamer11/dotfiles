@@ -44,7 +44,21 @@ EPOCH_BENCHMARKS = (
     "SWE-Bench verified",
 )
 EFFORT_FALLBACK = ("max", "xhigh", "high")
-LANE_EFFORT_ORDER = ("xhigh", "high", "medium", "low")
+# Every effort a lane can carry, strongest first: this has to cover
+# catalog.EFFORTS, because a source reports whatever the vendor exposes. While
+# it stopped at `xhigh` a max-effort figure could never be preferred, and the
+# distance between two efforts was measured on a scale missing its top half
+# (ticket 17).
+LANE_EFFORT_ORDER = ("ultra", "max", "xhigh", "high", "medium", "low")
+# When one effort has to stand for a model — the model-level figure, and the
+# `lane effort` a note names — it is the strongest effort a lane actually works
+# at. `ultra` is generated disabled and no source scores it, so it never stands
+# for the model even when a lane carries it.
+EFFORT_PREFERENCE = tuple(e for e in LANE_EFFORT_ORDER if e != "ultra")
+# The key a figure gets when the source stated no effort. It is a key like any
+# other, so the figure is never dropped for being unlabelled - and it matches
+# no lane, so it is never attributed for being unlabelled either.
+UNKNOWN_EFFORT = "unknown"
 AA_COLUMNS = (
     ("Coding Index", ("coding-index",)),
     ("Agentic Index", ("agentic-index",)),
@@ -94,7 +108,7 @@ def lane_effort_of(rec):
     efforts = rec["efforts"]
     if len(efforts) == 1:
         return efforts[0]
-    for effort in LANE_EFFORT_ORDER:
+    for effort in EFFORT_PREFERENCE:
         if effort in efforts:
             return effort
     return efforts[0]
@@ -259,7 +273,7 @@ def match_epoch_rows(epoch_rows, models):
 
 
 def choose_effort(available, lane_efforts):
-    for effort in LANE_EFFORT_ORDER:
+    for effort in EFFORT_PREFERENCE:
         if effort in lane_efforts and effort in available:
             return effort
     for effort in lane_efforts:
@@ -271,41 +285,108 @@ def choose_effort(available, lane_efforts):
     return None
 
 
-def select_epoch_cell(rows, lane_efforts):
-    if not rows:
-        return None
+def _effort_rank(effort):
+    """Sort key over efforts: strongest first, `unknown` last."""
+    if effort in LANE_EFFORT_ORDER:
+        return LANE_EFFORT_ORDER.index(effort)
+    return len(LANE_EFFORT_ORDER)
+
+
+def effort_cell_key(effort):
+    """The cell key for one measured effort, or `unknown` for an unstated one."""
+    return str(effort) if effort else UNKNOWN_EFFORT
+
+
+def collect_epoch_cells(rows):
+    """Every effort measured for one model on one benchmark, keyed by effort.
+
+    Two rows at the same effort are one figure, with `duplicates` naming the
+    disagreement. Two rows at different efforts are two figures: a lane may
+    claim only the figure measured at its own effort, so collapsing them here
+    is what attributed one model's whole sweep to every one of its lanes
+    (ticket 17).
+    """
     by_effort = defaultdict(list)
     for row in rows:
-        by_effort[row["effort"]].append(row)
-    chosen = choose_effort(by_effort, lane_efforts)
+        by_effort[effort_cell_key(row["effort"])].append(row)
+    cell = {}
+    for effort, group in by_effort.items():
+        best = max(group, key=lambda r: r["performance"])
+        scores = {c["performance"] for c in group}
+        dup_pairs = None
+        if len(scores) > 1:
+            dup_pairs = []
+            seen = set()
+            for cand in sorted(group, key=lambda r: (-r["performance"], r["source"])):
+                key = (cand["performance"], cand["source"])
+                if key in seen:
+                    continue
+                seen.add(key)
+                dup_pairs.append(key)
+        cell[effort] = {
+            "performance": best["performance"],
+            "source": best["source"],
+            "duplicates": dup_pairs,
+        }
+    return cell
+
+
+def effort_attributes(measured_effort, lane_effort):
+    """Whether a figure measured at `measured_effort` is this lane's figure.
+
+    The whole of the attribution rule, in one place: equality, and `unknown`
+    matching nothing, because a source that did not state an effort has not
+    said which lane it measured. The report, the wizard and the page all read
+    it from here, so the page can never disagree with the decision the wizard
+    offers (the reason `dominating_row` is exported rather than copied).
+    """
+    if not lane_effort:
+        return False
+    return effort_cell_key(measured_effort) == str(lane_effort)
+
+
+def lane_figure(cell, lane_effort):
+    """The one figure in a cell a lane may claim, or None."""
+    for effort, figure in (cell or {}).items():
+        if effort_attributes(effort, lane_effort):
+            out = dict(figure)
+            out["effort"] = effort
+            return out
+    return None
+
+
+def model_figure(cell, lane_efforts):
+    """The one figure the model-level view reports for a cell: measured at a
+    lane's effort where possible, else the strongest fallback effort, else the
+    best score in the cell. It stands for the model, never for one lane."""
+    if not cell:
+        return None
+    chosen = choose_effort(cell, lane_efforts)
     if chosen is None:
-        best = max(rows, key=lambda r: (r["performance"], r["source"]))
-        chosen = best["effort"]
-        candidates = [r for r in rows if r["effort"] == chosen]
-    else:
-        candidates = by_effort[chosen]
-    best = max(candidates, key=lambda r: r["performance"])
-    scores = sorted({c["performance"] for c in candidates}, reverse=True)
-    dup_pairs = None
-    if len(scores) > 1:
-        dup_pairs = []
-        seen = set()
-        for cand in sorted(candidates, key=lambda r: (-r["performance"], r["source"])):
-            key = (cand["performance"], cand["source"])
-            if key in seen:
-                continue
-            seen.add(key)
-            dup_pairs.append(key)
-    return {
-        "performance": best["performance"],
-        "effort": chosen,
-        "source": best["source"],
-        "duplicates": dup_pairs,
-    }
+        chosen = max(
+            cell.items(),
+            key=lambda kv: (kv[1]["performance"], kv[1]["source"] or ""),
+        )[0]
+    figure = dict(cell[chosen])
+    # the key as the source left it, `unknown` included: the notes and the
+    # page both say which effort a figure was measured at, and "unknown" is
+    # a fact where "" would read as an omission
+    figure["effort"] = chosen
+    return figure
 
 
-def effort_used_label(cells, lane_effort):
-    used = [(bench, cells[bench]["effort"]) for bench in EPOCH_BENCHMARKS if cells.get(bench)]
+def model_figures(cells, lane_efforts):
+    """{benchmark: the model-level figure}, for the tables and the notes."""
+    out = {}
+    for bench, cell in (cells or {}).items():
+        figure = model_figure(cell, lane_efforts)
+        if figure:
+            out[bench] = figure
+    return out
+
+
+def effort_used_label(figures, lane_effort):
+    used = [(bench, figures[bench]["effort"]) for bench in EPOCH_BENCHMARKS if figures.get(bench)]
     if not used:
         return "—"
     unique = {effort for _b, effort in used}
@@ -331,15 +412,19 @@ def sort_report_rows(items):
 def build_epoch_section(models, matched):
     scores_by_bench = {b: {} for b in EPOCH_BENCHMARKS}
     cells_by_model = {}
+    figures_by_model = {}
     for model, rec in models.items():
         lane_efforts = rec["efforts"]
         cells = {}
         for bench in EPOCH_BENCHMARKS:
-            selected = select_epoch_cell(matched.get((model, bench), []), lane_efforts)
-            if selected:
-                cells[bench] = selected
-                scores_by_bench[bench][model] = selected["performance"]
+            cell = collect_epoch_cells(matched.get((model, bench), []))
+            if cell:
+                cells[bench] = cell
         cells_by_model[model] = cells
+        figures = model_figures(cells, lane_efforts)
+        figures_by_model[model] = figures
+        for bench, figure in figures.items():
+            scores_by_bench[bench][model] = figure["performance"]
     ranks_by_bench = {b: rank_by_score(scores_by_bench[b]) for b in EPOCH_BENCHMARKS}
     items = []
     for model, rec in models.items():
@@ -351,6 +436,7 @@ def build_epoch_section(models, matched):
                 "lane_effort": lane_effort_of(rec),
                 "lane_efforts": rec["efforts"],
                 "cells": cells_by_model[model],
+                "figures": figures_by_model[model],
                 "mean": mean,
                 "mean_s": mean_s,
                 "gap": mean is None,
@@ -366,13 +452,13 @@ def build_epoch_section(models, matched):
     ]
     rows = []
     for item in items:
-        cells = item["cells"]
+        figures = item["figures"]
         rows.append(
             [
                 item["lanes"],
                 item["model"],
-                effort_used_label(cells, item["lane_effort"]),
-                *[fmt_pct(cells[b]["performance"] if b in cells else None) for b in EPOCH_BENCHMARKS],
+                effort_used_label(figures, item["lane_effort"]),
+                *[fmt_pct(figures[b]["performance"] if b in figures else None) for b in EPOCH_BENCHMARKS],
                 item["mean_s"],
             ]
         )
@@ -589,15 +675,29 @@ def build_notes(models, epoch_items, aa_items, aa_skipped, aa_keys_used, aa_firs
             cell = item["cells"].get(bench)
             if not cell:
                 continue
-            if cell["effort"] not in lane_efforts:
+            figure = item["figures"].get(bench)
+            if figure and figure["effort"] not in lane_efforts:
                 notes.append(
-                    f"{model} {bench} used effort {cell['effort']} (lane effort {lane_effort})"
+                    f"{model} {bench} used effort {figure['effort']} (lane effort {lane_effort})"
                 )
-            if cell["duplicates"]:
-                shown = ", ".join(
-                    f"{perf:.2f} ({source or 'unknown'})" for perf, source in cell["duplicates"]
+            for effort in sorted(cell, key=lambda e: (_effort_rank(e), e)):
+                dups = cell[effort]["duplicates"]
+                if dups:
+                    shown = ", ".join(
+                        f"{perf:.2f} ({source or 'unknown'})" for perf, source in dups
+                    )
+                    notes.append(f"{model} {bench} duplicate scores: {shown}")
+            # every other effort the source measured is real data that reaches
+            # no lane; the report is the human's evidence, so say so here
+            # rather than let it vanish behind the one figure shown.
+            spare = [e for e in cell if e not in lane_efforts
+                     and not (figure and e == effort_cell_key(figure["effort"]))]
+            for effort in sorted(spare, key=lambda e: (_effort_rank(e), e)):
+                where = "at an unstated effort" if effort == UNKNOWN_EFFORT else f"at effort {effort}"
+                notes.append(
+                    f"{model} {bench} also measured {where} "
+                    f"({cell[effort]['performance']:.2f}); no lane runs that effort"
                 )
-                notes.append(f"{model} {bench} duplicate scores: {shown}")
     if aa_skipped is None:
         for item in (aa_items or []):
             if not item.get("present"):
@@ -655,6 +755,67 @@ def render_report(
     return "\n".join(lines)
 
 
+def build_lane_section(lanes_doc, collected_models, aa_skipped):
+    """One record per catalog lane, holding only the figures measured at that
+    lane's own effort.
+
+    `models` stays the model-level view, which is what a comparison against
+    models nobody runs needs. This is the view a per-lane decision needs: the
+    mean rank and its `n=` count that lane's own figures, so it is a mean of
+    measurements that could have happened together. A lane whose model was
+    never measured at its effort has an empty record, which is the honest
+    answer and not the same as a model nobody measured.
+    """
+    lanes = {}
+    for lane_name, lane in (lanes_doc.get("lanes") or {}).items():
+        model = lane.get("model")
+        effort = lane.get("effort")
+        rec = collected_models.get(model)
+        cells = {}
+        aa = None
+        if rec:
+            epoch_cells = (rec.get("epoch") or {}).get("cells") or {}
+            for bench in EPOCH_BENCHMARKS:
+                figure = lane_figure(epoch_cells.get(bench), effort)
+                if figure:
+                    cells[bench] = figure
+            aa_rec = rec.get("aa")
+            if (aa_skipped is None and aa_rec
+                    and effort_attributes(aa_rec.get("effort"), effort)):
+                aa = {"cols": dict(aa_rec["cols"]), "effort": effort}
+        lanes[lane_name] = {"model": model, "effort": effort, "cells": cells, "aa": aa}
+
+    # ranks compare lane against lane, each at its own effort, so a rank is
+    # over figures that are comparable; a lane with no figure on a benchmark is
+    # absent from that benchmark's ranking rather than ranked last.
+    ranks_by_bench = {}
+    for bench in EPOCH_BENCHMARKS:
+        scores = {name: rec["cells"][bench]["performance"]
+                  for name, rec in lanes.items() if bench in rec["cells"]}
+        if scores:
+            ranks_by_bench[bench] = rank_by_score(scores)
+    for name, rec in lanes.items():
+        mean, mean_s = mean_rank_display(ranks_by_bench, name)
+        rec["mean"] = mean
+        rec["mean_s"] = mean_s
+        rec["n"] = len(rec["cells"])
+    if aa_skipped is None:
+        aa_names = [col for col, _needles in AA_COLUMNS]
+        aa_ranks = {}
+        for col in aa_names:
+            scores = {name: rec["aa"]["cols"][col] for name, rec in lanes.items()
+                      if rec["aa"] and rec["aa"]["cols"].get(col) is not None}
+            if scores:
+                aa_ranks[col] = rank_by_score(scores)
+        for name, rec in lanes.items():
+            if rec["aa"] is None:
+                continue
+            mean, mean_s = mean_rank_display(aa_ranks, name)
+            rec["aa"]["mean"] = mean
+            rec["aa"]["mean_s"] = mean_s
+    return lanes
+
+
 def collect(lanes_doc, epoch_csv=None, aa_json=None, key_file=None):
     """Collect benchmark data for the report and interactive consumers."""
     models = catalog_models(lanes_doc["lanes"])
@@ -685,6 +846,7 @@ def collect(lanes_doc, epoch_csv=None, aa_json=None, key_file=None):
         collected_models[model] = {
             "lanes": sorted(rec["lanes"]),
             "lane_effort": epoch["lane_effort"],
+            "lane_efforts": list(rec["efforts"]),
             "epoch": {
                 "cells": epoch["cells"],
                 "mean": epoch["mean"],
@@ -696,10 +858,15 @@ def collect(lanes_doc, epoch_csv=None, aa_json=None, key_file=None):
                 "cols": aa["cols"],
                 "mean": aa["mean"],
                 "mean_s": aa["mean_s"],
+                # the effort the matched Artificial Analysis row was measured
+                # at, or None when the row named none: without it the figure
+                # could only be attributed to a lane by assuming it
+                "effort": aa.get("effort"),
             },
         }
     return {
         "models": collected_models,
+        "lanes": build_lane_section(lanes_doc, collected_models, aa_skipped),
         "epoch_benchmarks": list(EPOCH_BENCHMARKS),
         "aa_columns": [name for name, _needles in AA_COLUMNS],
         "aa_skipped": aa_skipped,
@@ -722,14 +889,14 @@ def epoch_table_from_collection(data):
     for item in sort_report_rows(items):
         model = item["model"]
         rec = item["rec"]
-        cells = rec["epoch"]["cells"]
+        figures = model_figures(rec["epoch"]["cells"], rec.get("lane_efforts") or [rec["lane_effort"]])
         rows.append(
             [
                 ", ".join(rec["lanes"]),
                 model,
-                effort_used_label(cells, rec["lane_effort"]),
+                effort_used_label(figures, rec["lane_effort"]),
                 *[
-                    fmt_pct(cells[b]["performance"] if b in cells else None)
+                    fmt_pct(figures[b]["performance"] if b in figures else None)
                     for b in data["epoch_benchmarks"]
                 ],
                 rec["epoch"]["mean_s"],

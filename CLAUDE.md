@@ -16,26 +16,28 @@ The delegate redesign is the only live thread. Spec
 "Landed" note; skill context `agents/skills/delegate/CLAUDE.md`.
 
 **Branch `bench-aa-effort-slugs` is unmerged**, 21 commits ahead of `main` and 2
-behind, suite green at 355 assertions across 12 files. It contains
+behind, suite green at 367 assertions across 12 files. It contains
 `delegate-lane-catalog`, which is 24 commits behind it; that branch is history now,
-not a second thread. Tickets 01-16 are implemented. `main` still has none of it, and
+not a second thread. Tickets 01-17 are implemented. `main` still has none of it, and
 `~/.claude/skills/delegate` symlinks to the **main** checkout — so the installed
 skill has no `discover.py` and no pre-screen, and the four `/delegate-*` wrappers
 cannot be exercised until this merges. Merging conflicts on this file only.
 
 **Open, in priority order:**
 
-1. **Ticket 17** — a benchmark figure lands on every lane of its model, whatever
-   effort it was measured at, so the wizard's tier screen shows all six astra lanes
-   the same three scores. The page is fixed and reads each figure's own effort; the
-   wizard is not, because `bench.py` still groups by model. This blocks a live tier
-   pass, and it blocks adding the 14 missing codex lanes (sol x5, terra x5, luna x4),
-   which would multiply the wrong attribution. The agreed data contract is in the
-   ticket.
-2. **Ticket 14** — two real gaps: a cancelled-at-the-gate run returns `partial`
+1. **The tier screen's own design.** Attribution is fixed (ticket 17), so the
+   screen is honest, but two things about it are Orin's to settle: what `[x]`/`[ ]`
+   means beside an on/off column, and whether a lane already taken at a higher tier
+   greys out; and, downstream of both, which columns win the width at 80, where the
+   fit still drops the score columns before `model` and `lane`. TUI work goes to a
+   Claude Opus agent under `/frontend-design:frontend-design`.
+2. **Add the 14 missing codex lanes** — sol x5, terra x5, luna x4. Only astra has a
+   full effort sweep in the catalog, so no other model can be compared across
+   efforts. Safe now that a figure reaches one lane only.
+3. **Ticket 14** — two real gaps: a cancelled-at-the-gate run returns `partial`
    rather than `blocked` naming the gate, and the cancelled-tool-call regression
    test through `map_result` does not exist. The agy box is satisfied by the ADS pin.
-3. **Chunk dispatch does not fit one agy window.** `effort.py` splits a large packet
+4. **Chunk dispatch does not fit one agy window.** `effort.py` splits a large packet
    correctly, but dispatches the chunks in sequence: both live Artificial Analysis
    runs on 2026-09-10 failed at chunk 6 of 7 when the agy **5-hour** meter hit 0%
    (the weekly had just refilled to 95% — the 5h window is the binding constraint,

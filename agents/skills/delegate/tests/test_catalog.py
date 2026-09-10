@@ -619,5 +619,30 @@ record(
     }}) == "claude-fable-5-1",
 )
 
+record(
+    "7.8 every effort strips as a suffix, longest first",
+    [catalog.strip_effort_suffix(f"m-{e}") for e in catalog.EFFORTS]
+    == [("m", e) for e in catalog.EFFORTS]
+    and catalog.strip_effort_suffix("gpt-6-astra-xhigh") == ("gpt-6-astra", "xhigh")
+    and catalog.strip_effort_suffix("gpt-6-astra") == ("gpt-6-astra", None),
+    str([catalog.strip_effort_suffix(f"m-{e}") for e in catalog.EFFORTS]),
+)
+
+# The published name is reconciled against the lane's model, reaching past an
+# effort suffix the *catalog* carries (gemini-3.8-flash-high). A suffix on the
+# *published* side is left alone on purpose: a row states its effort in its own
+# field, and reading `gpt-6-astra-max` as plain `gpt-6-astra` would let a name
+# and a field disagree with nobody noticing. bench.py's aa_match_info is where
+# a suffixed published name is split, and it keeps the effort it split off.
+record(
+    "7.8 a suffix on the published side is not silently dropped",
+    resolve("gpt-6-astra-max", {"lanes": {
+        "a@codex": {"model": "gpt-6-astra", "effort": "high"},
+    }}) is None
+    and resolve("Gemini 3.8 Flash", {"lanes": {
+        "a@agy": {"model": "gemini-3.8-flash-high", "effort": "high"},
+    }}) == "gemini-3.8-flash-high",
+)
+
 
 sys.exit(1 if fails else 0)

@@ -7,7 +7,7 @@ External worker routing lives in this directory. Read `SKILL.md` first, then use
 - `scripts/delegate.py`: one run through a pinned ADS relay (`dispatch`), and rank-then-dispatch (`run`). Run directories under `~/.cache/delegate/runs/`, never reused.
 - `scripts/ads.sh`: installs and checks the relay layer, **halloffamer11/delegate-skills** (our fork of amElnagdy) at commit `f14dc1eeb27ae8c6282830566950f832ce366d02`, in `~/.local/share/delegate/ads`. `ads.sh install` is reproducible from that constant. The fork exists to carry the grok read-only fix (ticket 14).
 - `scripts/usage.py`: cached subscription-meter probes. `scripts/events.py`: the monitor ledger encoder (schema unchanged).
-- `scripts/report.py`: limits, runs, and the lead's run ledger. `scripts/bench.py`: the human-only benchmark ranking under `~/.cache/delegate/bench/`; no routing code reads it.
+- `scripts/report.py`: limits, runs, and the lead's run ledger. `scripts/bench.py`: the human-only benchmark ranking under `~/.cache/delegate/bench/`; no routing code reads it. `collect()` returns two views of the same figures: `models` (one figure per benchmark, for comparing against models nobody runs) and `lanes` (only the figures measured at that lane's own effort, with `mean`/`n` over those). `effort_attributes(measured, lane_effort)` is the whole attribution rule and the wizard and the page both read it from there.
 - `scripts/setup.py`, `scripts/setup_tui.py`: interactive catalog wizard (TUI on a TTY, prompt-driven under `--plain` or pipes).
 - `assets/preamble.md`: brief preamble prepended to worker prompts.
 - `assets/schemas/return.json`: the child return contract, requested in every prompt and parsed out of the relay's final message.

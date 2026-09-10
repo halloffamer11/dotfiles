@@ -16,6 +16,7 @@ import math
 import os
 from collections import defaultdict
 
+import bench
 from catalog import EFFORTS, resolve_published_model
 from setup_tui import certain_effort_rows, dominating_row, propose_enabled
 
@@ -741,7 +742,7 @@ def _figure_cell(entries, model_lanes, model, column_max):
         return '<td class="num quiet">—</td>'
     parts = []
     for effort, value, shown in entries:
-        owners = [n for n, e in model_lanes if e and e == effort]
+        owners = [n for n, e in model_lanes if bench.effort_attributes(effort, e)]
         width = 0.0 if value is None or not column_max else max(0.0, min(1.0, value / column_max)) * 100
         bar = f'<span class="track"><span class="bar" style="width:{width:.0f}%"></span></span>'
         if owners:
