@@ -15,10 +15,12 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 DELEGATE_DIR = os.path.abspath(os.path.join(HERE, "..", "scripts"))
 FIXTURE = os.path.join(HERE, "fixture", "bench-epoch.csv")
+FIXTURES_DISCOVER = os.path.join(HERE, "fixtures", "discover")
 sys.path.insert(0, DELEGATE_DIR)
 
 import bench
 import catalog
+import discover
 from setup_tui import Wizard
 
 LANES = catalog.load_json(os.path.abspath(os.path.join(HERE, "..", "assets", "samples", "lanes.json")))
@@ -40,12 +42,12 @@ def data():
     return bench.collect(copy.deepcopy(LANES), epoch_csv=FIXTURE, key_file=None)
 
 
-def wizard(bench_data=True, message="", effort_rows=None, lanes=None):
+def wizard(bench_data=True, message="", effort_rows=None, lanes=None, discovery=None):
     return Wizard(copy.deepcopy(lanes if lanes is not None else LANES),
                   copy.deepcopy(ROUTING),
                   data() if bench_data else None, DISCOVERED,
                   "/tmp/lanes.json", "/tmp/routing.json", message,
-                  effort_rows=effort_rows)
+                  effort_rows=effort_rows, discovery=discovery)
 
 
 def start(w):
@@ -229,6 +231,68 @@ try:
     record("11d o on start does not advance", w2.screen == "start")
 except Exception as e:
     record("11c any unmapped key leaves start", False, repr(e))
+
+disc_unmapped = {
+    "harnesses": {"agy": {"status": "ok"}},
+    "models": [],
+    "unmapped": [{"harness": "agy", "slug": "gemini-3.8-flash-low", "display_name": "Gemini 3.8 Flash (Low)"}],
+    "retired": [],
+}
+try:
+    w = wizard(discovery=disc_unmapped)
+    v = w.view()
+    body = "\n".join(v.get("body") or [])
+    record("11e start screen names a model with no lane",
+           v["screen"] == "start"
+           and "agy gemini-3.8-flash-low" in body
+           and "Models with no lane" in body)
+except Exception as e:
+    record("11e start screen names a model with no lane", False, repr(e))
+
+disc_retired = {
+    "harnesses": {"codex": {"status": "ok"}},
+    "models": [],
+    "unmapped": [],
+    "retired": [{"lane": "sol-high@codex", "harness": "codex", "model": "gpt-5.6-sol"}],
+}
+try:
+    w = wizard(discovery=disc_retired)
+    v = w.view()
+    body = "\n".join(v.get("body") or [])
+    record("11f start screen names a lane whose model is retired",
+           v["screen"] == "start"
+           and "sol-high@codex" in body
+           and "Lanes with retired models" in body)
+except Exception as e:
+    record("11f start screen names a lane whose model is retired", False, repr(e))
+
+disc_nodrift = {
+    "harnesses": {"codex": {"status": "ok"}},
+    "models": [],
+    "unmapped": [],
+    "retired": [],
+}
+try:
+    w = wizard(discovery=disc_nodrift)
+    v = w.view()
+    body = "\n".join(v.get("body") or [])
+    record("11g start screen shows no-drift line when there is neither",
+           v["screen"] == "start"
+           and "Model discovery: no drift" in body)
+except Exception as e:
+    record("11g start screen shows no-drift line when there is neither", False, repr(e))
+
+try:
+    # one shape: the discover() dict, or a string saying why it did not run
+    w1 = wizard(discovery="subprocess timed out")
+    body1 = "\n".join(w1.view().get("body") or [])
+    w2 = wizard(discovery=None)
+    body2 = "\n".join(w2.view().get("body") or [])
+    record("11h start screen shows discovery-failed line when argument says so",
+           "Model discovery: did not run: subprocess timed out" in body1
+           and "Model discovery: did not run" in body2)
+except Exception as e:
+    record("11h start screen shows discovery-failed line when argument says so", False, repr(e))
 
 try:
     w = wizard()
@@ -575,7 +639,15 @@ try:
     screens.append(w.view())
     w.handle("enter")
     screens.append(w.view())
-    for v in screens:
+    extra_screens = [
+        wizard(discovery=disc_unmapped).view(),
+        wizard(discovery=disc_retired).view(),
+        wizard(discovery=disc_nodrift).view(),
+        wizard(discovery={"error": "subprocess timed out"}).view(),
+        wizard(discovery={"error": "x" * 120}).view(),
+        wizard(discovery=discover.discover(LANES, fixture_dir=FIXTURES_DISCOVER)).view(),
+    ]
+    for v in screens + extra_screens:
         for line in [v["footer"], *(v.get("legend") or []), *(v.get("body") or [])]:
             if len(line) > 80:
                 over.append((v["screen"], len(line), line))
@@ -602,7 +674,8 @@ def pty_smoke():
         proc = subprocess.Popen(
             [sys.executable, os.path.join(DELEGATE_DIR, "setup.py"),
              "--config-dir", config_dir, "--discover-json", discover_path,
-             "--epoch-csv", FIXTURE],
+             "--epoch-csv", FIXTURE,
+             "--fixture-dir", FIXTURES_DISCOVER],
             stdin=slave, stdout=slave, stderr=slave, cwd=DELEGATE_DIR, env=env,
             close_fds=True,
         )

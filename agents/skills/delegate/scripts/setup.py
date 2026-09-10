@@ -11,6 +11,7 @@ import tempfile
 import bench
 import bench_page
 import catalog
+import discover
 import setup_tui
 from catalog import CatalogError, CLASSES, HARNESSES, load_json, validate_lanes, validate_routing, write_json
 
@@ -251,6 +252,8 @@ def main(argv=None):
     parser.add_argument("--epoch-csv", default=None, help="local Epoch CSV for bench.py")
     parser.add_argument("--aa-json", default=None, help="local Artificial Analysis JSON for bench.py")
     parser.add_argument("--effort-rows", default=None, help="effort.py check accepted.json for the pre-screen and benchmark page")
+    parser.add_argument("--no-discover", action="store_true", help="skip model discovery")
+    parser.add_argument("--fixture-dir", default=None, help="fixture directory for harness discovery")
     args = parser.parse_args(argv)
 
     try:
@@ -289,11 +292,23 @@ def main(argv=None):
                 page_path = None
                 page_message = f"benchmark page: {e}"
                 initial_message = f"{initial_message}; {page_message}" if initial_message else page_message
+            # Discovery shells out to three harness CLIs. It reports drift at the
+            # moment the human is already deciding tiers, and it must never be
+            # able to stop them getting there: any failure becomes the reason
+            # string the start screen prints.
+            if args.no_discover:
+                discovery_data = "skipped (--no-discover)"
+            else:
+                try:
+                    discovery_data = discover.discover(lanes_doc, fixture_dir=args.fixture_dir)
+                except Exception as e:
+                    discovery_data = str(e)
             wizard = setup_tui.Wizard(
                 lanes_doc, routing_doc, bench_data, discovered,
                 lanes_path, routing_path, initial_message,
                 bench_page_path=page_path,
                 effort_rows=effort_rows,
+                discovery=discovery_data,
             )
             result = setup_tui.run_curses(wizard)
             if result is None:

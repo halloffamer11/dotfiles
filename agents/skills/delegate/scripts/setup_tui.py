@@ -112,7 +112,7 @@ class Wizard:
 
     def __init__(self, lanes_doc, routing_doc, bench, discovered,
                  lanes_path, routing_path, initial_message="",
-                 bench_page_path=None, effort_rows=None):
+                 bench_page_path=None, effort_rows=None, discovery=None):
         self._original_lanes = copy.deepcopy(lanes_doc)
         self._original_routing = copy.deepcopy(routing_doc)
         self.lanes_doc = copy.deepcopy(lanes_doc)
@@ -120,6 +120,7 @@ class Wizard:
         self.bench = bench
         self.effort_rows = effort_rows
         self.discovered = set(discovered)
+        self.discovery = discovery
         self.lanes_path = lanes_path
         self.routing_path = routing_path
         self.bench_page_path = bench_page_path
@@ -341,22 +342,72 @@ class Wizard:
             lines.append(f"tier {tier}: {names}")
         return lines
 
+    @staticmethod
+    def _fit(line):
+        """One width rule for every start-screen line: the renderer clips at 79."""
+        return line if len(line) <= 79 else line[:76] + "..."
+
+    def _drift_line(self, label, items):
+        """`label (n): a, b (+k more)`, filled to the width and no further."""
+        total = len(items)
+        if total == 1:
+            return self._fit(f"{label}: {items[0]}")
+        prefix = f"{label} ({total}): "
+        chosen = []
+        for index, item in enumerate(items):
+            remaining = total - (index + 1)
+            suffix = f" (+{remaining} more)" if remaining else ""
+            if len(prefix + ", ".join(chosen + [item]) + suffix) > 79 and chosen:
+                break
+            chosen.append(item)
+        remaining = total - len(chosen)
+        suffix = f" (+{remaining} more)" if remaining else ""
+        return self._fit(prefix + ", ".join(chosen) + suffix)
+
+    def _discovery_notices(self):
+        """Drift notices for the start screen.
+
+        `discovery` is either the dict `discover.discover` returns or a string
+        saying why it did not run. Discovery shells out to three harness CLIs, so
+        it must never be able to stop the wizard: a notice is an aid, not a gate.
+        A silent absence and a failed probe must not look the same, so the
+        no-drift case says so in a line of its own.
+        """
+        if self.discovery is None:
+            return [self._fit("Model discovery: did not run")]
+        if isinstance(self.discovery, str):
+            return [self._fit(f"Model discovery: did not run: {self.discovery}")]
+
+        unmapped = self.discovery.get("unmapped") or []
+        retired = self.discovery.get("retired") or []
+        if not unmapped and not retired:
+            return [self._fit("Model discovery: no drift")]
+
+        notices = []
+        if unmapped:
+            notices.append(self._drift_line("Models with no lane", [
+                f"{m.get('harness', '')} {m.get('slug', '')}".strip() for m in unmapped
+            ]))
+        if retired:
+            notices.append(self._drift_line("Lanes with retired models", [
+                f"{r.get('lane', '')} ({r.get('model', '')})" for r in retired
+            ]))
+        return notices
+
     def view(self):
         if self.screen == "start":
             page = self.bench_page_path or "(not written)"
             body = [
-                "You are assigning each lane a tier, from the best tier down,",
-                "with benchmark numbers beside each row.",
-                "Nothing is written until the confirm screen.",
-                "q leaves without writing.",
-                f"Will write {self.lanes_path}",
-                f"Will write {self.routing_path}",
-                f"Benchmark page: {page}",
+                "Assign each lane a tier, best tier down, benchmark numbers beside it.",
+                "Nothing is written until the confirm screen; q leaves without writing.",
+                self._fit(f"Will write {self.lanes_path}"),
+                self._fit(f"Will write {self.routing_path}"),
+                self._fit(f"Benchmark page: {page}"),
+                *self._discovery_notices(),
                 "",
-                "Tier is capability, 1 to 4, and it is a ceiling:",
-                "a class needing tier 3 can use a tier 3 or 4 lane and nothing lower.",
-                "It is not computed; it is your judgement.",
-                "Lanes alike on tier are equivalent, and ranking separates them by pace.",
+                "Tier is capability, 1 to 4, and it is a ceiling: a class needing tier 3",
+                "can use a tier 3 or 4 lane and nothing lower. It is not computed; it is",
+                "your judgement. Lanes alike on tier are equivalent; pace separates them.",
             ]
             footer = ("any key: continue  o: open benchmark page  q: quit"
                       if self.bench_page_path else "any key: continue  q: quit")
