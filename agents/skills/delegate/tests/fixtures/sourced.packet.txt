@@ -1,0 +1,8 @@
+## source demo
+## url https://example.com/board
+## title Leaderboard
+## sha256 deadbeef
+## packed 2026-01-01
+## table 1
+Model	Effort	Benchmark	Score	Cost	Tokens
+gpt-4	high	swe-bench	19	$143.5	2048
