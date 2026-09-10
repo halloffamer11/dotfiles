@@ -181,6 +181,19 @@ def epoch_row_for(report, model):
     return ""
 
 
+def aa_row_for(report, model):
+    in_aa = False
+    for line in report.splitlines():
+        if line.startswith("## Artificial Analysis"):
+            in_aa = True
+            continue
+        if in_aa and line.startswith("## "):
+            break
+        if in_aa and line.startswith("|") and model in line.split("|")[2]:
+            return line
+    return ""
+
+
 def gaps_section(report):
     idx = report.find("## Gaps and notes")
     return report[idx:] if idx >= 0 else ""
@@ -365,6 +378,195 @@ with tempfile.TemporaryDirectory() as td:
         "CSV without expected header exits 1 with bench: message",
         res_bad.returncode == 1 and res_bad.stderr.startswith("bench: "),
         f"code={res_bad.returncode} stderr={res_bad.stderr!r}",
+    )
+
+    # New fixture-driven tests covering AA effort-suffixed matching
+    cfg_effort = os.path.join(td, "cfg-effort")
+    os.makedirs(cfg_effort)
+    shutil.copy(os.path.join(SAMPLES_DIR, "routing.json"), os.path.join(cfg_effort, "routing.json"))
+    with open(os.path.join(SAMPLES_DIR, "lanes.json"), encoding="utf-8") as f:
+        lanes_data = json.load(f)
+    lanes_data["lanes"]["astra-high@codex"] = {
+        "harness": "codex",
+        "model": "gpt-6-astra",
+        "effort": "high",
+        "meter": "codex",
+        "meter_weight": 10,
+        "timeout": "40m",
+        "price": {
+            "in": 10,
+            "cache_read": 1,
+            "cache_write": 12.5,
+            "out": 50,
+        },
+        "tier": 3,
+        "basis": "astra test",
+    }
+    with open(os.path.join(cfg_effort, "lanes.json"), "w", encoding="utf-8") as f:
+        json.dump(lanes_data, f)
+
+    aa_effort_data = {
+        "data": [
+            # 1. Suffixed-only slug: gpt-5.6-sol published only as gpt-5-6-sol-low
+            {
+                "slug": "gpt-5-6-sol-low",
+                "evaluations": {
+                    "coding_index": 78,
+                    "agentic_index": 72,
+                    "terminal_bench_hard": 58,
+                },
+                "median_output_tokens_per_second": 95,
+            },
+            # 2. Exact slug with suffixed siblings: claude-fable-5-1 exact + low + medium
+            {
+                "slug": "claude-fable-5-1-low",
+                "evaluations": {
+                    "coding_index": 50,
+                    "agentic_index": 50,
+                    "terminal_bench_hard": 40,
+                },
+                "median_output_tokens_per_second": 40,
+            },
+            {
+                "slug": "claude-fable-5-1-medium",
+                "evaluations": {
+                    "coding_index": 65,
+                    "agentic_index": 65,
+                    "terminal_bench_hard": 55,
+                },
+                "median_output_tokens_per_second": 40,
+            },
+            {
+                "slug": "claude-fable-5-1",
+                "evaluations": {
+                    "coding_index": 85,
+                    "agentic_index": 80,
+                    "terminal_bench_hard": 70,
+                },
+                "median_output_tokens_per_second": 40,
+            },
+            # 3. xhigh suffix and non-reasoning slug: gpt-6-astra-xhigh and gpt-6-astra-non-reasoning
+            {
+                "slug": "gpt-6-astra-non-reasoning",
+                "evaluations": {
+                    "coding_index": 45,
+                    "agentic_index": 40,
+                    "terminal_bench_hard": 35,
+                },
+                "median_output_tokens_per_second": 120,
+            },
+            {
+                "slug": "gpt-6-astra-xhigh",
+                "evaluations": {
+                    "coding_index": 92,
+                    "agentic_index": 88,
+                    "terminal_bench_hard": 80,
+                },
+                "median_output_tokens_per_second": 65,
+            },
+            # 4. Suffixed slug whose effort agrees with lane: gpt-5.6-luna lane effort is low, slug is low
+            {
+                "slug": "gpt-5-6-luna-low",
+                "evaluations": {
+                    "coding_index": 42,
+                    "agentic_index": 38,
+                    "terminal_bench_hard": 22,
+                },
+                "median_output_tokens_per_second": 190,
+            },
+            # 5. Non-reasoning-only model: grok-4.6 published only as non-reasoning
+            {
+                "slug": "grok-4-6-non-reasoning",
+                "evaluations": {
+                    "coding_index": 60,
+                    "agentic_index": 55,
+                    "terminal_bench_hard": 45,
+                },
+                "median_output_tokens_per_second": 80,
+            },
+            # Note: gemini-3.8-flash-high has NO row in aa_effort_data
+        ]
+    }
+    aa_effort_json = os.path.join(td, "aa-effort.json")
+    with open(aa_effort_json, "w", encoding="utf-8") as f:
+        json.dump(aa_effort_data, f)
+
+    out_effort = os.path.join(td, "out-effort")
+    os.makedirs(out_effort)
+    res_effort = run_bench(
+        [
+            "--config-dir", cfg_effort,
+            "--out-dir", out_effort,
+            "--date", "2026-09-10",
+            "--epoch-csv", epoch_csv,
+            "--aa-json", aa_effort_json,
+            "--key-file", missing_key,
+        ],
+        home,
+    )
+    effort_path = os.path.join(out_effort, "2026-09-10.md")
+    effort_report = ""
+    if os.path.isfile(effort_path):
+        with open(effort_path, encoding="utf-8") as f:
+            effort_report = f.read()
+    effort_gaps = gaps_section(effort_report)
+
+    sol_aa = aa_row_for(effort_report, "gpt-5.6-sol")
+    claude_aa = aa_row_for(effort_report, "claude-fable-5-1")
+    astra_aa = aa_row_for(effort_report, "gpt-6-astra")
+    luna_aa = aa_row_for(effort_report, "gpt-5.6-luna")
+    grok_aa = aa_row_for(effort_report, "grok-4.6")
+    gemini_aa = aa_row_for(effort_report, "gemini-3.8-flash-high")
+
+    record(
+        "AA matching: suffixed-only slug gpt-5-6-sol-low matches gpt-5.6-sol",
+        res_effort.returncode == 0
+        and "78" in sol_aa
+        and "gpt-5.6-sol absent from Artificial Analysis" not in effort_gaps,
+        f"sol_aa={sol_aa!r} gaps={effort_gaps}",
+    )
+
+    record(
+        "AA matching: exact slug claude-fable-5-1 wins over suffixed sibling",
+        "85" in claude_aa
+        and "50" not in claude_aa
+        and "65" not in claude_aa
+        and "claude-fable-5-1 Artificial Analysis used effort" not in effort_gaps,
+        f"claude_aa={claude_aa!r} gaps={effort_gaps}",
+    )
+
+    record(
+        "AA matching: xhigh suffix gpt-6-astra-xhigh matches",
+        "92" in astra_aa
+        and "gpt-6-astra absent from Artificial Analysis" not in effort_gaps,
+        f"astra_aa={astra_aa!r} gaps={effort_gaps}",
+    )
+
+    record(
+        "AA matching: non-reasoning slug is never selected",
+        "45" not in astra_aa
+        and "grok-4.6 absent from Artificial Analysis" in effort_gaps,
+        f"astra_aa={astra_aa!r} grok_aa={grok_aa!r} gaps={effort_gaps}",
+    )
+
+    record(
+        "AA matching: model with no AA row stays absent (gemini-3.8-flash-high)",
+        "gemini-3.8-flash-high absent from Artificial Analysis" in effort_gaps,
+        effort_gaps,
+    )
+
+    record(
+        "AA notes: effort note appears when matched effort differs from lane effort",
+        "gpt-5.6-sol Artificial Analysis used effort low (lane effort high)" in effort_gaps
+        and "gpt-6-astra Artificial Analysis used effort xhigh (lane effort high)" in effort_gaps,
+        effort_gaps,
+    )
+
+    record(
+        "AA notes: effort note omitted when matched effort agrees with lane effort",
+        "42" in luna_aa
+        and "gpt-5.6-luna Artificial Analysis used effort" not in effort_gaps,
+        f"luna_aa={luna_aa!r} gaps={effort_gaps}",
     )
 
 sys.exit(1 if fails else 0)

@@ -43,7 +43,12 @@ EPOCH_BENCHMARKS = (
 )
 EFFORT_FALLBACK = ("max", "xhigh", "high")
 LANE_EFFORT_ORDER = ("xhigh", "high", "medium", "low")
-MODEL_EFFORT_SUFFIXES = (("-medium", "medium"), ("-high", "high"), ("-low", "low"))
+MODEL_EFFORT_SUFFIXES = (
+    ("-xhigh", "xhigh"),
+    ("-high", "high"),
+    ("-medium", "medium"),
+    ("-low", "low"),
+)
 AA_COLUMNS = (
     ("Coding Index", ("coding-index",)),
     ("Agentic Index", ("agentic-index",)),
@@ -121,14 +126,28 @@ def model_matches_slug(catalog_model, slug):
     return bool(base) and slug == base
 
 
-def aa_name_matches(catalog_model, aa_name):
+def aa_match_info(catalog_model, aa_name):
     n_aa = normalize_name(aa_name)
-    if not n_aa:
-        return False
-    if n_aa == normalize_name(catalog_model):
-        return True
-    base, _ = strip_effort_suffix(catalog_model)
-    return n_aa == normalize_name(base)
+    n_model = normalize_name(catalog_model)
+    if not n_aa or not n_model:
+        return False, False, None
+    cat_base, _ = strip_effort_suffix(catalog_model)
+    n_base = normalize_name(cat_base)
+
+    if n_aa == n_model or (n_base and n_aa == n_base):
+        return True, True, None
+
+    aa_base, aa_effort = strip_effort_suffix(n_aa)
+    if aa_effort is not None:
+        if aa_base == n_model or (n_base and aa_base == n_base):
+            return True, False, aa_effort
+
+    return False, False, None
+
+
+def aa_name_matches(catalog_model, aa_name):
+    matches, _, _ = aa_match_info(catalog_model, aa_name)
+    return matches
 
 
 def as_number(value):
@@ -482,17 +501,55 @@ def build_aa_section(models, doc):
     aa_models = extract_aa_models(doc)
     first_keys = list(aa_models[0].keys()) if aa_models else []
     keys_used = {}
-    matched = {}
-    for obj in aa_models:
+    candidates_by_model = defaultdict(list)
+    for idx, obj in enumerate(aa_models):
         name = aa_model_name(obj)
         cols, used = extract_aa_columns(obj)
         for col, key in used.items():
             keys_used.setdefault(col, key)
         for model in models:
-            if model in matched:
-                continue
-            if aa_name_matches(model, name):
-                matched[model] = cols
+            matches, is_exact, effort = aa_match_info(model, name)
+            if matches:
+                candidates_by_model[model].append(
+                    {
+                        "obj": obj,
+                        "name": name,
+                        "cols": cols,
+                        "is_exact": is_exact,
+                        "effort": effort,
+                        "index": idx,
+                    }
+                )
+
+    matched = {}
+    matched_effort = {}
+    for model, rec in models.items():
+        cands = candidates_by_model.get(model, [])
+        if not cands:
+            continue
+        lane_effort = lane_effort_of(rec)
+        lane_idx = (
+            LANE_EFFORT_ORDER.index(lane_effort)
+            if lane_effort in LANE_EFFORT_ORDER
+            else 0
+        )
+
+        def cand_key(c):
+            if c["is_exact"]:
+                return (0, 0, 0, c["name"], c["index"])
+            e = c["effort"]
+            e_idx = (
+                LANE_EFFORT_ORDER.index(e)
+                if e in LANE_EFFORT_ORDER
+                else 99
+            )
+            dist = abs(e_idx - lane_idx)
+            return (1, dist, e_idx, c["name"], c["index"])
+
+        best = min(cands, key=cand_key)
+        matched[model] = best["cols"]
+        matched_effort[model] = best["effort"]
+
     col_names = [c[0] for c in AA_COLUMNS]
     scores_by_col = {c: {} for c in col_names}
     for model, cols in matched.items():
@@ -508,10 +565,13 @@ def build_aa_section(models, doc):
             {
                 "model": model,
                 "lanes": ", ".join(sorted(rec["lanes"])),
+                "lane_effort": lane_effort_of(rec),
+                "lane_efforts": rec["efforts"],
                 "cols": cols,
                 "mean": mean,
                 "mean_s": mean_s,
                 "present": model in matched,
+                "effort": matched_effort.get(model),
             }
         )
     items = sort_report_rows(items)
@@ -558,6 +618,17 @@ def build_notes(models, epoch_items, aa_items, aa_skipped, aa_keys_used, aa_firs
                 )
                 notes.append(f"{model} {bench} duplicate scores: {shown}")
     if aa_skipped is None:
+        for item in (aa_items or []):
+            if not item.get("present"):
+                continue
+            model = item["model"]
+            lane_efforts = set(item.get("lane_efforts") or [item["lane_effort"]])
+            lane_effort = item["lane_effort"]
+            used_effort = item.get("effort")
+            if used_effort is not None and used_effort not in lane_efforts:
+                notes.append(
+                    f"{model} Artificial Analysis used effort {used_effort} (lane effort {lane_effort})"
+                )
         if aa_keys_used:
             notes.append("AA keys used: " + ", ".join(aa_keys_used))
         else:
