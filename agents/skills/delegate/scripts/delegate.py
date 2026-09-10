@@ -32,10 +32,10 @@ Status mapping:
 CLI:
   python3 delegate.py dispatch (--lane <name> | --model <slug>) [--class <c>] --brief <path> --cwd <dir>
           [--write <worktree>] [--effort <e>] [--harness <h>] [--config-dir DIR]
-          [--ads-dir DIR] [--runs-dir DIR] [--no-probe]
+          [--ads-dir DIR] [--runs-dir DIR] [--no-probe] [--no-leash]
   python3 delegate.py run <class> --brief <path> --cwd <dir> [--write <worktree>] [--effort <e>]
           [--dry-run] [--config-dir DIR] [--meters FILE] [--harnesses a,b,c]
-          [--ads-dir DIR] [--runs-dir DIR] [--no-probe]
+          [--ads-dir DIR] [--runs-dir DIR] [--no-probe] [--no-leash]
 """
 import argparse
 from datetime import datetime, timezone
@@ -245,12 +245,44 @@ def resolve(lane_name, class_name, brief_path, cwd_dir, write_dir, effort_arg, c
     }
 
 
-def build_prompt(child_cwd, harness, write_dir, brief_path, run_dir=None):
+def should_leash(class_name, no_leash=False):
+    # The leash sentence is present for scout, mechanical and review, and absent
+    # for impl and hard-impl. Review is a reading job bounded by the diff, so it
+    # keeps the leash. Impl and hard-impl drop it because the real limit is the
+    # lane timeout. --no-leash drops the leash for one job of any class.
+    # If class is unspecified, conservative reading is to keep the leash.
+    if no_leash:
+        return False
+    if class_name in ("impl", "hard-impl"):
+        return False
+    return True
+
+
+def build_prompt(child_cwd, harness, write_dir, brief_path, run_dir=None, class_=None, no_leash=False):
     preamble_path = os.path.abspath(os.path.join(HERE, "..", "assets", "preamble.md"))
+    leash_path = os.path.abspath(os.path.join(HERE, "..", "assets", "preamble-leash.md"))
     schema_path = os.path.abspath(os.path.join(HERE, "..", "assets", "schemas", "return.json"))
 
     with open(preamble_path, "rb") as f:
         preamble_bytes = f.read()
+
+    leash_active = should_leash(class_, no_leash=no_leash)
+    if leash_active:
+        with open(leash_path, "rb") as f:
+            leash_bytes = f.read().strip()
+        anchor = b"no messages. Your final message"
+        if anchor not in preamble_bytes:
+            # The leash is spliced into the base paragraph at this anchor. Reword
+            # preamble.md and the splice would silently drop the sentence, so fail
+            # loudly here rather than dispatch a worker with no leash.
+            raise RuntimeError(
+                f"{preamble_path}: cannot splice the leash: the text "
+                f"{anchor.decode()!r} is no longer in the preamble"
+            )
+        preamble_bytes = preamble_bytes.replace(
+            anchor, b"no messages. " + leash_bytes + b" Your final message",
+        )
+
     if not preamble_bytes.endswith(b"\n"):
         preamble_bytes += b"\n"
 
@@ -300,7 +332,7 @@ def build_prompt(child_cwd, harness, write_dir, brief_path, run_dir=None):
     return prompt_bytes, prompt_path
 
 
-def allocate_run_dir(runs_dir_param, lane, harness, model, effort, timeout, class_name, cwd, write, brief_path, prompt_bytes):
+def allocate_run_dir(runs_dir_param, lane, harness, model, effort, timeout, class_name, cwd, write, brief_path, prompt_bytes, leash=True):
     runs_dir = os.path.abspath(os.path.expanduser(runs_dir_param)) if runs_dir_param else os.path.expanduser("~/.cache/delegate/runs")
     os.makedirs(runs_dir, exist_ok=True)
 
@@ -322,6 +354,7 @@ def allocate_run_dir(runs_dir_param, lane, harness, model, effort, timeout, clas
         "effort": effort,
         "timeout": timeout,
         "class": class_name,
+        "leash": leash,
         "cwd": cwd,
         "write": write,
         "brief": brief_path,
@@ -593,7 +626,7 @@ def print_and_exit(lane, status, secs, run_dir, thread_id, class_name, relay_exi
         sys.exit(1)
 
 
-def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None, ads_dir=None, runs_dir=None, no_probe=False, harness=None, model=None):
+def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None, ads_dir=None, runs_dir=None, no_probe=False, harness=None, model=None, no_leash=False):
     # Step 1: Resolve
     resolved = resolve(
         lane_name=lane,
@@ -615,12 +648,16 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
     child_cwd = resolved["child_cwd"]
     ads_d = resolved["ads_dir"]
 
+    effective_leash = should_leash(class_, no_leash=no_leash)
+
     # Step 2: Build the prompt
     prompt_bytes, _ = build_prompt(
         child_cwd=child_cwd,
         harness=harness,
         write_dir=write,
         brief_path=brief,
+        class_=class_,
+        no_leash=no_leash,
     )
 
     # Step 3: Allocate the run directory
@@ -636,6 +673,7 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
         write=write,
         brief_path=brief,
         prompt_bytes=prompt_bytes,
+        leash=effective_leash,
     )
 
     return_path = os.path.join(run_dir, "return.json")
@@ -734,7 +772,7 @@ def _print_rank_output(cls, cat, rows):
     return True
 
 
-def run(class_, brief, cwd, write=None, effort=None, dry_run=False, config_dir=None, meters=None, harnesses=None, ads_dir=None, runs_dir=None, no_probe=False):
+def run(class_, brief, cwd, write=None, effort=None, dry_run=False, config_dir=None, meters=None, harnesses=None, ads_dir=None, runs_dir=None, no_probe=False, no_leash=False):
     if class_ not in CLASSES:
         sys.stderr.write(f"delegate: invalid class '{class_}'; must be one of {", ".join(CLASSES)}\n")
         sys.exit(2)
@@ -781,6 +819,7 @@ def run(class_, brief, cwd, write=None, effort=None, dry_run=False, config_dir=N
         ads_dir=ads_dir,
         runs_dir=runs_dir,
         no_probe=no_probe,
+        no_leash=no_leash,
     )
 
 
@@ -804,6 +843,7 @@ def main(argv=None):
     p_dispatch.add_argument("--ads-dir", default=None, help="directory of amElnagdy/delegate-skills clone")
     p_dispatch.add_argument("--runs-dir", default=None, help="directory where run artifacts are stored")
     p_dispatch.add_argument("--no-probe", action="store_true", help="skip probing usage meters")
+    p_dispatch.add_argument("--no-leash", action="store_true", help="drop the 40-tool-call leash for this job")
 
     p_run = sub.add_parser("run", help="rank and dispatch in one step")
     p_run.add_argument("class_", metavar="class", help="work class")
@@ -818,6 +858,7 @@ def main(argv=None):
     p_run.add_argument("--ads-dir", default=None, help="directory of amElnagdy/delegate-skills clone")
     p_run.add_argument("--runs-dir", default=None, help="directory where run artifacts are stored")
     p_run.add_argument("--no-probe", action="store_true", help="skip probing usage meters")
+    p_run.add_argument("--no-leash", action="store_true", help="drop the 40-tool-call leash for this job")
 
     args = parser.parse_args(argv)
     if args.cmd == "dispatch":
@@ -834,6 +875,7 @@ def main(argv=None):
             no_probe=args.no_probe,
             harness=args.harness,
             model=args.model,
+            no_leash=args.no_leash,
         )
     elif args.cmd == "run":
         run(
@@ -849,6 +891,7 @@ def main(argv=None):
             ads_dir=args.ads_dir,
             runs_dir=args.runs_dir,
             no_probe=args.no_probe,
+            no_leash=args.no_leash,
         )
 
 

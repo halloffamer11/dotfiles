@@ -735,6 +735,55 @@ def main():
             ok24 = "--effort" not in argv24
         record("24. agy --effort ignored, no argv --effort", ok24, f"rc={res24.returncode} err={res24.stderr}")
 
+        # -------------------------------------------------------------
+        # 25. hard-impl prompt contains no tool-call sentence; dispatch.json leash: false
+        # -------------------------------------------------------------
+        leash_sentence = "Stop exploring after 40 tool calls and write the answer."
+        b25 = make_brief("b25.md", f"fake-relay: status=completed final={done_final}\nBrief 25.")
+        res25 = run_dispatch(t_env, ["--lane", "terra-high@codex", "--class", "hard-impl", "--brief", b25, "--cwd", cwd])
+        dir25 = parse_run_dir_from_stdout(res25.stdout)
+        ok25 = (res25.returncode == 0 and dir25 is not None)
+        if ok25:
+            prompt25 = open(os.path.join(dir25, "prompt.md"), "r", encoding="utf-8").read()
+            disp25 = json.load(open(os.path.join(dir25, "dispatch.json")))
+            ok25 = (
+                leash_sentence not in prompt25 and
+                disp25.get("leash") is False
+            )
+        record("25. hard-impl prompt has no leash, dispatch.json leash=False", ok25, f"rc={res25.returncode}")
+
+        # -------------------------------------------------------------
+        # 26. scout prompt contains tool-call sentence; dispatch.json leash: true
+        # -------------------------------------------------------------
+        b26 = make_brief("b26.md", f"fake-relay: status=completed final={done_final}\nBrief 26.")
+        res26 = run_dispatch(t_env, ["--lane", "terra-high@codex", "--class", "scout", "--brief", b26, "--cwd", cwd])
+        dir26 = parse_run_dir_from_stdout(res26.stdout)
+        ok26 = (res26.returncode == 0 and dir26 is not None)
+        if ok26:
+            prompt26 = open(os.path.join(dir26, "prompt.md"), "r", encoding="utf-8").read()
+            disp26 = json.load(open(os.path.join(dir26, "dispatch.json")))
+            ok26 = (
+                leash_sentence in prompt26 and
+                disp26.get("leash") is True
+            )
+        record("26. scout prompt has leash, dispatch.json leash=True", ok26, f"rc={res26.returncode}")
+
+        # -------------------------------------------------------------
+        # 27. --no-leash dispatch of a leashed class lacks leash; dispatch.json leash: false
+        # -------------------------------------------------------------
+        b27 = make_brief("b27.md", f"fake-relay: status=completed final={done_final}\nBrief 27.")
+        res27 = run_dispatch(t_env, ["--lane", "terra-high@codex", "--class", "scout", "--brief", b27, "--cwd", cwd, "--no-leash"])
+        dir27 = parse_run_dir_from_stdout(res27.stdout)
+        ok27 = (res27.returncode == 0 and dir27 is not None)
+        if ok27:
+            prompt27 = open(os.path.join(dir27, "prompt.md"), "r", encoding="utf-8").read()
+            disp27 = json.load(open(os.path.join(dir27, "dispatch.json")))
+            ok27 = (
+                leash_sentence not in prompt27 and
+                disp27.get("leash") is False
+            )
+        record("27. --no-leash scout prompt lacks leash, dispatch.json leash=False", ok27, f"rc={res27.returncode}")
+
     if fails > 0:
         print(f"FAIL: {fails} tests failed", file=sys.stderr)
         sys.exit(1)

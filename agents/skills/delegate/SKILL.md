@@ -5,7 +5,7 @@ description: Route worker-shaped work (implementation with a spec, verification,
 
 # Delegate
 
-The session plans, adjudicates, and synthesizes. Worker-shaped work goes out on a **lane**: one (harness, model, effort) tuple that drains one subscription **meter**. `/delegate` is the only entry point that reads meters. The typed-only wrappers `/delegate-claude`, `/delegate-codex`, `/delegate-agy`, `/delegate-grok` run a named lane with no ranking.
+The session plans, adjudicates, and synthesizes. Worker-shaped work goes out on a **lane**: one (harness, model, effort) tuple that drains one subscription **meter**. `/delegate` is the model-invocable entry point that reads meters and ranks lanes. The typed-only wrappers `/delegate-claude`, `/delegate-codex`, `/delegate-agy`, `/delegate-grok` run one harness with prose-constrained ranking.
 
 ## Terms
 
@@ -21,7 +21,7 @@ The session plans, adjudicates, and synthesizes. Worker-shaped work goes out on 
 
 - `~/.config/delegate/lanes.json`: meters and lanes (harness, model, effort, meter, meter weight, timeout, price, tier, basis). Global only.
 - `~/.config/delegate/routing.json`: `classTier` (class to tier), `margin`, `gate`. A project overrides any key at `<git-root>/.delegate/routing.json`; `classTier` merges per class.
-- Both are strict JSON, validated on read with a plain-language message naming the field and the rule, formatted on write, and accept `note` fields anywhere. `python3 ~/.claude/skills/delegate/scripts/catalog.py show` prints the effective catalog for the current directory; `scripts/catalog.py check <file>` validates one file. The starting catalog ships in `assets/samples/`; `/delegate setup` is the wizard that builds or revises it.
+- Both are strict JSON, validated on read with a plain-language message naming the field and the rule, formatted on write, and accept `note` fields anywhere. `python3 ~/.claude/skills/delegate/scripts/catalog.py show` prints the effective catalog for the current directory; `scripts/catalog.py check <file>` validates one file. The starting catalog ships in `assets/samples/`; `/delegate setup` is the wizard that builds or revises it (direct command: `python3 ~/.claude/skills/delegate/scripts/setup.py`). When `$ARGUMENTS` asks for setup (e.g. `/delegate setup`), run `python3 ~/.claude/skills/delegate/scripts/setup.py`.
 
 ## 1. Classify and write the brief
 
@@ -29,13 +29,15 @@ Pick the class. Write a Markdown brief with two headings, nothing else: `# Objec
 
 ## 2. Run
 
-    python3 ~/.claude/skills/delegate/scripts/delegate.py run <class> --brief </abs/brief.md> --cwd </abs/project> [--write </abs/worktree>] [--effort low|medium|high|xhigh] [--dry-run]
+    python3 ~/.claude/skills/delegate/scripts/delegate.py run <class> --brief </abs/brief.md> --cwd </abs/project> [--write </abs/worktree>] [--effort low|medium|high|xhigh] [--no-leash] [--dry-run]
 
-Run it with `run_in_background` so the session keeps working; the notification carries the `delegate:` line with `run=<dir>`, and `<dir>/return.json` is the result. The command prints the ordered lanes with one reason each, then dispatches the pick. `--dry-run` stops after the print. `--effort` overrides the lane's effort dial for this job only; the lane's tier is unchanged. `--write` is the only way a worker gets a shell and edits; the worktree is the blast radius, never a primary checkout.
+Run it with `run_in_background` so the session keeps working; the notification carries the `delegate:` line with `run=<dir>`, and `<dir>/return.json` is the result. The command prints the ordered lanes with one reason each, then dispatches the pick. `--dry-run` stops after the print. `--effort` overrides the lane's effort dial for this job only; the lane's tier is unchanged. `--no-leash` drops the tool-call leash in the prompt; set it when the job is large. `--write` is the only way a worker gets a shell and edits; the worktree is the blast radius, never a primary checkout.
 
 The rule: `need = classTier[class]`; eligible lanes have `tier >= need`, meter remaining at or above `gate`, and the harness CLI on PATH; sort by tier ascending, pace descending, then lane name ascending to break a tie; the first is the pick unless a later lane's pace beats the pick's pace by `margin`, which steals the job. Because pace already orders lanes inside a tier, a steal only ever crosses tiers. A meter whose probe is unknown sorts last and never blocks. When nothing is eligible the command stops with the reasons and starts nothing. Meters are probed at run start and run finish.
 
-To run a specific lane without ranking, type one of the wrappers yourself, for example `/delegate-codex --lane terra-high@codex </abs/brief.md>`. They are typed-only; the model never invokes them.
+When the user specifies prose constraints in the surrounding request (a harness to prefer or avoid, models to exclude, a ceiling on effort), apply them: read the `rank.py <class> --json` rows, drop the ones the constraints exclude, and dispatch the surviving pick with `delegate.py dispatch --lane <name> --class <class>`. Do not repurpose `--harnesses` as a filter — it declares which CLIs are present, so using it to exclude a harness makes the ranker report `cli absent` for a CLI that is installed. Stop and name the constraint if all lanes are eliminated. Ranking is otherwise unchanged — tier ceiling, pace order, pace margin still decide.
+
+To constrain a specific harness with plain-language instructions, type one of the wrappers yourself, for example `/delegate-codex dont use astra, maximum effort medium`. They are typed-only; the model never invokes them.
 
 ## 3. Verify and log
 

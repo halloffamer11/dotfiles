@@ -20,14 +20,37 @@ The wrapper reads `$ARGUMENTS` as prose constraints, not flags. It resolves the 
 
 **Status:** open, raised by Orin 2026-09-09.
 
-- [ ] The four wrappers keep `disable-model-invocation: true` and gain an `argument-hint` naming plain-language constraints
-- [ ] No wrapper body documents a flag grammar; each reads `$ARGUMENTS` as prose
-- [ ] A wrapper resolves its lane through `rank.py --harnesses <harness> --json` and prints the pick with its reason before dispatch
-- [ ] Constraints that eliminate every lane stop the run and name the constraint; no silent fallback
-- [ ] `/delegate` applies the same prose constraints when the agent routes on its own judgement
-- [ ] `/delegate` run with setup arguments starts the wizard
-- [ ] `SKILL.md` names the direct `setup.py` path and no longer claims anything untrue about `/delegate setup`
-- [ ] `preamble.md` is assembled per class: the 40-tool-call sentence appears for `scout` and `mechanical` and is absent for `impl` and `hard-impl`
-- [ ] A dispatched `hard-impl` prompt contains no tool-call sentence, verified by reading `<run>/prompt.md`
-- [ ] A per-dispatch override drops the leash for one job of any class, and is recorded in `dispatch.json`
+- [x] The four wrappers keep `disable-model-invocation: true` and gain an `argument-hint` naming plain-language constraints
+- [x] No wrapper body documents a flag grammar; each reads `$ARGUMENTS` as prose
+- [x] A wrapper resolves its lane through `rank.py --harnesses <harness> --json` and prints the pick with its reason before dispatch
+- [x] Constraints that eliminate every lane stop the run and name the constraint; no silent fallback
+- [x] `/delegate` applies the same prose constraints when the agent routes on its own judgement
+- [x] `/delegate` run with setup arguments starts the wizard
+- [x] `SKILL.md` names the direct `setup.py` path and no longer claims anything untrue about `/delegate setup`
+- [x] `preamble.md` is assembled per class: the 40-tool-call sentence appears for `scout` and `mechanical` and is absent for `impl` and `hard-impl`
+- [x] A dispatched `hard-impl` prompt contains no tool-call sentence, verified by reading `<run>/prompt.md`
+- [x] A per-dispatch override drops the leash for one job of any class, and is recorded in `dispatch.json`
 - [ ] Orin types each of the four wrappers once with a plain-language constraint and gets the lane he expected
+
+## Landed 2026-09-10
+
+`review` keeps the leash. The ticket named only `scout`/`mechanical` as keeping it
+and `impl`/`hard-impl` as dropping it; `review` is a reading job bounded by the
+diff, so `should_leash()` in `delegate.py` groups it with the leashed classes and
+says why in a comment. A dispatch with no `--class` is leashed, the conservative
+reading.
+
+The leash is spliced into `assets/preamble.md` at the anchor `no messages. Your
+final message`, with the sentence itself in `assets/preamble-leash.md`. Reword
+that anchor and `build_prompt` raises rather than silently dispatching an
+unleashed worker — the splice being a no-op was the obvious failure mode.
+
+All four wrappers now pass `--class <class>` to `dispatch`, because the leash is
+chosen from the class: a wrapper that ranked on one class and dispatched with
+none would have been leashed by accident.
+
+`/delegate` is told not to repurpose `--harnesses` as an exclusion filter. It
+declares which CLIs are present, so filtering with it makes the ranker print
+`cli absent` for a CLI that is installed.
+
+The last box needs Orin: type each of the four wrappers once with a constraint.
