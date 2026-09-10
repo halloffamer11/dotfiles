@@ -21,9 +21,11 @@ prefix = "ctrl+b"
 #   cmd+[ ]              agents
 #   cmd+shift+[ ]        workspaces
 #   cmd+ctrl+[ ]         tabs      (needs the goto_split unbind in ghostty/config)
-#   cmd+alt+[ ]          panes     (needs a Hyprland unbind on Omarchy)
+#   cmd+alt+[ ]          panes
 # Avoid: cmd+1..9 (Hyprland), plain ctrl+alt+<letter> (C0 collisions).
-# cmd+alt+[ ] is Hyprland's by default on Omarchy; unbind it there (ticket 15).
+# cmd+alt+[ ] was assumed to be Hyprland's on Omarchy; it is not. Verified
+# 2026-09-10: `hyprctl binds` has no bracket trigger under any modifier, and
+# Omarchy's defaults bind none. No unbind is needed (ticket 15).
 # Verify any new chord against:
 #   hyprctl binds  |  ghostty +list-keybinds --default
 focus_pane_left = ["prefix+h", "cmd+alt+h"]
