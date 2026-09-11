@@ -2,3 +2,5 @@
 .playwright-mcp/
 local.mk
 __pycache__/
+aa-key
+*.key

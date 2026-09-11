@@ -21,18 +21,20 @@ The delegate redesign is the only live thread. Spec
 (14 closed 2026-09-10); the boxes left unticked are Orin's own confirmations, and
 each ticket's Status line says which.
 
-**Branch `bench-aa-effort-slugs` is unmerged**, 34 commits ahead of `main` and 2
-behind, suite green at 374 assertions across 12 files (two of the twelve report one
-summary line rather than one line per assertion, so other counts of the same suite
-run higher). It contains `delegate-lane-catalog`, which is 37 commits behind it;
-that branch is history now, not a second thread. Tickets 01-17 are implemented, and
-the catalog carries every effort each codex model offers — 26 lanes, 19 of them
-generated and provisionally tiered.
+**Branch `bench-aa-effort-slugs` has `main` merged in** (2026-09-10) and is 35
+commits ahead of it, 0 behind; `main` has not fast-forwarded to it yet. Suite green
+at 374 assertions across 12 files (two of the twelve report one summary line rather
+than one line per assertion, so other counts of the same suite run higher). It
+contains `delegate-lane-catalog`, which is 40 commits behind it; that branch is
+history now, not a second thread. Tickets 01-17 are implemented, and the catalog
+carries every effort each codex model offers — 26 lanes, 19 of them generated and
+provisionally tiered.
 
 `~/.claude/skills/delegate` symlinks to `~/dotfiles`, the **main** checkout, so the
 installed skill is main's: no `discover.py`, no `bench_page.py`, no pre-screen, no
-per-effort attribution, and the four `/delegate-*` wrappers cannot be exercised
-until this merges. Merging conflicts on this file only.
+per-effort attribution, no permission-gate reading (ticket 14), and the four
+`/delegate-*` wrappers cannot be exercised until `main` fast-forwards. The
+fast-forward cannot conflict.
 
 **Open, in priority order:**
 
@@ -52,14 +54,23 @@ until this merges. Merging conflicts on this file only.
 
 **Waiting on Orin** (nothing else blocks on these):
 
+- Fast-forward `main`: `git -C ~/dotfiles merge --ff-only bench-aa-effort-slugs`.
+  Checked 2026-09-10: the main checkout had no uncommitted changes, and the live
+  `~/.config/delegate/lanes.json` and `routing.json` pass this branch's
+  `catalog.py check` and rank under `delegate.py run --dry-run`, so nothing else
+  must change first.
 - Run the wizard once to close tickets 06, 07, 07b and 15's last box, and to
   confirm or correct the provisional tiers on the 19 generated lanes. From the
   worktree root:
   `python3 agents/skills/delegate/scripts/setup.py --config-dir stow/delegate/.config/delegate --effort-rows .scratch/delegate-redesign/_data/tbench-accepted.json`
   The carry page should propose `astra-xhigh@codex` off as dominated by high and the
-  three `ultra` lanes off as never carried.
+  three `ultra` lanes off as never carried. It should also settle
+  `astra-high@codex`: `main`'s notes (`6e0f0b1`) said its price is sourced as
+  `10 / 1 / 12.5 / 50`, but the stowed catalog has `price` null with the note "not
+  sourced", and its `meter_weight` 40 is a placeholder. Find the source before
+  pasting the figures.
 - Type each of the four `/delegate-*` wrappers once with a plain-language
-  constraint (ticket 11) — needs the merge first.
+  constraint (ticket 11) — needs the fast-forward first.
 - Two one-liners in his own files, outside this repo (ticket 09):
   `~/.claude/hooks/delegate-gate.py` names `{SKILL_DIR}/delegate.py`, which moved to
   `scripts/delegate.py`, so the hook advises every session to run a path that does
@@ -91,7 +102,9 @@ Terminal-Bench are wider but publish display names (ticket 16). Cost is per-task
 swerb and on Artificial Analysis, but Terminal-Bench's `display_cost` is a whole-run
 figure. Even the two per-task numbers measure different task sets, so never compare
 costs across sources. The AA key is at `~/.config/delegate/aa-key`, mode 600, outside
-the repo and in `.gitignore` — never stow it; this repo is public.
+the repo and in `.gitignore` — never stow it; this repo is public. Where a note says
+AA covers a model, it means the `/models/releases/` pages that `effort.py` scrapes,
+not the free API that `bench.py` calls (`AA_URL`).
 
 `flash-high@agy` has no rows in any approved source, so its tier is a judgement from
 its `basis` note rather than from numbers. The AA figures for `gpt-5.6-sol`,
