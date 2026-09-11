@@ -2,7 +2,7 @@
 
 In a disposable browser (one your own browser tool launches, with no signed-in sessions), open https://example.com and read the page title; then open https://httpbin.org/forms/post, type the literal token `{{NONCE}}` into the "Customer name" field, submit the form, and read the value the response echoes back for that field.
 
-Forbid web fetch, curl, URL readers, web search, and every built-in web tool. Do not fall back to them if browser tools are unavailable or fail.
+Do not use web fetch, curl, URL readers, web search, or any built-in web tool, and do not fall back to them if browser tools are unavailable or fail.
 
 # Definition of done
 

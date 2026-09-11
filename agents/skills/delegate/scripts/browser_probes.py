@@ -52,26 +52,16 @@ def get_cli_version(cli_name):
 
 
 def load_effective_catalog(config_dir=None):
-    """Loads effective catalog, falling back to stow or sample catalog if user config has errors."""
+    """Loads the effective catalog. A catalog error stops the run: probing lanes
+    from any other catalog would report on lanes the user does not run."""
     if config_dir is None:
         config_dir = os.environ.get("DELEGATE_CONFIG_DIR")
-    if config_dir:
-        return catalog.load_catalog(config_dir=config_dir)
     try:
+        if config_dir:
+            return catalog.load_catalog(config_dir=config_dir)
         return catalog.load_catalog()
-    except catalog.CatalogError:
-        git_root = catalog.find_git_root(HERE)
-        if git_root:
-            stow_cfg = os.path.join(git_root, "stow", "delegate", ".config", "delegate")
-            if os.path.isdir(stow_cfg):
-                try:
-                    return catalog.load_catalog(config_dir=stow_cfg)
-                except catalog.CatalogError:
-                    pass
-        samples_cfg = os.path.abspath(os.path.join(HERE, "..", "assets", "samples"))
-        if os.path.isdir(samples_cfg):
-            return catalog.load_catalog(config_dir=samples_cfg)
-        raise
+    except catalog.CatalogError as e:
+        sys.exit(f"browser_probes: cannot load the delegate catalog: {e}")
 
 
 def pick_lowest_tier_lane(cat, harness):
@@ -146,11 +136,12 @@ def grade(target, probe, nonce=None):
     if not isinstance(deliverable, str):
         deliverable = str(deliverable or "")
 
-    # Look for explicit FAIL line first
+    # Look for explicit FAIL line first. A line with '<' is the brief's own
+    # template echoed back, not a verdict, as for PASS lines below.
     fail_reason = None
     for raw_line in deliverable.splitlines():
         line = raw_line.strip().strip("`")
-        if "BROWSER-PROBE FAIL" in line:
+        if "BROWSER-PROBE FAIL" in line and "<" not in line:
             parts = line.split("BROWSER-PROBE FAIL", 1)
             reason = parts[1].lstrip(": ").strip()
             fail_reason = reason if reason else "probe failed"

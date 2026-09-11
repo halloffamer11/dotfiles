@@ -181,6 +181,40 @@ def main():
         ok8 = res8.returncode == 0 and "cli absent" in res8.stdout
         record("8. dry-run with absent cli prints cli absent row", ok8, f"rc={res8.returncode} stdout={res8.stdout}")
 
+        # -------------------------------------------------------------
+        # 9. A catalog error stops the run; no fallback catalog is probed
+        # -------------------------------------------------------------
+        with open(os.path.join(fake_config, "routing.json"), "w") as f:
+            f.write('{"not_a_key": 1}\n')
+        res9 = subprocess.run(
+            [sys.executable, BROWSER_PROBES_PY, "--dry-run"],
+            env=test_env,
+            capture_output=True,
+            text=True,
+        )
+        ok9 = (
+            res9.returncode != 0 and
+            "cannot load the delegate catalog" in res9.stderr and
+            "dispatch" not in res9.stdout
+        )
+        record("9. catalog error stops the run, no fallback", ok9, f"rc={res9.returncode} stdout={res9.stdout} stderr={res9.stderr}")
+
+    # -------------------------------------------------------------
+    # 10. A copied FAIL template line does not override a real PASS line
+    # -------------------------------------------------------------
+    doc_template_echo = {
+        "status": "done",
+        "deliverable": (
+            "On fail: BROWSER-PROBE FAIL: <one-line reason>\n"
+            f"BROWSER-PROBE PASS title=Example Domain echoed={nonce}\n"
+        ),
+        "evidence": [],
+        "open_questions": [],
+        "changed_files": [],
+    }
+    verdict, reason = browser_probes.grade(doc_template_echo, "disposable", nonce=nonce)
+    record("10. FAIL template line with <placeholder> is ignored", verdict == "PASS", f"verdict={verdict} reason={reason}")
+
     if fails > 0:
         print(f"FAIL: {fails} tests failed", file=sys.stderr)
         sys.exit(1)
