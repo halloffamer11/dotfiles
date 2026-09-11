@@ -113,7 +113,7 @@ cd agents/skills/delegate/monitor && cargo test
 
 - [x] **Step 2: View**
 
-Layout and widgets per spec §6 and `tui-mockup.txt`. `LineGauge` labels are exact percents. Null 5h / null pace → `—`. Rank overlay is display-only.
+Layout and widgets per spec §6 (the mockup it also named is deleted; see the spec). `LineGauge` labels are exact percents. Null 5h / null pace → `—`. Rank overlay is display-only.
 
 - [x] **Step 3: Gate**
 

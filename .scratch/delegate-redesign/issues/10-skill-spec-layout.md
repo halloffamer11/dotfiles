@@ -27,7 +27,12 @@ Spec §9.6 asks that every file the hook or docs name exists. Ticket 09 marked i
 
 **Blocked by:** 07b (the TUI wizard worker writes `setup_tui.py` into the current layout; a move commit that races it only makes a conflict).
 
-**Status:** landed 2026-09-10 (`473df66` ticked boxes whose work had landed in `867cbd1`). All boxes ticked; nothing open.
+**Status:** landed 2026-09-10 (`473df66` ticked boxes whose work had landed in
+`867cbd1`). All boxes ticked; nothing open. Later correction: `references/` is gone
+entirely (2026-09-10). `kiro.md` named a harness with no lane and no code,
+`tui-research.md` and `tui-mockup.md` described a monitor that has since shipped as
+the `tools/delegate-mon/` crate, so the three files the layout boxes name no longer
+exist — the layout rule they were an example of still holds.
 
 - [x] The nine scripts plus `setup_tui.py` live in `scripts/` and every test still passes from the new location
 - [x] `tui-research.md` and `tui-mockup.md` live in `references/`; the `.txt` extension is gone

@@ -13,7 +13,6 @@ External worker routing lives in this directory. Read `SKILL.md` first, then use
 - `scripts/effort.py`: `pack`/`extract`/`check` over a benchmark page. `check` is the trust boundary: it rejects any number that is not on the page, and no worker may originate a number or an identifier.
 - `assets/preamble.md`: brief preamble prepended to worker prompts.
 - `assets/schemas/return.json`: the child return contract, requested in every prompt and parsed out of the relay's final message.
-- `references/`: `tui-research.md` and `tui-mockup.md` (the unbuilt monitor), `kiro.md` (a harness with no lane and a stub in `delegate.py`).
 - `tests/`: one test file per script, stdlib only, no network; `tests/fake-ads/relay.mjs` stands in for the relays.
 - Sibling skills `../delegate-claude`, `../delegate-codex`, `../delegate-agy`, `../delegate-grok`: typed-only wrappers, about twenty lines each.
 
