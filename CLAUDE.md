@@ -7,6 +7,10 @@ Machine configuration and agent tooling managed as one Git repository.
 - Read `Makefile` before changing installation or stow behavior.
 - Read `references/CLAUDE.md` for repository-wide operating context.
 - Each active skill under `agents/skills/` owns its detailed context.
+- `tools/` holds what a skill uses but does not execute: `tools/delegate-mon/` is a
+  Rust crate, the `delegate-mon` monitoring TUI, built out to its plan and owning
+  its own CLAUDE.md. It reads the same meters and ledger as the delegate skill and
+  is not part of the redesign thread below.
 
 ## Active work
 
