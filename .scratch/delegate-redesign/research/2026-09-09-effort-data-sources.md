@@ -100,3 +100,35 @@ which is a useful check on both.
 DeepSWE, DataBench, Terminal-Bench and VISTA all label the Anthropic row
 `Fable 5`, not `claude-fable-5-1`. Four boards, one ambiguous name. Do not
 let that equivalence be assumed into a trust score.
+
+## 2026-09-11: Artificial Analysis is read from the page's own dataset
+
+Ticket 18. The release-page text path failed twice on 2026-09-10, at chunk 6
+of 7, when the agy 5-hour meter reached 0%. The rows that did come back held
+only the composite Intelligence Index. The old caution, "use `/models/releases/`,
+not `/models/<slug>`", was about packed text: the model page packed to ~2960
+lines with little cost data. It is wrong for the JSON the pages embed. Every
+`/models/<slug>` page carries the whole comparison dataset in its Next.js flight
+payload. A release page's payload holds 25 models, and a model page's payload
+holds all of them.
+
+Measured on `/models/gpt-5-6-sol-high` with `effort.py aa`:
+
+- one request, 3.5 MB; a 2.6 MB payload; 137 variant objects, 77 of them with
+  an effort word in the name
+- 31 catalog variants (Gemini 3.8 Flash low was absent that day); 606 rows, and
+  `check` accepted all 606 against the payload
+- per variant: eight component scores, `intelligenceIndex`,
+  `intelligenceIndexCostPerTask.cost.total` and
+  `intelligenceIndexOutputTokensPerTask.output`
+
+Two consequences:
+
+- The cost is the index's cost per task. It is one figure per variant, repeated
+  on every component row, and it is not the cost of that component.
+- Eight components that come from the same runs broke the carry rule's "any one
+  benchmark" reading: it proposed 12 lanes off, and 9 of them lost on one
+  component only. Orin chose a majority rule: a lane is dominated when another
+  effort, for no more money, beats it on more than half of the benchmarks that
+  one source scored both on. The live result is `astra-xhigh@codex` off, beaten
+  by high on 4 of 7. A rule that needs every component switches no lane off.

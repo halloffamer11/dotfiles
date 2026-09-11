@@ -22,6 +22,8 @@ sys.path.insert(0, DELEGATE_DIR)
 import bench
 import catalog
 import discover
+import effort
+import setup_tui
 from setup_tui import Wizard
 
 LANES = catalog.load_json(os.path.abspath(os.path.join(HERE, "..", "assets", "samples", "lanes.json")))
@@ -636,7 +638,7 @@ try:
     sol = row_for(v, "sol-high@codex")
     flash = row_for(v, "flash-high@agy")
     record("24 dominated lane proposed off; unscored proposed on",
-           carry_of(luna) == "off" and "dominated" in why_of(luna)
+           carry_of(luna) == "off" and "wins on" in why_of(luna)
            and carry_of(sol) == "on" and why_of(sol) == "not dominated"
            and carry_of(flash) == "on" and why_of(flash) == "no rows for this lane"
            and any("Absence of data is not evidence against" in line
@@ -660,7 +662,7 @@ try:
     w.handle("enter")
     luna = row_for(w.view(), "luna-low@codex")
     record("24b an effort no lane can select never dominates",
-           carry_of(luna) == "on" and "dominated by" not in why_of(luna))
+           carry_of(luna) == "on" and "wins on" not in why_of(luna))
 except Exception as e:
     record("24b an effort no lane can select never dominates", False, repr(e))
 
@@ -709,6 +711,71 @@ except Exception as e:
     record("25 uncertain rows do not dominate", False, repr(e))
 
 
+def luna_lanes():
+    doc = copy.deepcopy(LANES)
+    for effort in ("low", "medium", "high"):
+        lane = copy.deepcopy(LANES["lanes"]["luna-low@codex"])
+        lane["effort"] = effort
+        doc["lanes"][f"luna-{effort}@codex"] = lane
+    return doc
+
+
+def board_row(effort, benchmark, score, cost, **extra):
+    row = {"model": "gpt-5.6-luna", "effort": effort, "benchmark": benchmark,
+           "score": score, "cost_usd": cost, "uncertain": False, "source": "aa"}
+    row.update(extra)
+    return row
+
+
+try:
+    # One source scoring each effort on several benchmarks: a lane is dominated
+    # when another effort, for no more money, does at least as well on most of
+    # the benchmarks the two share. One benchmark in eight is not most — on the
+    # live Artificial Analysis page that reading switched twelve lanes off.
+    rows = [
+        board_row("medium", "b1", 0.6, 1.0), board_row("high", "b1", 0.5, 2.0),
+        board_row("medium", "b2", 0.6, 1.0), board_row("high", "b2", 0.5, 2.0),
+        board_row("medium", "b3", 0.4, 1.0), board_row("high", "b3", 0.5, 2.0),
+        # low is ahead of medium on b1 only: one of three is not most
+        board_row("low", "b1", 0.7, 0.5), board_row("low", "b2", 0.1, 0.5),
+        board_row("low", "b3", 0.1, 0.5),
+    ]
+    w = wizard(lanes=luna_lanes(), effort_rows=rows)
+    w.handle("enter")
+    w.handle("enter")
+    v = w.view()
+    high, medium, low = (row_for(v, f"luna-{e}@codex") for e in ("high", "medium", "low"))
+    record("25b dominated means beaten on most of a source's benchmarks, and the reason names the source",
+           carry_of(high) == "off" and why_of(high) == "medium wins on aa"
+           and carry_of(medium) == "on" and why_of(medium) == "not dominated"
+           and carry_of(low) == "on" and why_of(low) == "not dominated",
+           str([high["cells"], medium["cells"], low["cells"]]))
+except Exception as e:
+    record("25b dominated means beaten on most of a source's benchmarks, and the reason names the source",
+           False, repr(e))
+
+
+try:
+    # Artificial Analysis publishes a composite index whose weighting it does not
+    # publish. It is a row a reader can see, never a vote: here the components
+    # split one each, and the index must not break the tie.
+    rows = [
+        board_row("medium", "b1", 0.6, 1.0), board_row("high", "b1", 0.5, 2.0),
+        board_row("medium", "b2", 0.4, 1.0), board_row("high", "b2", 0.5, 2.0),
+        board_row("medium", "index", 50.0, 1.0, composite=True),
+        board_row("high", "index", 40.0, 2.0, composite=True),
+    ]
+    w = wizard(lanes=luna_lanes(), effort_rows=rows)
+    w.handle("enter")
+    w.handle("enter")
+    high = row_for(w.view(), "luna-high@codex")
+    record("25c the composite index never decides a lane",
+           carry_of(high) == "on" and why_of(high) == "not dominated",
+           str(high["cells"]))
+except Exception as e:
+    record("25c the composite index never decides a lane", False, repr(e))
+
+
 # --- ticket 16: rows that name a model the way a leaderboard prints it -------
 # The real Terminal-Bench extraction, 18 rows, `check` accepted 18 and rejected
 # 0. Every model in it is a display name, so before this the pre-screen matched
@@ -738,7 +805,7 @@ try:
     record("28 a display-name sweep switches off the dominated lane",
            w.screen == "prescreen"
            and carry_of(xhigh) == "off"
-           and why_of(xhigh) == "dominated by high"
+           and why_of(xhigh) == "high wins on tbench"
            and carry_of(high) == "on" and why_of(high) == "not dominated"
            and carry_of(low) == "on" and why_of(low) == "not dominated",
            str([xhigh["cells"], high["cells"], low["cells"]]))
@@ -789,6 +856,33 @@ except Exception as e:
     record("28c published_as connects a name the derived rule cannot", False, repr(e))
 
 
+# --- ticket 18: the rows `effort.py aa` reads off one Artificial Analysis page --
+try:
+    with open(os.path.join(FIXTURES, "real_aa_model_page_sample.html"), "rb") as f:
+        _packet, AA_ROWS = effort.aa_extract(f.read(), observed="2026-09-11")
+    doc = astra_lanes()
+    lane_models = {lane["model"] for lane in doc["lanes"].values()}
+    resolved = {(r["model"], catalog.resolve_published_model(r["model"], doc)) for r in AA_ROWS}
+    _rows, unmatched = setup_tui.resolve_effort_rows(doc, AA_ROWS)
+    w = wizard(lanes=doc, effort_rows=AA_ROWS)
+    w.handle("enter")
+    w.handle("enter")
+    v = w.view()
+    off = {row["cells"][1]: why_of(row) for row in v["rows"] if carry_of(row) == "off"}
+    record("30 every catalog variant on the AA page resolves; only the strangers go unmatched",
+           {lane for _name, lane in resolved if lane} == lane_models
+           and sorted(unmatched) == ["GPT-5.5", "Grok 4.3"]
+           and any("no lane runs these, ignored: " in line and "GPT-5.5" in line
+                   for line in v["legend"]),
+           f"resolved={sorted(resolved, key=str)} unmatched={unmatched}")
+    record("30b the AA rows switch off one dominated effort, and the reason names the source",
+           off == {"astra-xhigh@codex": "high wins on aa"},
+           str(off))
+except Exception as e:
+    record("30 every catalog variant on the AA page resolves; only the strangers go unmatched",
+           False, repr(e))
+
+
 try:
     w = wizard(lanes=astra_lanes(), effort_rows=TBENCH)
     w.handle("enter")
@@ -836,7 +930,7 @@ try:
     w.handle("enter")
     luna = row_for(w.view(), "luna-low@codex")
     record("28e a slug-publishing source still matches, and rows are not mutated",
-           carry_of(luna) == "off" and "dominated" in why_of(luna)
+           carry_of(luna) == "off" and "wins on" in why_of(luna)
            and rows[0]["model"] == "gpt-5.6-luna", str(luna["cells"]))
 except Exception as e:
     record("28e a slug-publishing source still matches, and rows are not mutated",
@@ -1043,7 +1137,7 @@ try:
     record("29 every pre-screen reason is whole at 80 columns",
            "why" in grid[2]
            and all(reason in body for reason in reasons)
-           and "dominated by high" in body
+           and "high wins on tbench" in body
            and "…" not in body,
            repr([r for r in reasons if r not in body]) + "\n" + body)
 except Exception as e:

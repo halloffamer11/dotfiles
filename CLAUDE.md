@@ -17,16 +17,16 @@ Machine configuration and agent tooling managed as one Git repository.
 The delegate redesign is the only live thread. Spec
 `docs/superpowers/specs/2026-09-08-delegate-redesign.md`; tickets in
 `.scratch/delegate-redesign/issues/`, each carrying its own decisions and a
-"Landed" note; skill context `agents/skills/delegate/CLAUDE.md`. Tickets 18-21 are
-open and `ready-for-agent` (written 2026-09-11 from Orin's first wizard run); 01-17
+"Landed" note; skill context `agents/skills/delegate/CLAUDE.md`. Tickets 19-21 are
+open and `ready-for-agent` (written 2026-09-11 from Orin's first wizard run); 01-18
 are landed, and the boxes left unticked there are Orin's own confirmations, which
 each ticket's Status line names.
 
 **`main` is at `ea5430b`, the tip of `bench-aa-effort-slugs`** (2026-09-11): `main`
 was merged into the branch on 2026-09-10, then `main` fast-forwarded to it. Commits
 after `ea5430b` are on the branch only until `main` fast-forwards again. Suite green
-at 374 assertions across 12 files (two of the twelve report one summary line rather
-than one line per assertion, so other counts of the same suite run higher). The
+at 389 `PASS` lines across 12 files after ticket 18 (two of the twelve report one
+summary line rather than one line per assertion, so other counts run higher). The
 branch contains `delegate-lane-catalog`, which is history now, not a second thread.
 Tickets 01-17 are implemented, and the catalog carries every effort each codex model
 offers — 26 lanes, 19 of them generated and provisionally tiered.
@@ -43,13 +43,10 @@ since `ea5430b`, all of the redesign.
    catalog, and the tiers on the 19 new lanes are provisional by construction —
    `meter_weight`, `timeout` and, below the copied effort, `tier` are not
    measurements. Each new lane says so in its `note`.
-2. **Tickets 18-21**, in that order: 18 reads Artificial Analysis from the JSON every
-   `/models/<slug>` page embeds (31 of 32 catalog variants in one request, verified
-   2026-09-11), which retires the chunked worker path that failed at chunk 6 of 7
-   on 2026-09-10 — chunk dispatch is no longer an open problem; 19 gives claude, agy
-   and grok the per-effort lanes only codex has today (nine missing); 20 moves the
-   glossary to a root `CONTEXT.md`; 21 (blocked by 18) makes the report and the
-   tier pages read those per-effort rows instead of the free API's one entry per
+2. **Tickets 19-21**, in that order: 19 gives claude, agy and grok the per-effort
+   lanes only codex has today (nine missing); 20 moves the glossary to a root
+   `CONTEXT.md`; 21, unblocked now that 18 has landed, makes the report and the
+   tier pages read the per-effort AA rows instead of the free API's one entry per
    model.
 
 **Waiting on Orin** (nothing else blocks on these):
@@ -60,8 +57,10 @@ since `ea5430b`, all of the redesign.
   tickets 18-21, and the run is worth repeating only after 19 adds the nine
   missing lanes. From the worktree root:
   `python3 agents/skills/delegate/scripts/setup.py --config-dir stow/delegate/.config/delegate --effort-rows .scratch/delegate-redesign/_data/tbench-accepted.json`
-  The carry page should propose `astra-xhigh@codex` off as dominated by high and the
-  three `ultra` lanes off as never carried. It should also settle
+  The carry page should propose `astra-xhigh@codex` off as "high wins on tbench" and
+  the three `ultra` lanes off as never carried. With
+  `--effort-rows .scratch/delegate-redesign/_data/aa-accepted.json` instead, it
+  proposes the same lanes off, the first as "high wins on aa". It should also settle
   `astra-high@codex`: `main`'s notes (`6e0f0b1`) said its price is sourced as
   `10 / 1 / 12.5 / 50`, but the stowed catalog has `price` null with the note "not
   sourced", and its `meter_weight` 40 is a placeholder. Find the source before
@@ -87,7 +86,9 @@ since `ea5430b`, all of the redesign.
 ## Benchmark data
 
 `agents/skills/delegate/scripts/effort.py` is a `pack`/`extract`/`check` pipeline;
-`check` is the trust boundary and rejects any number not on the page. Approved
+`check` is the trust boundary and rejects any number not on the page. Artificial
+Analysis skips the worker: `effort.py aa` reads the rows out of the dataset every
+`/models/<slug>` page embeds and checks them against that payload (ticket 18). Approved
 sources and their cautions: `agents/skills/delegate/assets/sources.json`; the
 provenance research behind that choice:
 `.scratch/delegate-redesign/research/2026-09-09-effort-data-sources.md`. Accepted
@@ -100,20 +101,19 @@ swerb and on Artificial Analysis, but Terminal-Bench's `display_cost` is a whole
 figure. Even the two per-task numbers measure different task sets, so never compare
 costs across sources. The AA key is at `~/.config/delegate/aa-key`, mode 600, outside
 the repo and in `.gitignore` — never stow it; this repo is public. Where a note says
-AA covers a model, it means the `/models/releases/` pages that `effort.py` scrapes,
-not the free API that `bench.py` calls (`AA_URL`).
+AA covers a model, it means the `/models/<slug>` page payload that `effort.py aa`
+reads, not the free API that `bench.py` calls (`AA_URL`). AA's cost per task is the
+Intelligence Index's, one figure per variant, repeated on each component row.
 
 `flash-high@agy` has no rows in any approved source, so its tier is a judgement from
 its `basis` note rather than from numbers. The AA figures for `gpt-5.6-sol`,
 `gpt-5.6-terra` and `grok-4.6` were measured at low/medium/medium against lanes that
 run high; the report prints that caveat per model.
 
-The two paragraphs above describe what runs today. Ticket 18 replaces the AA scrape
-with a parser over the JSON every `/models/<slug>` page embeds (every catalog model
-at every effort, component scores and cost per task, one request), and ticket 21
-then retires the free API and the key from the report. Ticket 18 carries the
-measurements; llm-cost-frontier's `update.py` (catalystneuro, BSD-3) is the
-reference parser.
+The report still reads AA through the free API and the key; ticket 21 moves it onto
+the per-effort rows `effort.py aa` writes and retires both. Ticket 18's Landed note
+carries the measurements; llm-cost-frontier's `update.py` (catalystneuro, BSD-3)
+was the reference for where the dataset sits in the page.
 
 ## Settled, do not re-raise
 
@@ -132,6 +132,10 @@ reference parser.
   2026-09-10).
 - `ultra` lanes are generated disabled: no source scores them, and automatic task
   delegation contradicts the worker preamble (ticket 15).
+- The carry page proposes a lane off when another effort of the same model, for no
+  more money, beats it on more than half of the benchmarks one source scored both
+  on. The AA composite index is shown and never counted (Orin, 2026-09-11, ticket
+  18).
 
 Preserve unrelated working-tree changes. Validate the smallest affected surface
 before committing.

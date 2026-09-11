@@ -797,7 +797,9 @@ ok = (
 )
 record("check validates against whole packet and rejects number in no chunk", ok, f"acc={len(accepted_rows)}, rej={len(rejected_rows)}")
 
-# 41. Real Artificial Analysis packet test: pack gpt-6-astra.html and split into chunks
+# 41. Real Artificial Analysis packet test: pack gpt-6-astra.html and split into chunks.
+# The release page stays only as a large packet for the chunker to split; AA rows
+# come from `effort.py aa`, and `extract` refuses an AA packet (ticket 18).
 aa_fixture = fixture("real_aa_release_sample.html")
 if True:
     with open(aa_fixture, "rb") as f:
@@ -870,6 +872,118 @@ try:
            f"files={checked}/{len(acc)}/{len(rej)}")
 except Exception as e:
     record("check verifies against the whole packet, not one chunk", False, repr(e))
+
+
+# --- ticket 18: Artificial Analysis rows from the page's own dataset --------------
+# The fixture is the /models/gpt-5-6-sol-high page of 2026-09-11 cut down to the
+# 31 catalog variants and two strangers, each model object verbatim, split over
+# three flight chunks the way the real page splits its payload.
+AA_PAGE = fixture("real_aa_model_page_sample.html")
+AA_URL = "https://artificialanalysis.ai/models/gpt-5-6-sol-high"
+CATALOG_VARIANTS = {(model, e) for model, efforts in (
+    ("GPT-6 Astra", "low medium high xhigh max"),
+    ("GPT-5.6 Sol", "low medium high xhigh max"),
+    ("GPT-5.6 Terra", "low medium high xhigh max"),
+    ("GPT-5.6 Luna", "low medium high xhigh max"),
+    ("Claude Fable 5.1", "low medium high xhigh max"),
+    ("Grok 4.6", "low medium high xhigh"),
+    ("Gemini 3.8 Flash", "medium high"),
+) for e in efforts.split()}
+STRANGERS = {("GPT-5.5", "xhigh"), ("Grok 4.3", "none")}
+with open(AA_PAGE, "rb") as f:
+    aa_page = f.read()
+
+try:
+    aa_packet, aa_rows = effort.aa_extract(aa_page, url=AA_URL, observed="2026-09-11")
+    pairs = {(r["model"], r["effort"]) for r in aa_rows}
+    sol_tb = [r for r in aa_rows if (r["model"], r["effort"], r["benchmark"])
+              == ("GPT-5.6 Sol", "high", "Terminal-Bench 2.1")]
+    fable = {r["variant"] for r in aa_rows if (r["model"], r["effort"]) == ("Claude Fable 5.1", "high")}
+    record("aa: one page yields every catalog variant, named by release and effort word",
+           len(CATALOG_VARIANTS) == 31
+           and pairs == CATALOG_VARIANTS | STRANGERS
+           and len(sol_tb) == 1
+           and sol_tb[0]["score"] == 0.872659176029963
+           and sol_tb[0]["cost_usd"] == 0.807982690134498
+           and sol_tb[0]["tokens"] == 13249.974623852537
+           and (sol_tb[0]["source"], sol_tb[0]["url"], sol_tb[0]["observed"])
+           == ("aa", AA_URL, "2026-09-11")
+           and sol_tb[0]["fields"]["score"] == "terminalbenchV21"
+           and fable == {"Claude Fable 5.1 (Adaptive Reasoning, High Effort, Default Fallback)"},
+           f"extra={sorted(pairs - CATALOG_VARIANTS)} missing={sorted(CATALOG_VARIANTS - pairs)} "
+           f"sol_tb={sol_tb[:1]} fable={fable}")
+except Exception as e:
+    record("aa: one page yields every catalog variant, named by release and effort word", False, repr(e))
+
+try:
+    _packet, aa_rows = effort.aa_extract(aa_page, url=AA_URL, observed="2026-09-11")
+    composite = [r for r in aa_rows if r.get("composite")]
+    sol_high = [r for r in aa_rows if r["variant"] == "GPT-5.6 Sol (high)"]
+    sol_parts = sorted(r["benchmark"] for r in sol_high if not r.get("composite"))
+    sol_index = [r for r in sol_high if r.get("composite")]
+    unsure = {(r["model"], r["effort"]) for r in aa_rows if r["uncertain"]}
+    record("aa: the composite index is its own flagged row; component rows are not flagged",
+           len(composite) == len(CATALOG_VARIANTS | STRANGERS)
+           and {r["benchmark"] for r in composite} == {"Artificial Analysis Intelligence Index"}
+           and {r["fields"]["score"] for r in composite} == {"intelligenceIndex"}
+           and sol_parts == ["AA-LCR", "AutomationBench", "GDPval", "GPQA Diamond",
+                             "IFBench", "MMMU-Pro", "Omniscience", "Terminal-Bench 2.1"]
+           and len(sol_index) == 1 and sol_index[0]["score"] == 42.4991760420519
+           and all("composite" not in r for r in aa_rows if r["benchmark"] != sol_index[0]["benchmark"]),
+           f"composite={len(composite)} sol_parts={sol_parts} sol_index={sol_index[:1]}")
+    record("aa: (Non-reasoning) is effort none and uncertain; every other variant is certain",
+           unsure == {("Grok 4.3", "none")},
+           f"uncertain={sorted(unsure)}")
+except Exception as e:
+    record("aa: the composite index is its own flagged row; component rows are not flagged", False, repr(e))
+
+try:
+    aa_packet, aa_rows = effort.aa_extract(aa_page, url=AA_URL, observed="2026-09-11")
+    ok_rows, bad_rows = effort.check_rows(aa_rows, aa_packet)
+    # one digit of one number, the last place of Sol high's Terminal-Bench score
+    perturbed = [dict(r) for r in aa_rows if r["variant"] == "GPT-5.6 Sol (high)"
+                 and r["benchmark"] == "Terminal-Bench 2.1"]
+    perturbed[0]["score"] = 0.872659176029964
+    p_ok, p_bad = effort.check_rows(perturbed, aa_packet)
+    record("aa: check accepts every emitted row against the page payload",
+           aa_packet.startswith("## source aa\n## url " + AA_URL + "\n")
+           and "\n## payload\n" in aa_packet
+           and len(ok_rows) == len(aa_rows) and not bad_rows,
+           f"accepted={len(ok_rows)}/{len(aa_rows)} first_reject={bad_rows[:1]}")
+    record("aa: check rejects a row whose number is one digit off the payload",
+           not p_ok and len(p_bad) == 1
+           and p_bad[0]["reasons"] == ["unsourced score=0.872659176029964"],
+           f"ok={p_ok} bad={p_bad}")
+except Exception as e:
+    record("aa: check accepts every emitted row against the page payload", False, repr(e))
+
+try:
+    with tempfile.TemporaryDirectory() as td:
+        res = run_cli("aa", "--html", AA_PAGE, "--url", AA_URL, "--out-dir", td)
+        written = sorted(os.listdir(td))
+        rows = load_json(os.path.join(td, "rows.json"))
+        acc = load_json(os.path.join(td, "accepted.json"))
+        rej = load_json(os.path.join(td, "rejected.json"))
+        with open(os.path.join(td, "packet.txt"), encoding="utf-8") as f:
+            head = f.read(200)
+        record("aa CLI: one command writes the packet, the rows and check's verdict",
+               res.returncode == 0
+               and written == ["accepted.json", "packet.txt", "rejected.json", "rows.json"]
+               and rows and len(acc) == len(rows) and rej == []
+               and f"checked={len(rows)} accepted={len(rows)} rejected=0" in res.stdout
+               and head.startswith("## source aa\n"),
+               f"rc={res.returncode} written={written} stdout={res.stdout!r} stderr={res.stderr!r}")
+
+        # The worker path is for pages with no dataset of their own. An AA packet
+        # sent down it would spend agy quota to re-derive what `aa` already read.
+        brief_dir = os.path.join(td, "worker")
+        res = run_cli("extract", "--packet", os.path.join(td, "packet.txt"), "--out-dir", brief_dir)
+        record("the worker path refuses an Artificial Analysis packet before any dispatch",
+               res.returncode == 1 and "effort.py aa" in res.stderr
+               and not os.path.exists(os.path.join(brief_dir, "extract-brief.md")),
+               f"rc={res.returncode} stderr={res.stderr!r}")
+except Exception as e:
+    record("aa CLI: one command writes the packet, the rows and check's verdict", False, repr(e))
 
 
 sys.exit(1 if fails else 0)

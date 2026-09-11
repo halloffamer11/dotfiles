@@ -18,7 +18,7 @@ from collections import defaultdict
 
 import bench
 from catalog import EFFORTS, resolve_published_model
-from setup_tui import certain_effort_rows, dominating_row, propose_enabled
+from setup_tui import certain_effort_rows, dominating_row, is_dominated_reason, propose_enabled
 
 # A published sweep runs the API's own enum, which starts below the lowest
 # effort a lane can be set to. `none` is a real row and the cheapest one, so a
@@ -159,7 +159,7 @@ def _proposed_off(proposals):
     """{lane name: reason} for lanes the pre-screen would switch off on the
     strength of the data, not lanes already recorded off or never carried."""
     return {name: why for name, (on, why) in proposals.items()
-            if not on and isinstance(why, str) and why.startswith("dominated by")}
+            if not on and is_dominated_reason(why)}
 
 
 def _load_sources():
@@ -904,7 +904,7 @@ def _catalog_section(lanes_doc, proposals):
                             else '<span class="quiet">—</span>')
         else:
             on, why = verdict
-            cls = "" if on else ("off" if why.startswith("dominated by") else "quiet")
+            cls = "" if on else ("off" if is_dominated_reason(why) else "quiet")
             verdict_cell = f'<span class="{cls}">{"carry" if on else "off"}: {_esc(why)}</span>'
         out.append("<tr>"
                    f'<td><span class="mono">{_esc(name)}</span></td>'

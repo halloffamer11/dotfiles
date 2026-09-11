@@ -237,7 +237,7 @@ try:
     page = bench_page.render(None, ASTRA, SWEEP)
     proposals = setup_tui.propose_enabled(ASTRA, SWEEP)
     off = sorted(name for name, (on, _why) in proposals.items()
-                 if not on and _why.startswith("dominated by"))
+                 if not on and setup_tui.is_dominated_reason(_why))
     struck = re.findall(r'<g class="pt lane_off"><title>([^<]*)</title>', page)
     verdict = re.search(r'<p class="verdict">(.*?)</p>', page, re.S).group(1)
     caption = re.search(r"<figcaption>(.*?)</figcaption>", page, re.S).group(1)
@@ -245,14 +245,42 @@ try:
     order = re.findall(r"<td>(low|medium|high|xhigh|max)</td><td>", body)
     record("the page marks what the wizard marks, names it at the top, and shows the arithmetic",
            off == ["astra-xhigh@codex"] and len(struck) == 1 and "xhigh" in struck[0]
-           and "astra-xhigh@codex" in verdict and "dominated by high" in verdict
+           and "astra-xhigh@codex" in verdict and "high wins on tbench" in verdict
            and "scores the same as high" in caption and "$81.1 more (+4%)" in caption
-           and "off: dominated by high" in body
+           and "off: high wins on tbench" in body
            and order[:5] == ["low", "medium", "high", "xhigh", "max"]
            and "GPT-6 Astra" in page and "gpt-6-astra" in page,
            f"off={off} struck={struck} verdict={verdict[:120]!r} order={order[:6]}")
 except Exception as e:
     record("the page marks what the wizard marks, names it at the top, and shows the arithmetic",
+           False, repr(e))
+
+try:
+    # One source, three benchmarks off the same runs. medium beats high on two
+    # of the three, so the wizard switches high off over the source, and the page
+    # has to say so on every one of that source's boards — including b3, where
+    # high happens to score more.
+    luna = copy.deepcopy(LANES)
+    for effort in ("low", "medium", "high"):
+        lane = copy.deepcopy(LANES["lanes"]["sol-high@codex"])
+        lane["model"] = "gpt-5.6-luna"
+        lane["effort"] = effort
+        luna["lanes"][f"luna-{effort}@codex"] = lane
+    board = []
+    for bench_name, points in (("b1", (0.6, 0.5)), ("b2", (0.6, 0.5)), ("b3", (0.4, 0.5))):
+        for effort, score, cost in (("medium", points[0], 1.0), ("high", points[1], 2.0)):
+            board.append({"source": "aa", "model": "gpt-5.6-luna", "effort": effort,
+                          "benchmark": bench_name, "score": score, "cost_usd": cost,
+                          "uncertain": False, "provenance": "unlabelled"})
+    page = bench_page.render(None, luna, board)
+    struck = re.findall(r'<g class="pt lane_off"><title>([^<]*)</title>', page)
+    kept = re.findall(r'<g class="pt lane"><title>([^<]*)</title>', page)
+    record("a lane dominated over its source is struck on every board of that source",
+           len(struck) == 3 and all("dominated by medium" in t for t in struck)
+           and len(kept) == 3 and not any("dominated by" in t for t in kept),
+           f"struck={struck} kept={kept}")
+except Exception as e:
+    record("a lane dominated over its source is struck on every board of that source",
            False, repr(e))
 
 try:

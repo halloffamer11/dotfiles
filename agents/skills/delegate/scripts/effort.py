@@ -23,6 +23,11 @@ integers, so a human still reads accepted.json. A badge that sits in different
 markup from its row will degrade to a rejection rather than a false accept:
 a missed badge is recoverable, a false verified is not.
 
+One source skips stage 2. Artificial Analysis embeds its whole dataset as JSON
+in every /models/<slug> page, so `aa` reads the rows straight out of that
+payload and writes the payload itself as the packet; `check` then runs as it
+does for any other source. `extract` refuses an Artificial Analysis packet.
+
 Default extract lane is flash-high@agy; terra-high@codex is the fallback
 for packets that lane handles badly.
 
@@ -43,15 +48,19 @@ CLI forms:
   effort.py extract --packet <file> --out-dir <dir> [--lane <lane>] [--budget <bytes>]
   effort.py check --rows <rows.json> --packet <file> [--out-dir <dir>]
   effort.py run <html-file> --source <id> --out-dir <dir> [--url <url>] [--lane <lane>] [--budget <bytes>]
+  effort.py aa --out-dir <dir> [--url <url>] [--html <file>]
 """
 import argparse
 import hashlib
+import html
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from html.parser import HTMLParser
@@ -63,6 +72,9 @@ ROW_IDENTITY_FIELDS = ("source", "model", "effort", "benchmark")
 EFFORT_VALUES = (
     "none", "low", "medium", "high", "xhigh", "max", "ultra", "unspecified",
 )
+# The words a page may print for an effort, where the row's word is not one of
+# them: Artificial Analysis prints `Non-reasoning` for the API's `none`.
+EFFORT_PRINTED = {"none": ("none", "non-reasoning")}
 PROVENANCE_VALUES = ("verified", "self-reported", "unlabelled")
 PROVENANCE_STEMS = {
     "verified": ("verif", "official"),
@@ -528,6 +540,17 @@ def extract_embedded_payloads(script_blocks):
     return emitted
 
 
+def packet_header(source, url, title, digest, packed):
+    """The five provenance lines every packet opens with."""
+    return [
+        f"## source {source}",
+        f"## url {url}".rstrip() if url else "## url",
+        f"## title {title}".rstrip() if title else "## title",
+        f"## sha256 {digest}",
+        f"## packed {packed}",
+    ]
+
+
 def pack_html(raw_bytes, source, url=None, packed=None):
     """Build a deterministic packet from raw HTML bytes.
 
@@ -597,14 +620,7 @@ def pack_html(raw_bytes, source, url=None, packed=None):
     ):
         raise ClientRenderedError(CLIENT_RENDERED_MSG)
 
-    url_value = url if url else ""
-    lines = [
-        f"## source {source}",
-        f"## url {url_value}".rstrip() if url_value else "## url",
-        f"## title {parser.title()}".rstrip() if parser.title() else "## title",
-        f"## sha256 {digest}",
-        f"## packed {packed}",
-    ]
+    lines = packet_header(source, url, parser.title(), digest, packed)
     for i, rows in enumerate(parser.tables, 1):
         lines.append(f"## table {i}")
         for row in rows:
@@ -868,6 +884,11 @@ def extract_rows(packet_path, out_dir, lane=None, budget=DEFAULT_BUDGET):
             packet_text = f.read()
     except OSError as e:
         raise EffortError(f"{packet_path}: cannot read: {e}")
+    if packet_text.startswith(f"## source {AA_SOURCE}\n"):
+        raise EffortError(
+            f"{packet_path}: an Artificial Analysis packet goes to no worker; "
+            "run `effort.py aa`, which reads the page's own dataset"
+        )
 
     chunks = split_packet(packet_text, budget=budget)
 
@@ -990,7 +1011,8 @@ def check_row(row, packet_text, numbers):
     model = row.get("model")
     if not occurs_ci(packet_text, model):
         reasons.append("unsourced model")
-    if effort_key in EFFORT_VALUES and not occurs_ci(packet_text, effort_s):
+    printed = EFFORT_PRINTED.get(effort_key, (effort_s,))
+    if effort_key in EFFORT_VALUES and not any(occurs_ci(packet_text, word) for word in printed):
         reasons.append("unsourced effort")
     elif effort_key not in EFFORT_VALUES and effort_s and not occurs_ci(packet_text, effort_s):
         reasons.append("unsourced effort")
@@ -1097,6 +1119,236 @@ def run_pipeline(html_file, source, out_dir, url=None, lane=None, budget=DEFAULT
     return check_files(rows_path, packet_path, out_dir=out_dir)
 
 
+# --- Artificial Analysis: the dataset the page embeds -------------------------
+# Every /models/<slug> page on artificialanalysis.ai carries the whole comparison
+# dataset in its Next.js flight payload, one JSON object per model variant, so no
+# worker reads it: a parser copies numbers out of JSON it did not write, and
+# `check` verifies each one against that payload, which is the packet.
+# llm-cost-frontier's update.py (catalystneuro, BSD-3) reads the same payload and
+# was the reference for where to look.
+
+AA_SOURCE = "aa"
+SOURCES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "..", "assets", "sources.json")
+# Every variant object carries this key, and nothing else on the page does.
+AA_MARKER_KEY = "intelligenceIndexCostPerTask"
+# payload field -> the benchmark the row names.
+AA_COMPONENTS = (
+    ("terminalbenchV21", "Terminal-Bench 2.1"),
+    ("automationBenchPartialScore", "AutomationBench"),
+    ("lcr", "AA-LCR"),
+    ("ifbench", "IFBench"),
+    ("omniscience", "Omniscience"),
+    ("gpqa", "GPQA Diamond"),
+    ("gdpvalNormalized", "GDPval"),
+    ("mmmuPro", "MMMU-Pro"),
+)
+# The composite is emitted so a reader can see it, flagged `composite` so the
+# carry page never decides on it: the sources file says its weighting is not
+# published.
+AA_COMPOSITE = ("intelligenceIndex", "Artificial Analysis Intelligence Index")
+# The index's cost and output tokens per task: one figure per variant, the same
+# on every benchmark row of that variant.
+AA_COST_FIELD = "intelligenceIndexCostPerTask.cost.total"
+AA_TOKENS_FIELD = "intelligenceIndexOutputTokensPerTask.output"
+AA_EFFORT_WORDS = tuple(e for e in EFFORT_VALUES if e not in ("none", "unspecified"))
+FLIGHT_CHUNK = re.compile(r'self\.__next_f\.push\(\[1,"((?:[^"\\]|\\.)*)"\]\)')
+HTML_TITLE = re.compile(r"<title[^>]*>(.*?)</title>", re.S | re.I)
+
+
+def flight_payload(html_text):
+    """The page's Next.js flight payload: every `push([1, "..."])` string, joined."""
+    chunks = FLIGHT_CHUNK.findall(html_text)
+    if not chunks:
+        raise EffortError("no Next.js flight payload on the page; the site layout may have changed")
+    return "".join(json.loads(f'"{chunk}"') for chunk in chunks)
+
+
+def _enclosing_brace(text, index):
+    """Offset of the `{` opening the object that contains `index`, or None.
+
+    It counts braces walking back and does not track strings, so a brace inside
+    a string can mislead it. The caller parses what it finds and keeps it only
+    if the marker is that object's own key, so a wrong start costs a variant,
+    never a wrong row.
+    """
+    depth = 0
+    for j in range(index, -1, -1):
+        ch = text[j]
+        if ch == "}":
+            depth += 1
+        elif ch == "{":
+            if depth == 0:
+                return j
+            depth -= 1
+    return None
+
+
+def aa_variants(payload):
+    """Each variant object in the payload once, in payload order."""
+    decoder = json.JSONDecoder()
+    variants, seen = [], set()
+    for m in re.finditer(f'"{AA_MARKER_KEY}"', payload):
+        start = _enclosing_brace(payload, m.start())
+        if start is None:
+            continue
+        try:
+            obj, _end = decoder.raw_decode(payload, start)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict) or AA_MARKER_KEY not in obj:
+            continue
+        name = obj.get("name")
+        if not isinstance(name, str) or name in seen:
+            continue
+        seen.add(name)
+        variants.append(obj)
+    return variants
+
+
+def _aa_effort(variant_name):
+    """The effort a variant name prints, or None.
+
+    `GPT-5.6 Sol (high)` and `Claude Fable 5.1 (Adaptive Reasoning, High Effort,
+    Default Fallback)` are both `high`; `(Non-reasoning)` is `none`. A name with
+    no effort word in its closing parentheses — `(Reasoning)`, or none at all —
+    says nothing a lane could be set to.
+    """
+    m = re.search(r"\(([^()]*)\)\s*$", variant_name)
+    if not m:
+        return None
+    for part in m.group(1).split(","):
+        word = part.strip().lower()
+        if word == "non-reasoning":
+            return "none"
+        if word.endswith(" effort"):
+            word = word[: -len(" effort")].strip()
+        if word in AA_EFFORT_WORDS:
+            return word
+    return None
+
+
+def _dig(obj, path):
+    for key in path.split("."):
+        obj = obj.get(key) if isinstance(obj, dict) else None
+    return obj
+
+
+def _number(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return value
+
+
+def aa_rows(variants, url, observed):
+    """One row per variant per component score it has.
+
+    `model` is the release name (`GPT-5.6 Sol`) and `effort` the word in the
+    variant name, so the catalog resolves the row the way it resolves any other
+    source's. Beyond the worker row schema each row keeps `variant`, the name
+    the page printed, and `fields`, the payload field behind each number.
+    """
+    rows = []
+    for variant in variants:
+        name = variant["name"]
+        effort = _aa_effort(name)
+        if effort is None:
+            continue
+        release = _dig(variant, "release.name")
+        model = release if isinstance(release, str) and release.strip() else name.split(" (")[0]
+        cost = _number(_dig(variant, AA_COST_FIELD))
+        tokens = _number(_dig(variant, AA_TOKENS_FIELD))
+        for field, benchmark in AA_COMPONENTS + (AA_COMPOSITE,):
+            score = _number(variant.get(field))
+            if score is None:
+                continue
+            row = {
+                "source": AA_SOURCE, "url": url, "model": model, "effort": effort,
+                "benchmark": benchmark, "score": score, "score_unit": None,
+                "cost_usd": cost, "tokens": tokens, "observed": observed,
+                # The page has no per-row badge to read, so nothing here can
+                # claim `verified`; that AA runs every model itself is a fact
+                # about the source, recorded in sources.json.
+                "provenance": "unlabelled",
+                # No lane runs at `none`, and ticket 15 keeps it uncertain.
+                "uncertain": effort == "none",
+                "variant": name,
+                "fields": {"score": field, "cost_usd": AA_COST_FIELD, "tokens": AA_TOKENS_FIELD},
+            }
+            if (field, benchmark) == AA_COMPOSITE:
+                row["composite"] = True
+            rows.append(row)
+    return rows
+
+
+def aa_extract(raw_bytes, url=None, observed=None):
+    """(packet, rows) for one Artificial Analysis model page.
+
+    The packet is the whole flight payload under the usual provenance header,
+    verbatim, so `check` verifies the rows against the page and nothing else.
+    """
+    if observed is None:
+        observed = utc_today()
+    html_text = raw_bytes.decode("utf-8", errors="replace")
+    payload = flight_payload(html_text)
+    variants = aa_variants(payload)
+    if not variants:
+        raise EffortError("the page payload holds no model dataset; the site layout may have changed")
+    title_match = HTML_TITLE.search(html_text)
+    title = collapse_ws(html.unescape(title_match.group(1))) if title_match else ""
+    digest = hashlib.sha256(raw_bytes).hexdigest()
+    lines = packet_header(AA_SOURCE, url, title, digest, observed)
+    lines += ["## payload", payload.rstrip("\n")]
+    return "\n".join(lines) + "\n", aa_rows(variants, url, observed)
+
+
+def source_url(source_id):
+    """The page the sources file approves for `source_id`."""
+    try:
+        with open(SOURCES_PATH, encoding="utf-8") as f:
+            doc = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        raise EffortError(f"{SOURCES_PATH}: cannot read: {e}")
+    url = ((doc.get("sources") or {}).get(source_id) or {}).get("url")
+    if not url:
+        raise EffortError(f"{SOURCES_PATH}: source {source_id} has no url")
+    return url
+
+
+def fetch_page(url):
+    request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (delegate effort.py)"})
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return response.read()
+    except (urllib.error.URLError, OSError) as e:
+        raise EffortError(f"{url}: cannot fetch: {e}")
+
+
+def run_aa(out_dir, url=None, html_file=None):
+    """Read one Artificial Analysis model page, write packet.txt and rows.json,
+    then check them. `html_file` reads a saved page instead of fetching; its
+    `url` is then only what the rows record."""
+    if html_file:
+        try:
+            with open(html_file, "rb") as f:
+                raw = f.read()
+        except OSError as e:
+            raise EffortError(f"{html_file}: cannot read: {e}")
+    else:
+        url = url or source_url(AA_SOURCE)
+        raw = fetch_page(url)
+    packet_text, rows = aa_extract(raw, url=url)
+    os.makedirs(out_dir, exist_ok=True)
+    packet_path = os.path.join(out_dir, "packet.txt")
+    rows_path = os.path.join(out_dir, "rows.json")
+    with open(packet_path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(packet_text)
+    with open(rows_path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(format_json(rows))
+    print(f"aa: {len({r['variant'] for r in rows})} variants with an effort, {len(rows)} rows")
+    return check_files(rows_path, packet_path, out_dir=out_dir)
+
+
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
@@ -1149,6 +1401,16 @@ def main(argv=None):
         help=f"maximum byte size per packet chunk (default {DEFAULT_BUDGET})",
     )
 
+    p_aa = sub.add_parser(
+        "aa", help="read an Artificial Analysis model page's own dataset, then check",
+    )
+    p_aa.add_argument("--out-dir", required=True, help="output directory")
+    p_aa.add_argument(
+        "--url", default=None,
+        help="model page to fetch (default: the page sources.json approves)",
+    )
+    p_aa.add_argument("--html", default=None, help="saved page to read instead of fetching")
+
     args = parser.parse_args(argv)
 
     try:
@@ -1166,6 +1428,12 @@ def main(argv=None):
             _checked, _accepted, rejected = run_pipeline(
                 args.html_file, args.source, args.out_dir,
                 url=args.url, lane=args.lane, budget=args.budget,
+            )
+            if rejected:
+                sys.exit(1)
+        elif args.cmd == "aa":
+            _checked, _accepted, rejected = run_aa(
+                args.out_dir, url=args.url, html_file=args.html,
             )
             if rejected:
                 sys.exit(1)

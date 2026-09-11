@@ -16,15 +16,14 @@
     },
     "aa": {
       "name": "Artificial Analysis",
-      "url": "https://artificialanalysis.ai/models/releases/gpt-5-6-sol",
-      "reaches": "tables",
+      "url": "https://artificialanalysis.ai/models/gpt-5-6-sol-high",
+      "reaches": "embedded-json",
       "models": [
         "all seven catalog models"
       ],
-      "efforts": "none..max",
+      "efforts": "none..max; the page prints none as (Non-reasoning)",
       "cost": "usd_per_task",
-      "caution": "Runs models in house. Use component scores, not the composite Intelligence Index, whose weighting is not published. One URL per model release page. Use the /models/releases/ pages, NOT /models/<slug>: the release page packs to ~480 lines and carries the effort sweep with $/task, while the model overview page packs to ~2960 lines and carries almost no cost data.",
-      "url_pattern": "https://artificialanalysis.ai/models/releases/<model-slug>"
+      "caution": "Runs models in house. Use component scores, not the composite Intelligence Index, whose weighting is not published: `effort.py aa` emits the index as its own row flagged `composite`, and the carry page never decides on it. Every /models/<slug> page embeds the whole comparison dataset, one JSON object per model and effort, in its Next.js flight payload, so one page serves every catalog model and no worker reads it. Cost and output tokens are the Intelligence Index's per-task figures, the same on every benchmark row of one variant."
     },
     "tbench": {
       "name": "Terminal-Bench 4.0",

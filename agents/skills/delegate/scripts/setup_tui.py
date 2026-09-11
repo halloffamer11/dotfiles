@@ -30,7 +30,7 @@ CONFIRM_OFF_LEGEND = "off: written with enabled: false.  On lanes omit the key."
 # is whole at about twenty characters, and the sentence it used to be is a
 # legend line that appears only on the screens where that phrase appears. A
 # reason cut mid-word explains no more than a legend cut mid-sentence does.
-DOMINATED_LEGEND = "Dominated: another effort of the same model scores ≥ at ≤ cost."
+DOMINATED_LEGEND = "X wins on S: effort X scores ≥ at ≤ cost on most of source S's benchmarks."
 ABSENCE_LEGEND = "Absence of data is not evidence against a lane, so those stay on."
 RECORDED_LEGEND = '"in the catalog": you recorded that already; the pre-screen leaves it.'
 ULTRA_LEGEND = "ultra: no source scores it, and auto-delegation breaks the worker preamble."
@@ -38,6 +38,21 @@ NO_ROWS_REASON = "no rows for this lane"
 NO_DATA_REASON = "no per-effort data"
 NOT_DOMINATED_REASON = "not dominated"
 ULTRA_REASON = "ultra, never carried"
+
+
+def dominated_reason(effort, source):
+    """The reason for a lane another effort dominates: `high wins on aa`.
+
+    It names the source because two sources can disagree about one lane, and it
+    is not "dominated by high (tbench)" because that is 26 places and the `why`
+    column has 21 at 80 columns; `medium wins on tbench`, the longest, is 21.
+    """
+    return f"{effort} wins on {source}"
+
+
+def is_dominated_reason(why):
+    """Whether a proposal's reason is the data switching the lane off."""
+    return isinstance(why, str) and " wins on " in why
 
 
 def recorded_reason(enabled):
@@ -107,10 +122,14 @@ def certain_effort_rows(effort_rows):
     `none`. Letting one dominate would switch off a real lane on the strength of
     a setting that cannot be chosen, which is exactly what it did to
     luna-low@codex: equal score to `none` at a tenth of a cent more.
+
+    A `composite` row is a reader's figure, not evidence: Artificial Analysis
+    does not publish the weighting of its Intelligence Index, so it is shown and
+    never counted.
     """
     certain = []
     for row in effort_rows or []:
-        if not isinstance(row, dict) or row.get("uncertain"):
+        if not isinstance(row, dict) or row.get("uncertain") or row.get("composite"):
             continue
         if not row.get("model") or not row.get("effort"):
             continue
@@ -125,38 +144,73 @@ def certain_effort_rows(effort_rows):
     return certain
 
 
-def dominating_row(row, certain):
-    """The row that weakly Pareto-dominates this one, or None.
+def _beats(other, row):
+    """At least the score for no more money, and strictly better in one of the two."""
+    return (other["score"] >= row["score"] and other["cost_usd"] <= row["cost_usd"]
+            and (other["score"] > row["score"] or other["cost_usd"] < row["cost_usd"]))
 
-    Another effort of the same model, at least the score for no more money and
-    strictly better in one of the two, inside one source and benchmark.
+
+def dominating_effort(model, effort, source, certain):
+    """The effort of `model` that dominates `effort` inside one source, or None.
+
+    Dominated means another effort of the same model beats it on more than half
+    of the benchmarks that source scored both on. A source with one benchmark —
+    Terminal-Bench, SWE Refactor Bench — comes down to that one comparison.
+    Artificial Analysis scores eight components off the same runs, and losing
+    one noisy component in eight is not reason enough to switch a lane off: on
+    the live page of 2026-09-11 that reading proposed twelve lanes off, nine of
+    them on a single component.
+    """
+    mine, theirs = {}, {}
+    for row in certain:
+        if row.get("model") != model or row.get("source") != source:
+            continue
+        if row.get("effort") == effort:
+            mine.setdefault(row.get("benchmark"), row)
+        else:
+            theirs.setdefault(row["effort"], {}).setdefault(row.get("benchmark"), row)
+    for other_effort, board in theirs.items():
+        shared = [benchmark for benchmark in mine if benchmark in board]
+        wins = sum(1 for benchmark in shared if _beats(board[benchmark], mine[benchmark]))
+        if shared and 2 * wins > len(shared):
+            return other_effort
+    return None
+
+
+def dominating_row(row, certain):
+    """The dominating effort's point on this row's own board, or None.
+
+    The judgement belongs to the effort over its whole source
+    (`dominating_effort`), so every point of a dominated effort is marked on
+    every board of that source, including a board where it happens to score
+    higher: the lane is off over the source, not over one chart.
 
     Public because the benchmark page draws this rule: a point it shows hollow
     has to be a point the pre-screen switched a lane off over, and two
     implementations of one rule would eventually disagree in front of a human
     trying to check the wizard's arithmetic.
     """
-    model, effort = row.get("model"), row.get("effort")
-    scope = (row.get("source"), row.get("benchmark"))
-    for other in certain:
-        if other.get("model") != model or other.get("effort") == effort:
-            continue
-        if (other.get("source"), other.get("benchmark")) != scope:
-            continue
-        if other["score"] >= row["score"] and other["cost_usd"] <= row["cost_usd"]:
-            if other["score"] > row["score"] or other["cost_usd"] < row["cost_usd"]:
-                return other
-    return None
+    other = dominating_effort(row.get("model"), row.get("effort"), row.get("source"), certain)
+    if other is None:
+        return None
+    board = (row.get("source"), row.get("benchmark"))
+    return next((r for r in certain
+                 if r.get("model") == row.get("model") and r.get("effort") == other
+                 and (r.get("source"), r.get("benchmark")) == board), None)
 
 
-def _dominating_effort(lane, certain):
-    """The effort of the row that dominates this lane's own rows, else None."""
+def _first_domination(lane, certain):
+    """(effort, source) of the first source in which another effort dominates
+    this lane, else None."""
+    sources = []
     for row in certain:
-        if row.get("model") != lane["model"] or row.get("effort") != lane["effort"]:
-            continue
-        other = dominating_row(row, certain)
+        if row.get("model") == lane["model"] and row.get("effort") == lane["effort"]:
+            if row.get("source") not in sources:
+                sources.append(row.get("source"))
+    for source in sources:
+        other = dominating_effort(lane["model"], lane["effort"], source, certain)
         if other is not None:
-            return other["effort"]
+            return other, source
     return None
 
 
@@ -178,9 +232,10 @@ def propose_enabled(lanes_doc, effort_rows):
             enabled = bool(lane["enabled"])
             out[name] = (enabled, recorded_reason(enabled))
             continue
-        other = _dominating_effort(lane, certain)
-        if other is not None:
-            out[name] = (False, f"dominated by {other}")
+        found = _first_domination(lane, certain)
+        if found is not None:
+            other, source = found
+            out[name] = (False, dominated_reason(other, source))
             continue
         if not supplied:
             out[name] = (True, NO_DATA_REASON)
