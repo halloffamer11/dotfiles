@@ -17,9 +17,10 @@ Machine configuration and agent tooling managed as one Git repository.
 The delegate redesign is the only live thread. Spec
 `docs/superpowers/specs/2026-09-08-delegate-redesign.md`; tickets in
 `.scratch/delegate-redesign/issues/`, each carrying its own decisions and a
-"Landed" note; skill context `agents/skills/delegate/CLAUDE.md`. No ticket is open
-(14 closed 2026-09-10); the boxes left unticked are Orin's own confirmations, and
-each ticket's Status line says which.
+"Landed" note; skill context `agents/skills/delegate/CLAUDE.md`. Tickets 18-21 are
+open and `ready-for-agent` (written 2026-09-11 from Orin's first wizard run); 01-17
+are landed, and the boxes left unticked there are Orin's own confirmations, which
+each ticket's Status line names.
 
 **`main` is at `ea5430b`, the tip of `bench-aa-effort-slugs`** (2026-09-11): `main`
 was merged into the branch on 2026-09-10, then `main` fast-forwarded to it. Commits
@@ -42,13 +43,14 @@ since `ea5430b`, all of the redesign.
    catalog, and the tiers on the 19 new lanes are provisional by construction —
    `meter_weight`, `timeout` and, below the copied effort, `tier` are not
    measurements. Each new lane says so in its `note`.
-2. **Chunk dispatch does not fit one agy window.** `effort.py` splits a large packet
-   correctly, but dispatches the chunks in sequence: both live Artificial Analysis
-   runs on 2026-09-10 failed at chunk 6 of 7 when the agy **5-hour** meter hit 0%
-   (the weekly had just refilled to 95% — the 5h window is the binding constraint,
-   not the weekly). Options and measurements are in ticket 15's last section: run the
-   chunks concurrently, spread them across lanes, or both. Raising the budget is not
-   a fix.
+2. **Tickets 18-21**, in that order: 18 reads Artificial Analysis from the JSON every
+   `/models/<slug>` page embeds (31 of 32 catalog variants in one request, verified
+   2026-09-11), which retires the chunked worker path that failed at chunk 6 of 7
+   on 2026-09-10 — chunk dispatch is no longer an open problem; 19 gives claude, agy
+   and grok the per-effort lanes only codex has today (nine missing); 20 moves the
+   glossary to a root `CONTEXT.md`; 21 (blocked by 18) makes the report and the
+   tier pages read those per-effort rows instead of the free API's one entry per
+   model.
 
 **Waiting on Orin** (nothing else blocks on these):
 
