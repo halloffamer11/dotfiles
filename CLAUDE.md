@@ -54,9 +54,11 @@ since `ea5430b`, all of the redesign.
 
 **Waiting on Orin** (nothing else blocks on these):
 
-- Run the wizard once to close tickets 06, 07, 07b and 15's last box, and to
-  confirm or correct the provisional tiers on the 19 generated lanes. From the
-  worktree root:
+- Run the wizard to the confirm page to close tickets 06, 07, 07b and 15's last
+  box, and to confirm or correct the provisional tiers on the 19 generated lanes.
+  Orin drove it once on 2026-09-11 without writing; his three findings became
+  tickets 18-21, and the run is worth repeating only after 19 adds the nine
+  missing lanes. From the worktree root:
   `python3 agents/skills/delegate/scripts/setup.py --config-dir stow/delegate/.config/delegate --effort-rows .scratch/delegate-redesign/_data/tbench-accepted.json`
   The carry page should propose `astra-xhigh@codex` off as dominated by high and the
   three `ultra` lanes off as never carried. It should also settle
@@ -105,6 +107,13 @@ not the free API that `bench.py` calls (`AA_URL`).
 its `basis` note rather than from numbers. The AA figures for `gpt-5.6-sol`,
 `gpt-5.6-terra` and `grok-4.6` were measured at low/medium/medium against lanes that
 run high; the report prints that caveat per model.
+
+The two paragraphs above describe what runs today. Ticket 18 replaces the AA scrape
+with a parser over the JSON every `/models/<slug>` page embeds (every catalog model
+at every effort, component scores and cost per task, one request), and ticket 21
+then retires the free API and the key from the report. Ticket 18 carries the
+measurements; llm-cost-frontier's `update.py` (catalystneuro, BSD-3) is the
+reference parser.
 
 ## Settled, do not re-raise
 

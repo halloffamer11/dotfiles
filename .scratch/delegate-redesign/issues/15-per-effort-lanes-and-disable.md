@@ -177,3 +177,9 @@ Three ways out, none of them tried yet:
 
 Terminal-Bench (29KB, one chunk, 18 rows accepted) and SWE Refactor Bench (15KB)
 both fit in a single dispatch, which is why this never showed up before.
+
+**Superseded 2026-09-11 by ticket 18.** None of the three ways out is taken. The
+Artificial Analysis page embeds its whole dataset as JSON, so the rows come from
+a parser, not from chunks sent to a worker; the only packets that ever needed
+chunking were the AA pages. The two failed runs' chunk outputs held only the
+composite Intelligence Index anyway.
