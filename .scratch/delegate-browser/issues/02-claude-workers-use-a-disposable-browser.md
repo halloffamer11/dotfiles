@@ -13,5 +13,5 @@ Facts and setup rules: `../research/2026-09-10-browser-routes.md`.
 - [ ] Read-only claude runs still cannot edit, write, or run a shell. The relay's read-only change check still reports changes.
 - [ ] Claude.ai connectors stay off in every run.
 - [ ] Setup on the Mac, in conversation with Orin: a `playwright` server in Claude's user config that follows the setup rules. Every other MCP server that config now exposes to workers is listed here.
-- [ ] The delegate skill's `CLAUDE.md` names the current ADS pin and describes agy read-only as it now works.
+- [x] The delegate skill's `CLAUDE.md` names the current ADS pin and describes agy read-only as it now works. Done 2026-09-11 during session close; update the pin line again when this ticket pins a new commit.
 - [ ] Proof on the Mac: the claude row passes the disposable probe in a read-only run and in a write run. A read-only failure does not close this ticket.
