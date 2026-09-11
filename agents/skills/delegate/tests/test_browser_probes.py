@@ -155,17 +155,25 @@ def main():
         lines = res.stdout.strip().splitlines()
         has_8_lines = len(lines) == 8
 
-        non_agy_lines = [ln for ln in lines if "@agy" not in ln]
-        agy_lines = [ln for ln in lines if "@agy" in ln]
+        # The sample's only claude lane is native (harness = ORCHESTRATOR), so its
+        # rows name the agent to spawn instead of a relay command.
+        native_lines = [ln for ln in lines if ln.startswith("native lane=")]
+        relay_lines = [ln for ln in lines if not ln.startswith("native lane=")]
+        non_agy_lines = [ln for ln in relay_lines if "@agy" not in ln]
+        agy_lines = [ln for ln in relay_lines if "@agy" in ln]
 
-        all_non_agy_have_effort_low = len(non_agy_lines) == 6 and all("--effort low" in ln for ln in non_agy_lines)
+        native_ok = len(native_lines) == 2 and all(
+            "lane=fable-xhigh@claude" in ln and "agent=lane-fable-xhigh" in ln and "dispatch" not in ln
+            for ln in native_lines
+        )
+        all_non_agy_have_effort_low = len(non_agy_lines) == 4 and all("--effort low" in ln for ln in non_agy_lines)
         agy_has_no_effort = len(agy_lines) == 2 and all("--effort" not in ln for ln in agy_lines)
 
-        ok7 = res.returncode == 0 and has_8_lines and all_non_agy_have_effort_low and agy_has_no_effort
+        ok7 = res.returncode == 0 and has_8_lines and native_ok and all_non_agy_have_effort_low and agy_has_no_effort
         record(
-            "7. dry-run with fake catalog: --effort low for non-agy, omitted for agy",
+            "7. dry-run with fake catalog: native claude rows, --effort low for other relays, omitted for agy",
             ok7,
-            f"rc={res.returncode} total={len(lines)} non_agy_ok={all_non_agy_have_effort_low} agy_ok={agy_has_no_effort}\n{res.stdout}",
+            f"rc={res.returncode} total={len(lines)} native_ok={native_ok} non_agy_ok={all_non_agy_have_effort_low} agy_ok={agy_has_no_effort}\n{res.stdout}",
         )
 
         # -------------------------------------------------------------

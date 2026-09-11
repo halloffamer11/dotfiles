@@ -227,6 +227,18 @@ def run_probe_for_harness(harness, probe_name, lane):
     return verdict, reason
 
 
+def native_agent(cat, lane):
+    """Returns the agent to spawn when the lane is native, else None.
+
+    A native lane's harness is the orchestrator's, so delegate.py prints a spawn
+    line and starts no relay. A script cannot spawn that agent: the session
+    probes the lane itself with the same brief."""
+    import delegate
+    if cat.get("lanes", {}).get(lane, {}).get("harness") == delegate.ORCHESTRATOR:
+        return "lane-" + lane.split("@", 1)[0]
+    return None
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Browser capability eval runner across delegate harnesses.")
     parser.add_argument("--only", default=None, help="comma-separated list of harnesses to run")
@@ -259,7 +271,11 @@ def main(argv=None):
                 for probe in probes:
                     print(f"| {harness} | — | {probe} | FAIL | no enabled lane |")
                 continue
+            agent = native_agent(cat, lane)
             for probe in probes:
+                if agent:
+                    print(f"native lane={lane} agent={agent} probe={probe}: probe it from the session")
+                    continue
                 tmpdir = tempfile.mkdtemp(prefix=f"delegate-probe-{harness}-{probe}-")
                 nonce = uuid.uuid4().hex[:12]
                 probe_template_path = os.path.join(PROBES_DIR, f"{probe}.md")
@@ -289,7 +305,11 @@ def main(argv=None):
                 h_rows.append((harness, version, probe, "FAIL", "no enabled lane"))
             return harness, h_rows
 
+        agent = native_agent(cat, lane)
         for probe in probes:
+            if agent:
+                h_rows.append((harness, version, probe, "NATIVE", f"native lane {lane}: probe it from the session with agent {agent}"))
+                continue
             verdict, reason = run_probe_for_harness(harness, probe, lane)
             h_rows.append((harness, version, probe, verdict, reason))
         return harness, h_rows
