@@ -1,4 +1,7 @@
-# 22 — The benchmark page is a few plots with settings, not a wall of charts
+# 23 — The benchmark page is a few plots with settings, not a wall of charts
+
+Numbered 23 because `main` landed its own ticket 22 (class range and native Claude
+lanes) earlier the same day. This ticket's commit, `221283c`, still says 22.
 
 **What to build:** The page the wizard's `o` key opens drew one static chart per
 board (ten on the AA rows alone) and labelled nearly every point, so the labels

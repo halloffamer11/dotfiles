@@ -17,71 +17,67 @@ Machine configuration and agent tooling managed as one Git repository.
 The delegate redesign is the only live thread. Spec
 `docs/superpowers/specs/2026-09-08-delegate-redesign.md`; tickets in
 `.scratch/delegate-redesign/issues/`, each carrying its own decisions and a
-"Landed" note; skill context `agents/skills/delegate/CLAUDE.md`. Tickets 19-21 are
-open and `ready-for-agent` (written 2026-09-11 from Orin's first wizard run); 01-18
-are landed, and the boxes left unticked there are Orin's own confirmations, which
-each ticket's Status line names.
+"Landed" note; skill context `agents/skills/delegate/CLAUDE.md`. The boxes left
+unticked in a landed ticket are Orin's own confirmations, which its Status line names.
 
-**`main` is at `ea5430b`, the tip of `bench-aa-effort-slugs`** (2026-09-11): `main`
-was merged into the branch on 2026-09-10, then `main` fast-forwarded to it. Commits
-after `ea5430b` are on the branch only until `main` fast-forwards again. Suite green
-at 394 `PASS` lines across 12 files after ticket 22 (two of the twelve report one
-summary line rather than one line per assertion, so other counts run higher). The
-branch contains `delegate-lane-catalog`, which is history now, not a second thread.
-Tickets 01-17 are implemented, and the catalog carries every effort each codex model
-offers — 26 lanes, 19 of them generated and provisionally tiered.
+**`main` and `bench-aa-effort-slugs` have diverged from `ea5430b`** (2026-09-11):
 
-`~/.claude/skills/delegate` and the four `delegate-*` wrappers symlink into
-`~/dotfiles`, the **main** checkout, so the installed skill is whatever `main` holds —
-since `ea5430b`, all of the redesign.
+- `main` (`7c966a7`, the `~/dotfiles` checkout) landed ticket 22: each class has a
+  floor and a ceiling, no class reaches tier 4, and Claude lanes run natively as the
+  `lane-*` agents. It also added a root `CONTEXT.md`, which is ticket 20's glossary.
+  Its `CLAUDE.md` is newer than this one on what waits on Orin.
+- This branch (worktree `~/.herdr/worktrees/dotfiles/delegate-lane-catalog`) landed
+  ticket 18 (AA rows from the page's own dataset, the majority carry rule) and
+  ticket 23 (the benchmark page as plots with settings; its commit `221283c` still
+  says 22, the number it held before `main`'s 22 was seen), and holds the text of
+  tickets 19-21. Suite green at 394 `PASS` lines across 12 files (two of the twelve
+  report one summary line rather than one line per assertion).
+
+The branch must merge `main` before `main` can take it. Both sides changed
+`CLAUDE.md`, `agents/skills/delegate/CLAUDE.md`, `scripts/setup.py`,
+`scripts/setup_tui.py`, `tests/test_setup.py` and `tests/test_setup_tui.py`, so
+expect conflicts in all six. `~/.claude/skills/delegate` and the four `delegate-*`
+wrappers symlink into `~/dotfiles`, so the installed skill has ticket 22 and not 18
+or 23.
 
 **Open, in priority order:**
 
-1. **Orin's own wizard run.** Nothing in the workflow is known to be wrong now:
+1. **Merge `main` into this branch**, resolve the six conflicts, run the whole
+   suite, and then fast-forward `main`. For this file, take `main`'s text for the
+   stow step and the Delegation section, and keep this branch's for tickets 18 and 23.
+2. **Orin's own wizard run.** Nothing in the workflow is known to be wrong now:
    attribution is per lane (ticket 17), every codex effort is a lane, and each page
-   makes one decision per line. It has never been driven by a human against the real
-   catalog, and the tiers on the 19 new lanes are provisional by construction —
-   `meter_weight`, `timeout` and, below the copied effort, `tier` are not
-   measurements. Each new lane says so in its `note`.
-2. **Tickets 19-21**, in that order: 19 gives claude, agy and grok the per-effort
-   lanes only codex has today (nine missing); 20 moves the glossary to a root
-   `CONTEXT.md`; 21, unblocked now that 18 has landed, makes the report and the
-   tier pages read the per-effort AA rows instead of the free API's one entry per
-   model.
+   makes one decision per line. The tiers on the 19 generated codex lanes and the
+   three native Claude lanes are provisional by construction: `meter_weight`,
+   `timeout` and `tier` are not measurements. Each such lane says so in its `note`.
+3. **Tickets 19-21**, in that order: 19 gives claude, agy and grok the per-effort
+   lanes only codex has today, and each Claude lane it makes also needs a `lane-*`
+   agent file (ticket 22); 20's glossary half is done by `main`'s `CONTEXT.md`, and
+   its start-page half is not; 21 makes the report and the tier pages read the
+   per-effort AA rows instead of the free API's one entry per model.
 
 **Waiting on Orin** (nothing else blocks on these):
 
-- Run the wizard to the confirm page to close tickets 06, 07, 07b and 15's last
-  box, and to confirm or correct the provisional tiers on the 19 generated lanes.
-  Orin drove it once on 2026-09-11 without writing; his three findings became
-  tickets 18-21, and the run is worth repeating only after 19 adds the nine
-  missing lanes. From the worktree root:
-  `python3 agents/skills/delegate/scripts/setup.py --config-dir stow/delegate/.config/delegate --effort-rows .scratch/delegate-redesign/_data/tbench-accepted.json`
-  The carry page should propose `astra-xhigh@codex` off as "high wins on tbench" and
-  the three `ultra` lanes off as never carried. With
-  `--effort-rows .scratch/delegate-redesign/_data/aa-accepted.json` instead, it
-  proposes the same lanes off, the first as "high wins on aa". `--effort-rows` may be
-  repeated; with both files, the `o` key's page opens on the AA Intelligence Index
-  and on Terminal-Bench, one plot each, with the tables collapsed. It should also settle
-  `astra-high@codex`: `main`'s notes (`6e0f0b1`) said its price is sourced as
-  `10 / 1 / 12.5 / 50`, but the stowed catalog has `price` null with the note "not
-  sourced", and its `meter_weight` 40 is a placeholder. Find the source before
-  pasting the figures.
+- After the merge, run the wizard against the repo catalog, then link the live
+  folder to it. From the worktree root:
+  `python3 agents/skills/delegate/scripts/setup.py --config-dir stow/delegate/.config/delegate --effort-rows .scratch/delegate-redesign/_data/aa-accepted.json --effort-rows .scratch/delegate-redesign/_data/tbench-accepted.json`
+  then move the plain `lanes.json` and `routing.json` out of `~/.config/delegate` and
+  run `stow -d stow -t ~ -R delegate` (never `--adopt`, which would pull the 10-lane
+  live file over the repo's); ticket 22's last section has the full steps. The run
+  closes tickets 06, 07, 07b and 15's last box. The carry page should propose
+  `astra-xhigh@codex` off ("high wins on aa" or "on tbench") and the three `ultra`
+  lanes off as never carried. The `o` key's page opens on the AA Intelligence Index
+  and Terminal-Bench, one plot each; nobody has yet hovered or dragged on it with a
+  real mouse. The run should also settle `astra-high@codex`: `6e0f0b1` said its
+  price is sourced as `10 / 1 / 12.5 / 50`, but the stowed catalog has `price` null
+  with the note "not sourced", and its `meter_weight` 40 is a placeholder. Find the
+  source before pasting the figures.
 - Type each of the four `/delegate-*` wrappers once with a plain-language
   constraint (ticket 11).
 - Two one-liners in his own files, outside this repo (ticket 09):
   `~/.claude/hooks/delegate-gate.py` names `{SKILL_DIR}/delegate.py`, which moved to
   `scripts/delegate.py`, so the hook advises every session to run a path that does
   not exist; and `export DELEGATE_BALANCE=1` is still line 1 of `~/.zshrc.local`.
-- Reconcile the live catalog with the stowed one, now that the stowed file is the
-  authority (see Settled). The live `~/.config/delegate/lanes.json` is a regular
-  file, not a stow symlink, and as of 2026-09-10 it holds 10 lanes against the
-  stowed 26; it also lacks `published_as: ["Fable 5.1"]` on the fable lane and keeps
-  tier 4 on `astra-low@codex` and `astra-medium@codex`, which the stowed file drops
-  to 1. Replacing it is a mutating command in Orin's own home, so it is his to run.
-- Decide whether the `~/.claude/CLAUDE.md` Delegation section collapses to one line
-  as ticket 09 asks, which would drop the `why-claude` and "a result is a claim"
-  rules.
 - Walk the eight spec §9 acceptance items and sign each off. §9.2 is signed; §9.6 is
   down to the hook above; §9.7 is the `.zshrc.local` line.
 
@@ -125,6 +121,11 @@ was the reference for where the dataset sits in the page.
 - `trust` is gone from the design entirely. Ranking sorts
   `(tier asc, pace desc, lane name asc)`; the name term is an arbitrary deterministic
   tie-break, so a steal only ever crosses tiers (tickets 01 and 02).
+- Each class has a floor and a ceiling; the floor is the default, and tier 4 is
+  reached only by naming a lane until setup says otherwise. Tiers are what Orin sets:
+  tests check the rule on fixtures, never his tiers (ticket 22, on `main`).
+- The Delegation section of `~/.claude/CLAUDE.md` is gone (2026-09-11); the skill is
+  the only routing rule, and "Fable never runs as a worker" went with it.
 - One decision per line on each page, with the same `[x]`/`[ ]` marker on every
   page: the carry page selects a model at an effort, the tier pages assign a tier,
   and no page asks a question another page already asked (Orin, 2026-09-10). TUI
@@ -138,6 +139,8 @@ was the reference for where the dataset sits in the page.
   more money, beats it on more than half of the benchmarks one source scored both
   on. The AA composite index is shown and never counted (Orin, 2026-09-11, ticket
   18).
+- The benchmark page's frontier is a display aid, not a rule: nothing reads it, and
+  the carry rule above is the only thing that proposes a lane off (ticket 23).
 
 Preserve unrelated working-tree changes. Validate the smallest affected surface
 before committing.
@@ -156,5 +159,5 @@ The five default roles, written as a waiting ticket's `**Status:**` value. See
 
 ### Domain docs
 
-Single-context: one `CONTEXT.md` and `docs/adr/` at the root; neither exists yet.
-See `docs/agents/domain.md`.
+Single-context: the glossary is the root `CONTEXT.md` on `main` (this branch gets it
+at the merge); `docs/adr/` does not exist yet. See `docs/agents/domain.md`.
