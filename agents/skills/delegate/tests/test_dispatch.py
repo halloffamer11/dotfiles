@@ -735,6 +735,36 @@ def main():
             ok24 = "--effort" not in argv24
         record("24. agy --effort ignored, no argv --effort", ok24, f"rc={res24.returncode} err={res24.stderr}")
 
+        # -------------------------------------------------------------
+        # 25. prompt.md preamble permits disposable browser and forbids other network writes
+        # -------------------------------------------------------------
+        prompt_path24 = os.path.join(dir24, "prompt.md")
+        with open(prompt_path24, "r", encoding="utf-8") as f:
+            prompt24_text = f.read()
+        ok25 = (
+            "you may read and write in a disposable browser only" in prompt24_text and
+            "every other network write stays forbidden" in prompt24_text and
+            "no commits, no pushes, no messages" in prompt24_text
+        )
+        record("25. prompt preamble permits disposable browser and forbids other network writes", ok25)
+
+        # -------------------------------------------------------------
+        # 26. agy read-only prompt has new line and no 'file tools only'; --write prompt omits it
+        # -------------------------------------------------------------
+        prompt_path9e = os.path.join(dir9e, "prompt.md")
+        with open(prompt_path9e, "r", encoding="utf-8") as f:
+            prompt9e_text = f.read()
+        new_agy_line = "Browser tools are permitted. Terminal commands run inside a sandbox confined to the workspace; you still must not create, edit, or delete files."
+        ok26 = (
+            new_agy_line in prompt24_text and
+            "file tools only" not in prompt24_text and
+            "auto-denied" not in prompt24_text and
+            new_agy_line not in prompt9e_text and
+            "file tools only" not in prompt9e_text and
+            "Writes are authorized inside" in prompt9e_text
+        )
+        record("26. agy prompt: read-only has new sandbox line and no 'file tools only', --write omits it", ok26)
+
     if fails > 0:
         print(f"FAIL: {fails} tests failed", file=sys.stderr)
         sys.exit(1)

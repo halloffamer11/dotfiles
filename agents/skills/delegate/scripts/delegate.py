@@ -261,7 +261,7 @@ def build_prompt(child_cwd, harness, write_dir, brief_path, run_dir=None):
 
     agy_extra = b""
     if harness == "agy" and not write_dir:
-        agy_extra = b"You have NO terminal: any command tool is auto-denied and ends this session. Use the file tools only.\n"
+        agy_extra = b"Browser tools are permitted. Terminal commands run inside a sandbox confined to the workspace; you still must not create, edit, or delete files.\n"
 
     cwd_section = f"\n# Working directory\n{child_cwd}\nEvery relative path in this brief is under it. Do not search elsewhere.\n\n".encode("utf-8")
 

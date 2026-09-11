@@ -9,7 +9,9 @@ External worker routing lives in this directory. Read `SKILL.md` first, then use
 - `scripts/usage.py`: cached subscription-meter probes. `scripts/events.py`: the monitor ledger encoder (schema unchanged).
 - `scripts/report.py`: limits, runs, and the lead's run ledger. `scripts/bench.py`: the human-only benchmark ranking under `~/.cache/delegate/bench/`; no routing code reads it.
 - `scripts/setup.py`, `scripts/setup_tui.py`: interactive catalog wizard (TUI on a TTY, prompt-driven under `--plain` or pipes).
+- `scripts/browser_probes.py`: browser capability probe runner across harnesses (`--only`, `--probe`, `--dry-run`).
 - `assets/preamble.md`: brief preamble prepended to worker prompts.
+- `assets/probes/`: capability probe briefs for disposable browser (`disposable.md`) and agent profile (`agent-profile.md`).
 - `assets/schemas/return.json`: the child return contract, requested in every prompt and parsed out of the relay's final message.
 - `references/`: `tui-research.md`, `tui-mockup.md`.
 - `tests/`: one test file per script, stdlib only, no network; `tests/fake-ads/relay.mjs` stands in for the relays.
