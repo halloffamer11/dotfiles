@@ -27,10 +27,11 @@ each ticket's Status line names.
 path lets workers use a browser a harness already has — a disposable browser
 everywhere, and the Helium "GenAI" agent profile through the Playwright extension — on
 the Mac and omarchy. No new config file, flag or ranking change; machine setup happens
-in conversation with Orin. Ticket 01 (the runner `scripts/browser_probes.py` and the
-prompt changes) is built, and its agy disposable row passes on the Mac; the full
-table waits on the claude row (native lanes, see the ticket) and codex quota. Facts
-and setup rules:
+in conversation with Orin. Ticket 01 is done: the runner `scripts/browser_probes.py`,
+the prompt changes, and the Mac baseline table (agy's disposable row passes; every
+other row fails, as expected before 02-06). Next are 02-04. Ticket 02 predates
+ticket 22: claude lanes are now native and never use the relay it targets, so it
+needs rescoping before anyone builds it (01's notes). Facts and setup rules:
 `.scratch/delegate-browser/research/2026-09-10-browser-routes.md`.
 
 **Ticket 22 landed on `main` as `71e285c`** (2026-09-11), on top of `ea5430b`: each
