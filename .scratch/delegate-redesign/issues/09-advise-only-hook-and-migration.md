@@ -30,3 +30,45 @@ Orin runs the spec acceptance list as the final assessment before this ticket cl
 | 8 | Claude lane read-only smoke run | **Signed off.** Two `fable-xhigh@claude` runs, `sandbox: null`, `status: completed` |
 
 Five of eight signed off. The checkbox above closes when 2, 6 and 7 do.
+
+## §9 walk continued 2026-09-10
+
+The three criteria left unsigned were walked again after the day's eight commits.
+Every claim below was checked by hand, not taken from the walk's report.
+
+**§9.2 — "No implementation run is bounded by a tool-call limit." Satisfied.**
+`should_leash` in `scripts/delegate.py` returns False for `impl` and `hard-impl`,
+`build_prompt` splices the sentence only when the leash is active, and
+`assets/preamble.md` no longer carries it. `tests/test_dispatch.py` covers a
+`hard-impl` prompt without it, a `scout` prompt with it, and `--no-leash`. Signed
+off under the 2026-09-09 amendment; `review` keeps the leash as a reading job.
+
+**§9.6 — "Every file the hook or docs name exists." Was open; two of three now
+fixed.** Verified by listing the files:
+
+- `references/CLAUDE.md` told every agent to read
+  `~/.claude/skills/delegate/references/routing.md` before routing. That file was
+  deleted in the redesign and the directory holds only `kiro.md`,
+  `tui-mockup.md` and `tui-research.md`. Now points at `SKILL.md` and names
+  `routing.json` as the rules. **Fixed.**
+- `agents/skills/delegate/CLAUDE.md` still said "**agy is still broken**… an agy run
+  that needs tools must be given `--write`". Ticket 14 closed on 2026-09-10 and
+  `ADS_COMMIT` pins both read-only fixes, so that advice sent agents reaching for a
+  much larger blast radius than they needed. **Fixed.**
+- `~/.claude/hooks/delegate-gate.py:56` tells every session to run
+  `{SKILL_DIR}/delegate.py`. That path does not exist — ticket 10 moved it to
+  `scripts/delegate.py`, confirmed by `ls`. **Still open, and outside this repo**:
+  the hook is a standalone file in Orin's harness, not stowed from here, so it is
+  his to change. One word: `delegate.py` → `scripts/delegate.py`.
+
+**§9.7 — "No env var switch remains." Needs a human, unchanged.** No repo code
+reads `DELEGATE_BALANCE`; the dead `export DELEGATE_BALANCE=1` is still line 1 of
+`~/.zshrc.local`, which only Orin should edit.
+
+Also confirmed while walking: `commandcode-delegate` passes
+`--permission-mode plan` but is unreachable — `commandcode` is not in
+`catalog.HARNESSES`, has no lane and no wrapper. `claude-delegate` passes it too
+and **works**, because Claude Code runs `Read`, `Glob` and `Grep` without prompting
+under plan mode; run `20260909T180126Z-fable-xhigh@claude-ca924983` did exactly
+that with `readOnlyViolation: false`. So ticket 14's second follow-up is a latent
+inconsistency, not a live defect.

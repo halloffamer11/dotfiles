@@ -73,15 +73,107 @@ sensitive.
 
 **Blocked by:** 13 (discovery), 12 (the wizard screens this adds a toggle to).
 
-**Status:** open, raised by Orin 2026-09-09: "we should have each level. so luna-low, luna-med, luna-high would all be lanes. add an option to disable or turn off certain lanes."
+**Status:** implemented 2026-09-10 (`8d1dbb2`, `5994965`, `1ab5cb2`, `bc0f773`). Every effort each codex model offers is now a lane — 26 in the catalog — and the pre-screen proposes the dominated ones off. The one unticked box is Orin's: enumerating the efforts he wants in one wizard run. The chunk-dispatch measurements in the last section are still the open engineering problem and are listed in the project CLAUDE.md.
 
-- [ ] `enabled` is a validated boolean on every lane, defaulting to true when absent so existing catalogs keep working
-- [ ] `rank.py` reports a disabled lane as ineligible with reason `disabled`, and never picks one
-- [ ] The wizard toggles `enabled` on the cursor row and shows disabled lanes dimmed, not hidden
-- [ ] `discover.py --efforts <model>` prints a ready-to-paste lane stanza per effort the harness reports
-- [ ] A generated `ultra` stanza carries `enabled: false`, with the reason in its `basis`
-- [ ] `discover.py --efforts` emits one shared `price` block across a model's efforts, not a prompt per lane
-- [ ] `tests/test_rank.py` covers a disabled lane that would otherwise be the pick
+- [x] `enabled` is a validated boolean on every lane, defaulting to true when absent so existing catalogs keep working
+- [x] `rank.py` reports a disabled lane as ineligible with reason `disabled`, and never picks one
+- [x] The wizard toggles `enabled` on the cursor row and shows disabled lanes dimmed, not hidden
+- [x] `discover.py --efforts <model>` prints a ready-to-paste lane stanza per effort the harness reports
+- [x] A generated `ultra` stanza carries `enabled: false`, with the reason in its `basis`
+- [x] `discover.py --efforts` emits one shared `price` block across a model's efforts, not a prompt per lane
+- [x] `tests/test_rank.py` covers a disabled lane that would otherwise be the pick
 - [x] `effort.py extract` completes one real run end to end, so the pipeline is proven, not half-proven
-- [ ] A pre-screen runs before the tier screens, proposes `enabled` per lane from `effort.py` output, and sets the starting mark state rather than writing the catalog
+- [x] A pre-screen runs before the tier screens, proposes `enabled` per lane from `effort.py` output, and sets the starting mark state rather than writing the catalog
 - [ ] Orin enumerates the codex efforts he wants and switches off the rest in one wizard run
+
+## Schema and generator landed 2026-09-10
+
+`enabled` is optional and defaults to true, so every existing catalog — the
+samples and the live one — validates untouched. It is checked **first** in
+`rank.py`'s veto chain, ahead of the tier ceiling: a lane switched off is out of
+play, not a lane that lost a comparison, so its reason must not depend on which
+class asked. The reason reads `vetoed: disabled`.
+
+Still open, and all of it depends on the wizard and on `discover.py`:
+`--efforts` lane generation, the wizard toggle and dimming, and the pre-screen.
+
+### The generator, same day
+
+`discover.py --efforts <model>` prints the stanzas. `catalog.py`'s `EFFORTS` had
+to grow to `low, medium, high, xhigh, max, ultra` first: it allowed four levels,
+codex reports six, so every `max` and `ultra` stanza would have been rejected by
+the validator the moment it was pasted, and this ticket's own requirement of an
+`ultra` stanza would have been unsatisfiable. Side effect recorded here because
+it is real: `delegate.py --effort` now accepts `max` and `ultra` on harnesses that
+do not offer them. Per-harness effort policing is a separate decision and was
+deliberately not taken.
+
+Proven pasteable end to end, not just unit-tested: the six `gpt-6-astra` stanzas
+parse as JSON, go into a copy of the sample catalog, and `catalog.py check`
+accepts the result once the four human fields are filled. One shared `price`
+block in the output, `enabled` present on the `ultra` stanza and on no other, and
+`rank.py` reports `astra-ultra@codex` as `vetoed: disabled`.
+
+The wizard toggle and the pre-screen followed; see below.
+
+### The toggle and the pre-screen, same day
+
+`x` flips `enabled` on the cursor row, on the pre-screen and on the tier screens.
+A lane switched off stays on the tier table, tagged `off`, and still takes a tier —
+`tier` is required on every lane, so being off does not excuse it from the tier
+pass. The tag distinguishes "switched off" from the existing dimming for
+"already assigned a higher tier". The confirm screen lists the lanes it will write
+off. A lane that is off is written `enabled: false`; a lane that is on is written
+with no `enabled` key, so the round trip stays byte-identical when nothing is
+switched off.
+
+The pre-screen consumes `effort.py check` output through `--effort-rows` rather
+than running the pipeline. `extract` is an LLM call — 121s on one packet — and a
+curses wizard has to stay deterministic and fast.
+
+Two defects found in review, both of which would have switched off a lane Orin
+uses:
+
+- **A row at an effort no lane can select must never dominate.** Every published
+  sweep carries a `none` row, because the benchmark harnesses drive the API enum,
+  which runs `none` to `max`. `gpt-5.6-luna` at `none` scores 4.0 for $1.6 and at
+  `low` scores 4.0 for $1.7, so the first pass proposed `luna-low@codex` **off** —
+  dominated by a setting no lane can be configured at. The dominating pool is now
+  filtered to `catalog.EFFORTS`, and the reason string it printed, "dominated by
+  none of the same model", was the tell.
+- **An explicit `enabled` in the catalog is a recorded human decision.** The first
+  pass ignored it, so a lane switched off in one run came back on in the next,
+  silently, and went straight back in front of the ranker. The pre-screen now
+  reports it as recorded and proposes nothing; only `ultra` still overrides, since
+  an `ultra` lane switched on breaks the return contract by construction.
+
+Verified against the real swerb rows with the six-effort `EFFORTS`: every unscored
+lane on, `luna-low` on, `luna-xhigh` off because `max` scores 10.5 at $2.8 against
+its 5.5 at $2.9, `ultra` off. That is the rule doing real work rather than
+switching off whatever it has no data for.
+
+One box left, and only Orin can close it: enumerate the codex efforts he wants and
+switch off the rest in one wizard run.
+
+## A sequential chunk sweep does not fit one agy window — measured 2026-09-10
+
+The first live Artificial Analysis extractions, run right after packet chunking
+landed, both **failed at chunk 6 of 7** with the lane `blocked`. Not the weekly
+quota — that had just refilled to 95% — but the **5-hour window**, which hit 0%.
+
+So the binding constraint on `effort.py` is the 5h meter, and a 656KB page is seven
+sequential dispatches at roughly 100-640s each. One page cannot finish inside one
+agy 5h window, and a five-model sweep is out of the question on one lane.
+
+Three ways out, none of them tried yet:
+
+- Dispatch the chunks **concurrently** rather than in sequence. This is the open
+  question the chunking worker raised, and it does not fix the quota arithmetic by
+  itself — it just stops the wall clock being the problem.
+- Spread the chunks **across lanes**, so one page does not drain one meter.
+- Raise the per-chunk budget. agy's cap is ~128KB of prompt against a 100KB default
+  and ~3.5KB of measured overhead; 120KB would cut seven chunks to six, which is a
+  rounding error, not a fix.
+
+Terminal-Bench (29KB, one chunk, 18 rows accepted) and SWE Refactor Bench (15KB)
+both fit in a single dispatch, which is why this never showed up before.

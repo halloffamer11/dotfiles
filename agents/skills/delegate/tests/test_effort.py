@@ -702,4 +702,174 @@ ok = (
 )
 record("regression: real tbench sample has 5 distinct reasoning_effort values and < 700 lines", ok, f"efforts={astra_efforts}, lines={len(lines)}")
 
+# 36. split_packet: a packet under the budget produces one chunk unchanged (byte-identical)
+chunks_under = effort.split_packet(base_packet, budget=100 * 1024)
+ok = (
+    len(chunks_under) == 1
+    and chunks_under[0] == base_packet
+    and isinstance(chunks_under[0], str)
+)
+record("split_packet under budget produces one chunk unchanged", ok)
+
+# 37. split_packet: a packet over the budget produces several chunks, each carrying the full header and under budget
+table_rows = [f"model-{i}\thigh\tswe-bench\t{i * 10}\t${i + 1}.0\t{1000 * i}" for i in range(12)]
+long_packet = (
+    "## source test_src\n"
+    "## url https://example.com/test\n"
+    "## title Test Leaderboard\n"
+    "## sha256 0123456789abcdef\n"
+    "## packed 2026-09-10\n"
+    "## table 1\n"
+    "Model\tEffort\tBenchmark\tScore\tCost\tTokens\n"
+    + "\n".join(table_rows) + "\n"
+)
+budget_37 = 250
+chunks_over = effort.split_packet(long_packet, budget=budget_37)
+expected_header = (
+    "## source test_src\n"
+    "## url https://example.com/test\n"
+    "## title Test Leaderboard\n"
+    "## sha256 0123456789abcdef\n"
+    "## packed 2026-09-10\n"
+)
+ok = (
+    len(chunks_over) > 1
+    and all(c.startswith(expected_header) for c in chunks_over)
+    and all(len(c.encode("utf-8")) <= budget_37 for c in chunks_over)
+)
+record("split_packet over budget produces several chunks each carrying full header and under budget", ok, f"chunks={len(chunks_over)}")
+
+# 38. split_packet: no row is split across a boundary, and continuation chunks preserve table header
+all_chunk_lines = [line for c in chunks_over for line in c.splitlines()]
+all_data_rows_intact = all(row in all_chunk_lines for row in table_rows)
+table_header_line = "Model\tEffort\tBenchmark\tScore\tCost\tTokens"
+continuation_chunks_have_header = all(
+    (table_header_line in c and "## table 1" in c) for c in chunks_over
+)
+embedded_rows = [json.dumps({"model": f"emb-{i}", "score": i * 5, "effort": "medium"}) for i in range(15)]
+embedded_packet = (
+    expected_header
+    + "## embedded 1\n"
+    + "\n".join(embedded_rows) + "\n"
+)
+budget_emb = 200
+chunks_emb = effort.split_packet(embedded_packet, budget=budget_emb)
+all_emb_chunk_lines = [line for c in chunks_emb for line in c.splitlines()]
+all_emb_rows_intact = all(r in all_emb_chunk_lines for r in embedded_rows)
+ok = (
+    all_data_rows_intact
+    and continuation_chunks_have_header
+    and len(chunks_emb) > 1
+    and all_emb_rows_intact
+    and all(len(c.encode("utf-8")) <= budget_emb for c in chunks_emb)
+    and all(c.startswith(expected_header) for c in chunks_emb)
+)
+record("split_packet never splits a row across boundary and preserves section headers", ok)
+
+# 39. combine_rows: rows are de-duplicated on (source, model, effort, benchmark)
+row_a1 = make_row(source="aa", model="gpt-6-astra", effort="high", benchmark="swe-bench", score=51)
+row_a2 = make_row(source="aa", model="gpt-6-astra", effort="high", benchmark="swe-bench", score=51)  # duplicate of a1
+row_b = make_row(source="aa", model="gpt-6-astra", effort="low", benchmark="swe-bench", score=46)   # different effort
+row_c = make_row(source="aa", model="gpt-6-astra", effort="high", benchmark="mmlu", score=90)       # different benchmark
+row_d = make_row(source="aa", model="gpt-5.6-sol", effort="high", benchmark="swe-bench", score=47)  # different model
+combined = effort.combine_rows([row_a1, row_b], [row_a2, row_c, row_d])
+ok = (
+    len(combined) == 4
+    and combined[0] == row_a1
+    and combined[1] == row_b
+    and combined[2] == row_c
+    and combined[3] == row_d
+    and effort.ROW_IDENTITY_FIELDS == ("source", "model", "effort", "benchmark")
+)
+record("combine_rows de-duplicates on (source, model, effort, benchmark)", ok, f"len={len(combined)}")
+
+# 40. check still validates against whole packet and rejects a number in no chunk
+valid_row_chunk1 = make_row(source="test_src", model="model-0", effort="high", benchmark="swe-bench", score=0, cost_usd=1.0, tokens=0)
+valid_row_chunk2 = make_row(source="test_src", model="model-2", effort="high", benchmark="swe-bench", score=20, cost_usd=3.0, tokens=2000)
+bad_row = make_row(source="test_src", model="model-0", effort="high", benchmark="swe-bench", score=9999, cost_usd=1.0, tokens=0)
+
+accepted_rows, rejected_rows = effort.check_rows([valid_row_chunk1, valid_row_chunk2, bad_row], long_packet)
+ok = (
+    len(accepted_rows) == 2
+    and len(rejected_rows) == 1
+    and rejected_rows[0]["model"] == "model-0"
+    and any("unsourced score=9999" in r for r in rejected_rows[0]["reasons"])
+)
+record("check validates against whole packet and rejects number in no chunk", ok, f"acc={len(accepted_rows)}, rej={len(rejected_rows)}")
+
+# 41. Real Artificial Analysis packet test: pack gpt-6-astra.html and split into chunks
+aa_fixture = fixture("real_aa_release_sample.html")
+if True:
+    with open(aa_fixture, "rb") as f:
+        aa_raw = f.read()
+    aa_packet = effort.pack_html(aa_raw, "aa", packed="2026-09-10")
+    aa_packet_bytes = len(aa_packet.encode("utf-8"))
+    aa_chunks = effort.split_packet(aa_packet, budget=effort.DEFAULT_BUDGET)
+    aa_header = (
+        "## source aa\n"
+        "## url\n"
+        "## title GPT-6 Astra Models - Intelligence, Performance & Price Comparison | Artificial Analysis\n"
+        "## sha256 8cf2beff03e30826a6c5112327aafd50a0cca83426a497a0a8b8afc87f356e82\n"
+        "## packed 2026-09-10\n"
+    )
+    ok = (
+        aa_packet_bytes == 656017
+        and len(aa_chunks) == 7
+        and all(c.startswith(aa_header) for c in aa_chunks)
+        and all(len(c.encode("utf-8")) <= effort.DEFAULT_BUDGET for c in aa_chunks)
+    )
+    record("real Artificial Analysis page packs and splits into 7 chunks under default budget", ok, f"bytes={aa_packet_bytes}, chunks={len(aa_chunks)}")
+
+# ---------------------------------------------------------------------------
+# The trust boundary must not get weaker because the input was split. `check`
+# verifies every row against the WHOLE packet, so a number that lives only in a
+# later chunk is still accepted. Narrow this to one chunk and the extraction
+# silently loses every row from chunks 2..n — which looks exactly like a model
+# that returned nothing.
+try:
+    with open(fixture("real_aa_release_sample.html"), "rb") as f:
+        aa_bytes = f.read()
+    big = effort.pack_html(aa_bytes, "aa", packed="2026-09-10")
+    parts = effort.split_packet(big, budget=effort.DEFAULT_BUDGET)
+    assert len(parts) > 1, "fixture did not split; pick a smaller budget"
+
+    # a number that appears in the last chunk but not in the first
+    first_numbers = effort.packet_numbers(parts[0])
+    last_numbers = effort.packet_numbers(parts[-1])
+    # a plausible score, not a stray negative the row schema would reject anyway
+    only_late = sorted(n for n in (last_numbers - first_numbers) if 0 < n < 100)
+    assert only_late, "no usable number unique to the last chunk; fixture unsuitable"
+    # packet_numbers yields Decimal; a row comes from JSON, so use a JSON number
+    late = float(only_late[0])
+
+    row = {"source": "aa", "url": "u", "model": "m", "effort": "low",
+           "benchmark": "b", "score": late, "score_unit": None,
+           "cost_usd": None, "tokens": None, "observed": "2026-09-10",
+           "provenance": "unlabelled", "uncertain": False, "reasons": []}
+
+    whole_ok, whole_bad = effort.check_rows([dict(row)], big)
+    first_ok, first_bad = effort.check_rows([dict(row)], parts[0])
+
+    # and through check_files, which is the wiring `run` actually uses: narrow it
+    # to one chunk there and every row from chunks 2..n is silently rejected
+    with tempfile.TemporaryDirectory() as td:
+        rows_path = os.path.join(td, "rows.json")
+        packet_path = os.path.join(td, "packet.txt")
+        with open(rows_path, "w", encoding="utf-8") as f:
+            json.dump([row], f)
+        with open(packet_path, "w", encoding="utf-8") as f:
+            f.write(big)
+        checked, acc, rej = effort.check_files(rows_path, packet_path, out_dir=td)
+
+    record("check verifies against the whole packet, not one chunk",
+           len(whole_ok) == 1 and not whole_bad
+           and len(first_bad) == 1 and not first_ok
+           and (checked, len(acc), len(rej)) == (1, 1, 0),
+           f"late={late} whole={len(whole_ok)}/{len(whole_bad)} "
+           f"first={len(first_ok)}/{len(first_bad)} "
+           f"files={checked}/{len(acc)}/{len(rej)}")
+except Exception as e:
+    record("check verifies against the whole packet, not one chunk", False, repr(e))
+
+
 sys.exit(1 if fails else 0)

@@ -6,7 +6,7 @@ The riskiest assumption in the design is a nested Claude run from inside Claude 
 
 **Blocked by:** 01 Lane catalog and validators.
 
-**Status:** landed 2026-09-09 in the working tree (uncommitted); items left unticked are Orin's
+**Status:** landed 2026-09-09, committed on `bench-aa-effort-slugs`. The one unticked box is Orin's: a real read-only run reviewed from its run directory (spec acceptance 8).
 
 - [x] The ADS commit is recorded in the skill's context file and the install is reproducible from that record
 - [x] Every run leaves a directory under the delegate cache that outlives the session, and two runs never share one

@@ -10,6 +10,14 @@ Three stages, one trust boundary:
 An LLM may select and restructure text. It may not originate a number.
 Stage 3 enforces that mechanically.
 
+A row keeps the model name its source printed — `GPT-6 Astra` from
+Terminal-Bench, `gpt-5.6-luna` from SWE Refactor Bench. Normalising that to a
+catalog slug here would be originating an identifier out of local knowledge the
+packet cannot vouch for, which is the same objection as originating a number, so
+the reconciliation happens where that knowledge lives: `catalog.py`'s
+`resolve_published_model` and the lane field `published_as`, read by whoever
+consumes the rows (ticket 16).
+
 Stage 3 catches invented distinctive numbers and cannot vouch for small
 integers, so a human still reads accepted.json. A badge that sits in different
 markup from its row will degrade to a rejection rather than a false accept:
@@ -18,11 +26,23 @@ a missed badge is recoverable, a false verified is not.
 Default extract lane is flash-high@agy; terra-high@codex is the fallback
 for packets that lane handles badly.
 
+agy passes the prompt as a CLI argument, which Linux caps at ~128KB
+(MAX_ARG_STRLEN = 131,072 bytes). The dispatch harness and brief wrapper add
+~3.5KB of prompt overhead (preamble + leash ~590B, return schema ~1,370B,
+working directory/clause ~300B, and extract instructions ~1,275B). To keep
+the total prompt within OS limits with comfortable headroom (~25KB), packets
+larger than the chunk budget (default 100KB = 102,400 bytes) are split on
+table or row boundaries into self-contained chunks that each carry the full
+packet provenance header (## source, ## url, ## title, ## sha256, ## packed).
+Each chunk is extracted independently, and rows are combined and de-duplicated
+on (source, model, effort, benchmark) before check validates them against the
+whole original packet.
+
 CLI forms:
   effort.py pack <html-file> --source <id> [--url <url>] [-o <out>]
-  effort.py extract --packet <file> --out-dir <dir> [--lane <lane>]
+  effort.py extract --packet <file> --out-dir <dir> [--lane <lane>] [--budget <bytes>]
   effort.py check --rows <rows.json> --packet <file> [--out-dir <dir>]
-  effort.py run <html-file> --source <id> --out-dir <dir>
+  effort.py run <html-file> --source <id> --out-dir <dir> [--url <url>] [--lane <lane>] [--budget <bytes>]
 """
 import argparse
 import hashlib
@@ -38,6 +58,8 @@ from html.parser import HTMLParser
 
 DEFAULT_LANE = "flash-high@agy"
 FALLBACK_LANE = "terra-high@codex"
+DEFAULT_BUDGET = 100 * 1024  # 100KB in bytes; prompt overhead is ~3.5KB, fitting within Linux ~128KB arg cap
+ROW_IDENTITY_FIELDS = ("source", "model", "effort", "benchmark")
 EFFORT_VALUES = (
     "none", "low", "medium", "high", "xhigh", "max", "ultra", "unspecified",
 )
@@ -655,6 +677,176 @@ def compose_extract_brief(packet_text):
     )
 
 
+def split_packet(packet_text, budget=DEFAULT_BUDGET):
+    """Split packet_text into chunks that each fit within budget bytes.
+
+    Each chunk retains the full packet header (## source, ## url, ## title,
+    ## sha256, ## packed). Splits are made only on table or row boundaries,
+    never mid-row. If the packet already fits within budget, returns [packet_text]
+    unchanged (byte-identical).
+    """
+    if len(packet_text.encode("utf-8")) <= budget:
+        return [packet_text]
+
+    lines = packet_text.splitlines(keepends=True)
+    header_lines = []
+    content_lines = []
+    in_header = True
+    content_prefixes = ("## table", "## jsonld", "## embedded", "## labels", "## note")
+
+    for line in lines:
+        if in_header:
+            if any(line.startswith(p) for p in content_prefixes):
+                in_header = False
+                content_lines.append(line)
+            else:
+                header_lines.append(line)
+        else:
+            content_lines.append(line)
+
+    header_text = "".join(header_lines)
+    header_bytes = len(header_text.encode("utf-8"))
+    if header_bytes >= budget:
+        raise EffortError(
+            f"packet header ({header_bytes} bytes) exceeds chunk budget ({budget} bytes)"
+        )
+
+    sections = []
+    cur_sec = []
+    for line in content_lines:
+        if line.startswith("## ") and any(line.startswith(p) for p in content_prefixes):
+            if cur_sec:
+                sections.append(cur_sec)
+            cur_sec = [line]
+        else:
+            if cur_sec:
+                cur_sec.append(line)
+            else:
+                cur_sec = [line]
+    if cur_sec:
+        sections.append(cur_sec)
+
+    chunks = []
+    current_lines = []
+    current_bytes = header_bytes
+
+    def flush():
+        nonlocal current_lines, current_bytes
+        if current_lines:
+            chunks.append(header_text + "".join(current_lines))
+            current_lines = []
+            current_bytes = header_bytes
+
+    for sec in sections:
+        sec_bytes = sum(len(l.encode("utf-8")) for l in sec)
+        if current_bytes + sec_bytes <= budget:
+            current_lines.extend(sec)
+            current_bytes += sec_bytes
+            continue
+
+        if current_lines and (header_bytes + sec_bytes <= budget):
+            flush()
+            current_lines.extend(sec)
+            current_bytes += sec_bytes
+            continue
+
+        sec_tag = sec[0]
+        if sec_tag.startswith("## table"):
+            table_header = sec[1] if len(sec) > 1 else ""
+            data_rows = sec[2:] if len(sec) > 2 else []
+            prefix_lines = [sec_tag, table_header] if table_header else [sec_tag]
+            prefix_bytes = sum(len(l.encode("utf-8")) for l in prefix_lines)
+            first_row_bytes = len(data_rows[0].encode("utf-8")) if data_rows else 0
+            if current_lines and (current_bytes + prefix_bytes + first_row_bytes > budget):
+                flush()
+            current_lines.extend(prefix_lines)
+            current_bytes += prefix_bytes
+            for r in data_rows:
+                r_bytes = len(r.encode("utf-8"))
+                if current_bytes + r_bytes <= budget:
+                    current_lines.append(r)
+                    current_bytes += r_bytes
+                else:
+                    flush()
+                    current_lines.extend(prefix_lines)
+                    current_bytes += prefix_bytes + r_bytes
+                    current_lines.append(r)
+        elif sec_tag.startswith("## embedded") or sec_tag.startswith("## labels"):
+            prefix_lines = [sec_tag]
+            prefix_bytes = sum(len(l.encode("utf-8")) for l in prefix_lines)
+            data_rows = sec[1:]
+            first_row_bytes = len(data_rows[0].encode("utf-8")) if data_rows else 0
+            if current_lines and (current_bytes + prefix_bytes + first_row_bytes > budget):
+                flush()
+            current_lines.extend(prefix_lines)
+            current_bytes += prefix_bytes
+            for r in data_rows:
+                r_bytes = len(r.encode("utf-8"))
+                if current_bytes + r_bytes <= budget:
+                    current_lines.append(r)
+                    current_bytes += r_bytes
+                else:
+                    flush()
+                    current_lines.extend(prefix_lines)
+                    current_bytes += prefix_bytes + r_bytes
+                    current_lines.append(r)
+        else:
+            if current_lines and (header_bytes + sec_bytes <= budget):
+                flush()
+            if current_bytes + sec_bytes <= budget:
+                current_lines.extend(sec)
+                current_bytes += sec_bytes
+            else:
+                for l in sec:
+                    l_bytes = len(l.encode("utf-8"))
+                    if current_bytes + l_bytes <= budget:
+                        current_lines.append(l)
+                        current_bytes += l_bytes
+                    else:
+                        flush()
+                        current_lines.append(l)
+                        current_bytes += l_bytes
+
+    flush()
+    return chunks
+
+
+chunk_packet = split_packet
+
+
+def row_key(row):
+    """Identifying tuple for a benchmark row on (source, model, effort, benchmark)."""
+    if not isinstance(row, dict):
+        return id(row)
+    return tuple(
+        str(row.get(field) or "").strip().lower()
+        for field in ROW_IDENTITY_FIELDS
+    )
+
+
+def deduplicate_rows(rows):
+    """De-duplicate rows on (source, model, effort, benchmark), preserving first appearance."""
+    seen = set()
+    unique = []
+    for row in rows:
+        key = row_key(row)
+        if key not in seen:
+            seen.add(key)
+            unique.append(row)
+    return unique
+
+
+def combine_rows(*row_lists):
+    """Combine multiple lists of rows and de-duplicate them on (source, model, effort, benchmark)."""
+    flat = []
+    for item in row_lists:
+        if isinstance(item, list):
+            flat.extend(item)
+        else:
+            flat.append(item)
+    return deduplicate_rows(flat)
+
+
 def delegate_path():
     """Path to delegate.py. The sibling script wins; PATH is the fallback."""
     sibling = os.path.join(os.path.dirname(os.path.abspath(__file__)), "delegate.py")
@@ -666,7 +858,7 @@ def delegate_path():
     raise EffortError("delegate.py: not beside effort.py and not on PATH")
 
 
-def extract_rows(packet_path, out_dir, lane=None):
+def extract_rows(packet_path, out_dir, lane=None, budget=DEFAULT_BUDGET):
     """Dispatch an LLM worker to write rows.json. Needs network; tests skip this."""
     if lane is None:
         lane = DEFAULT_LANE
@@ -676,22 +868,56 @@ def extract_rows(packet_path, out_dir, lane=None):
             packet_text = f.read()
     except OSError as e:
         raise EffortError(f"{packet_path}: cannot read: {e}")
-    brief_path = os.path.join(out_dir, "extract-brief.md")
-    with open(brief_path, "w", encoding="utf-8", newline="\n") as f:
-        f.write(compose_extract_brief(packet_text))
-    cmd = [
-        sys.executable, delegate_path(), "dispatch",
-        "--lane", lane,
-        "--brief", brief_path,
-        "--cwd", os.path.abspath(out_dir),
-        "--write", os.path.abspath(out_dir),
-    ]
-    try:
-        subprocess.run(cmd, check=True)
-    except FileNotFoundError:
-        raise EffortError("delegate.py: not found on PATH")
-    except subprocess.CalledProcessError as e:
-        raise EffortError(f"delegate.py dispatch failed with exit {e.returncode}")
+
+    chunks = split_packet(packet_text, budget=budget)
+
+    if len(chunks) == 1:
+        brief_path = os.path.join(out_dir, "extract-brief.md")
+        with open(brief_path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(compose_extract_brief(packet_text))
+        cmd = [
+            sys.executable, delegate_path(), "dispatch",
+            "--lane", lane,
+            "--brief", brief_path,
+            "--cwd", os.path.abspath(out_dir),
+            "--write", os.path.abspath(out_dir),
+        ]
+        try:
+            subprocess.run(cmd, check=True)
+        except FileNotFoundError:
+            raise EffortError("delegate.py: not found on PATH")
+        except subprocess.CalledProcessError as e:
+            raise EffortError(f"delegate.py dispatch failed with exit {e.returncode}")
+        return
+
+    chunk_rows_list = []
+    for i, chunk_text in enumerate(chunks, 1):
+        chunk_dir = os.path.join(out_dir, f"chunk-{i}")
+        os.makedirs(chunk_dir, exist_ok=True)
+        brief_path = os.path.join(chunk_dir, "extract-brief.md")
+        with open(brief_path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(compose_extract_brief(chunk_text))
+        cmd = [
+            sys.executable, delegate_path(), "dispatch",
+            "--lane", lane,
+            "--brief", brief_path,
+            "--cwd", os.path.abspath(chunk_dir),
+            "--write", os.path.abspath(chunk_dir),
+        ]
+        try:
+            subprocess.run(cmd, check=True)
+        except FileNotFoundError:
+            raise EffortError("delegate.py: not found on PATH")
+        except subprocess.CalledProcessError as e:
+            raise EffortError(f"delegate.py dispatch for chunk {i} failed with exit {e.returncode}")
+
+        chunk_rows_path = os.path.join(chunk_dir, "rows.json")
+        chunk_rows_list.append(load_rows(chunk_rows_path))
+
+    combined = combine_rows(*chunk_rows_list)
+    combined_path = os.path.join(out_dir, "rows.json")
+    with open(combined_path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(format_json(combined))
 
 
 def normalize_numeric_token(token):
@@ -861,12 +1087,12 @@ def check_files(rows_path, packet_path, out_dir=None):
     return checked, accepted, rejected
 
 
-def run_pipeline(html_file, source, out_dir, url=None, lane=None):
+def run_pipeline(html_file, source, out_dir, url=None, lane=None, budget=DEFAULT_BUDGET):
     """pack, then extract, then check. Stops at the first failure."""
     os.makedirs(out_dir, exist_ok=True)
     packet_path = os.path.join(out_dir, "packet.txt")
     pack_file(html_file, source, url=url, out=packet_path)
-    extract_rows(packet_path, out_dir, lane=lane)
+    extract_rows(packet_path, out_dir, lane=lane, budget=budget)
     rows_path = os.path.join(out_dir, "rows.json")
     return check_files(rows_path, packet_path, out_dir=out_dir)
 
@@ -896,6 +1122,10 @@ def main(argv=None):
         "--lane", default=DEFAULT_LANE,
         help=f"delegate lane (default {DEFAULT_LANE}; fallback {FALLBACK_LANE})",
     )
+    p_extract.add_argument(
+        "--budget", type=int, default=DEFAULT_BUDGET,
+        help=f"maximum byte size per packet chunk (default {DEFAULT_BUDGET})",
+    )
 
     p_check = sub.add_parser("check", help="reject rows whose numbers are not in the packet")
     p_check.add_argument("--rows", required=True, help="path to rows.json")
@@ -914,6 +1144,10 @@ def main(argv=None):
         "--lane", default=DEFAULT_LANE,
         help=f"delegate lane (default {DEFAULT_LANE}; fallback {FALLBACK_LANE})",
     )
+    p_run.add_argument(
+        "--budget", type=int, default=DEFAULT_BUDGET,
+        help=f"maximum byte size per packet chunk (default {DEFAULT_BUDGET})",
+    )
 
     args = parser.parse_args(argv)
 
@@ -921,7 +1155,7 @@ def main(argv=None):
         if args.cmd == "pack":
             pack_file(args.html_file, args.source, url=args.url, out=args.out)
         elif args.cmd == "extract":
-            extract_rows(args.packet, args.out_dir, lane=args.lane)
+            extract_rows(args.packet, args.out_dir, lane=args.lane, budget=args.budget)
         elif args.cmd == "check":
             _checked, _accepted, rejected = check_files(
                 args.rows, args.packet, out_dir=args.out_dir,
@@ -931,7 +1165,7 @@ def main(argv=None):
         elif args.cmd == "run":
             _checked, _accepted, rejected = run_pipeline(
                 args.html_file, args.source, args.out_dir,
-                url=args.url, lane=args.lane,
+                url=args.url, lane=args.lane, budget=args.budget,
             )
             if rejected:
                 sys.exit(1)

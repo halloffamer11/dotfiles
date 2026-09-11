@@ -80,6 +80,56 @@ try:
 except Exception as e:
     record("show --json parses", False, str(e))
 
+# 1d. enabled field: absent defaults to true, explicit true and false are valid
+doc_absent = copy.deepcopy(lanes_sample)
+doc_absent["lanes"]["fable-xhigh@claude"].pop("enabled", None)
+val_absent = catalog.validate_lanes(doc_absent)
+record(
+    "enabled absent defaults true",
+    val_absent is not None and doc_absent["lanes"]["fable-xhigh@claude"].get("enabled", True) is True,
+)
+
+doc_true = copy.deepcopy(lanes_sample)
+doc_true["lanes"]["fable-xhigh@claude"]["enabled"] = True
+val_true = catalog.validate_lanes(doc_true)
+record(
+    "enabled true is valid",
+    val_true is not None and doc_true["lanes"]["fable-xhigh@claude"].get("enabled", True) is True,
+)
+
+doc_false = copy.deepcopy(lanes_sample)
+doc_false["lanes"]["fable-xhigh@claude"]["enabled"] = False
+val_false = catalog.validate_lanes(doc_false)
+record(
+    "enabled false is valid",
+    val_false is not None and doc_false["lanes"]["fable-xhigh@claude"].get("enabled", True) is False,
+)
+
+# 1e. lane at each of the six efforts validates
+for eff in ("low", "medium", "high", "xhigh", "max", "ultra"):
+    doc_eff = copy.deepcopy(lanes_sample)
+    doc_eff["lanes"]["fable-xhigh@claude"]["effort"] = eff
+    val_eff = catalog.validate_lanes(doc_eff)
+    record(
+        f"effort {eff} validates",
+        val_eff is not None and doc_eff["lanes"]["fable-xhigh@claude"]["effort"] == eff,
+    )
+
+# 1f. the stowed catalog carries the three native claude lanes and validates
+import json as _json
+import os as _os
+_stowed_path = _os.path.abspath(_os.path.join(
+    _os.path.dirname(__file__), "..", "..", "..", "..",
+    "stow", "delegate", ".config", "delegate", "lanes.json"))
+with open(_stowed_path, encoding="utf-8") as _f:
+    _stowed = _json.load(_f)
+record("stowed catalog validates", catalog.validate_lanes(copy.deepcopy(_stowed)) is not None)
+for lane_name in ("haiku-high@claude", "sonnet-high@claude", "opus-high@claude"):
+    record(
+        f"native lane {lane_name} present in the stowed catalog",
+        lane_name in _stowed["lanes"] and _stowed["lanes"][lane_name]["meter"] == "claude-general",
+    )
+
 # 2. Rejections
 # 2.1 lane naming a missing meter
 doc = copy.deepcopy(lanes_sample)
@@ -232,24 +282,45 @@ with tempfile.TemporaryDirectory() as td:
         msg,
     )
 
-# 2.15 unknown class in classTier
+# 2.15 unknown class in classes
 doc = copy.deepcopy(routing_sample)
-doc["classTier"]["invalid_class"] = 2
+doc["classes"]["invalid_class"] = {"floor": 1, "ceiling": 2}
 msg = check_catalog_error(catalog.validate_routing, doc)
 record(
-    "reject: unknown class in classTier",
+    "reject: unknown class in classes",
     bool(msg and "invalid_class" in msg and "unknown class" in msg),
     msg,
 )
 
-# 2.16 class tier 5
+# 2.16 class ceiling 5
 doc = copy.deepcopy(routing_sample)
-doc["classTier"]["scout"] = 5
+doc["classes"]["scout"]["ceiling"] = 5
 msg = check_catalog_error(catalog.validate_routing, doc)
 record(
     "reject: class tier 5",
-    bool(msg and "scout" in msg and "tier" in msg and "1 to 4" in msg),
+    bool(msg and "scout" in msg and "ceiling" in msg and "1 to 4" in msg),
     msg,
+)
+
+# 2.16b floor > ceiling rejected
+doc = copy.deepcopy(routing_sample)
+doc["classes"]["scout"]["floor"] = 4
+doc["classes"]["scout"]["ceiling"] = 2
+msg = check_catalog_error(catalog.validate_routing, doc)
+record(
+    "reject: floor exceeds ceiling",
+    bool(msg and "scout" in msg and "cannot exceed" in msg),
+    msg,
+)
+
+# 2.16c legacy key rejected with migration message
+legacy_key = "class" + "Tier"
+doc_legacy = {"version": "delegate-routing.v1", legacy_key: {"scout": 2}, "margin": 0.2, "gate": 0.1}
+msg_legacy = check_catalog_error(catalog.validate_routing, doc_legacy)
+record(
+    "reject: legacy key with migration message",
+    bool(msg_legacy and legacy_key in msg_legacy and "replaced by 'classes'" in msg_legacy and "floor" in msg_legacy and "ceiling" in msg_legacy),
+    msg_legacy,
 )
 
 # 2.17 margin 1.5
@@ -273,6 +344,27 @@ record(
     msg,
 )
 
+# 2.19 reject: enabled as non-boolean
+for bad_val, label in [("true", 'string "true"'), ("false", 'string "false"'), (1, "int 1"), (0, "int 0")]:
+    doc_bad = copy.deepcopy(lanes_sample)
+    doc_bad["lanes"]["fable-xhigh@claude"]["enabled"] = bad_val
+    msg = check_catalog_error(catalog.validate_lanes, doc_bad)
+    record(
+        f"reject: enabled as {label}",
+        bool(msg and "fable-xhigh@claude" in msg and "enabled" in msg and "boolean" in msg),
+        msg,
+    )
+
+# 2.20 reject: invalid effort
+doc_bad_eff = copy.deepcopy(lanes_sample)
+doc_bad_eff["lanes"]["fable-xhigh@claude"]["effort"] = "super"
+msg_eff = check_catalog_error(catalog.validate_lanes, doc_bad_eff)
+record(
+    "reject: invalid effort",
+    bool(msg_eff and "fable-xhigh@claude" in msg_eff and "effort must be one of" in msg_eff and "got 'super'" in msg_eff),
+    msg_eff,
+)
+
 # 3. Override merge
 with tempfile.TemporaryDirectory() as td:
     cfg_dir = os.path.join(td, "cfg")
@@ -286,20 +378,21 @@ with tempfile.TemporaryDirectory() as td:
 
     p_dir = os.path.join(fake_git, ".delegate")
     p_file = os.path.join(p_dir, "routing.json")
-    catalog.write_json(p_file, {"classTier": {"review": 3}})
+    catalog.write_json(p_file, {"classes": {"scout": {"floor": 3}}})
 
     r1, s1 = catalog.effective_routing(cwd=fake_git, config_dir=cfg_dir)
-    review_ok = (
-        r1["classTier"]["review"] == 3 and
-        s1["classTier.review"] == p_file and
+    scout_ok = (
+        r1["classes"]["scout"]["floor"] == 3 and
+        r1["classes"]["scout"]["ceiling"] == routing_sample["classes"]["scout"]["ceiling"] and
+        s1["classes.scout.floor"] == p_file and
+        s1["classes.scout.ceiling"] == g_file and
         r1["margin"] == 0.2 and
         s1["margin"] == g_file and
         r1["gate"] == 0.1 and
         s1["gate"] == g_file and
-        all(r1["classTier"][c] == routing_sample["classTier"][c] for c in ("scout", "mechanical", "impl", "hard-impl")) and
-        all(s1[f"classTier.{c}"] == g_file for c in ("scout", "mechanical", "impl", "hard-impl"))
+        all(r1["classes"][c] == routing_sample["classes"][c] for c in ("mechanical", "impl", "review", "hard-impl"))
     )
-    record("override merge: classTier review only", review_ok)
+    record("override merge: classes scout floor keeps global ceiling", scout_ok)
 
     # Margin override
     catalog.write_json(p_file, {"margin": 0.5})
@@ -307,8 +400,8 @@ with tempfile.TemporaryDirectory() as td:
     margin_ok = (
         r2["margin"] == 0.5 and
         s2["margin"] == p_file and
-        r2["classTier"]["review"] == routing_sample["classTier"]["review"] and
-        s2["classTier.review"] == g_file
+        r2["classes"]["scout"] == routing_sample["classes"]["scout"] and
+        s2["classes.scout.floor"] == g_file
     )
     record("override merge: margin only", margin_ok)
 
@@ -317,8 +410,8 @@ with tempfile.TemporaryDirectory() as td:
     os.makedirs(no_git)
     r3, s3 = catalog.effective_routing(cwd=no_git, config_dir=cfg_dir)
     no_git_ok = (
-        r3["classTier"]["review"] == routing_sample["classTier"]["review"] and
-        s3["classTier.review"] == g_file and
+        r3["classes"]["scout"] == routing_sample["classes"]["scout"] and
+        s3["classes.scout.floor"] == g_file and
         s3["margin"] == g_file
     )
     record("override merge: no git root", no_git_ok)
@@ -351,7 +444,7 @@ with tempfile.TemporaryDirectory() as td:
     note_logic_ok = (
         eff_r["note"] == "project note override" and
         eff_r["margin"] == routing_sample["margin"] and
-        eff_r["classTier"] == routing_sample["classTier"]
+        eff_r["classes"] == routing_sample["classes"]
     )
 
     buf = io.StringIO()
@@ -448,5 +541,145 @@ with tempfile.TemporaryDirectory() as td:
         "delegate-lanes.v1" in res_no_ver.stderr and
         "delegate-routing.v1" in res_no_ver.stderr,
     )
+
+# 7. published_as: the local mapping from a leaderboard's display name to a lane model
+#    (ticket 16). Sources publish "GPT-6 Astra" or "Fable 5.1"; the catalog keys on
+#    slugs. The derived rule covers formatting; published_as covers the rest.
+
+pub_ok = copy.deepcopy(lanes_sample)
+pub_ok["lanes"]["fable-xhigh@claude"]["published_as"] = ["Fable 5.1", "Claude Fable 5.1"]
+record(
+    "7.1 published_as list of names is accepted",
+    check_catalog_error(catalog.validate_lanes, pub_ok) is None,
+)
+
+for bad, tag in (
+    ("Fable 5.1", "a bare string"),
+    ([], "an empty list"),
+    (["Fable 5.1", ""], "an empty entry"),
+    (["Fable 5.1", 5], "a non-string entry"),
+    (["Fable 5.1", "  "], "a blank entry"),
+):
+    doc = copy.deepcopy(lanes_sample)
+    doc["lanes"]["fable-xhigh@claude"]["published_as"] = bad
+    msg = check_catalog_error(catalog.validate_lanes, doc)
+    record(
+        f"7.2 published_as rejects {tag}",
+        bool(msg and "fable-xhigh@claude" in msg and "published_as" in msg),
+        msg,
+    )
+
+conflict = copy.deepcopy(lanes_sample)
+conflict["lanes"]["fable-xhigh@claude"]["published_as"] = ["Fable 5.1"]
+conflict["lanes"]["sol-high@codex"]["published_as"] = ["fable 5.1"]
+msg = check_catalog_error(catalog.validate_lanes, conflict)
+record(
+    "7.3 one published name claimed by two models is rejected",
+    bool(msg and "Fable 5.1" in msg and "claude-fable-5-1" in msg and "gpt-5.6-sol" in msg),
+    msg,
+)
+
+shared = copy.deepcopy(lanes_sample)
+shared["lanes"]["sol-low@codex"] = copy.deepcopy(shared["lanes"]["sol-high@codex"])
+shared["lanes"]["sol-low@codex"]["effort"] = "low"
+shared["lanes"]["sol-high@codex"]["published_as"] = ["GPT-5.6 Sol"]
+shared["lanes"]["sol-low@codex"]["published_as"] = ["GPT-5.6 Sol"]
+record(
+    "7.4 the same name on two lanes of one model is accepted",
+    check_catalog_error(catalog.validate_lanes, shared) is None,
+)
+
+# 7.5 resolution: what the pre-screen asks of the catalog
+resolve = catalog.resolve_published_model
+astra = copy.deepcopy(lanes_sample)
+astra["lanes"]["astra-high@codex"] = copy.deepcopy(astra["lanes"]["sol-high@codex"])
+astra["lanes"]["astra-high@codex"]["model"] = "gpt-6-astra"
+astra["lanes"]["fable-xhigh@claude"]["published_as"] = ["Fable 5.1"]
+cases = (
+    ("GPT-6 Astra", "gpt-6-astra", "a display name differing only in case and separators"),
+    ("gpt-6-astra", "gpt-6-astra", "a slug already in catalog form"),
+    ("GPT-5.6 Sol", "gpt-5.6-sol", "a display name whose dot is a separator"),
+    ("Gemini 3.8 Flash", "gemini-3.8-flash-high", "a lane model carrying an effort suffix"),
+    ("Fable 5.1", "claude-fable-5-1", "a published_as entry"),
+    ("fable  5.1", "claude-fable-5-1", "a published_as entry, loosely typed"),
+    ("GLM-5.3", None, "a model that is nobody's lane"),
+    ("", None, "an empty name"),
+    (None, None, "no name at all"),
+)
+for name, want, tag in cases:
+    got = resolve(name, astra)
+    record(f"7.5 resolve {tag}", got == want, f"{name!r} -> {got!r}, wanted {want!r}")
+
+ambiguous = copy.deepcopy(lanes_sample)
+ambiguous["lanes"]["flash-medium@agy"] = copy.deepcopy(ambiguous["lanes"]["flash-high@agy"])
+ambiguous["lanes"]["flash-medium@agy"]["effort"] = "medium"
+ambiguous["lanes"]["flash-medium@agy"]["model"] = "gemini-3.8-flash-medium"
+record(
+    "7.6 a name two lane models could denote resolves to neither",
+    resolve("Gemini 3.8 Flash", ambiguous) is None,
+    repr(resolve("Gemini 3.8 Flash", ambiguous)),
+)
+
+# 7.7 A published_as entry may not be pointed at a model another lane runs: the
+#     explicit map is consulted first, so such an entry would silently read that
+#     lane's rows as this one's — its own numbers would then switch it off as
+#     dominated while the real lane read "no rows". Both spellings of the
+#     collision are rejected: the model slug itself, and the display name that
+#     denotes it.
+for entry, tag in (
+    ("gpt-5.6-luna", "another lane's model slug"),
+    ("Gemini 3.8 Flash", "a display name another lane's model already answers to"),
+):
+    doc = copy.deepcopy(lanes_sample)
+    doc["lanes"]["sol-high@codex"]["published_as"] = [entry]
+    msg = check_catalog_error(catalog.validate_lanes, doc)
+    record(
+        f"7.7 published_as rejects {tag}",
+        bool(msg and "sol-high@codex" in msg and "gpt-5.6-sol" in msg
+             and ("gpt-5.6-luna" in msg or "gemini-3.8-flash-high" in msg)),
+        msg,
+    )
+
+own = copy.deepcopy(lanes_sample)
+own["lanes"]["flash-high@agy"]["published_as"] = ["Gemini 3.8 Flash", "gemini-3.8-flash-high"]
+record(
+    "7.7 a lane may spell out its own model",
+    check_catalog_error(catalog.validate_lanes, own) is None,
+)
+
+record(
+    "7.7 an entry the derived rule cannot reach still resolves",
+    resolve("Fable 5.1", {"lanes": {
+        "a@codex": {"model": "gpt-6-astra", "effort": "high"},
+        "b@claude": {"model": "claude-fable-5-1", "effort": "xhigh",
+                     "published_as": ["Fable 5.1"]},
+    }}) == "claude-fable-5-1",
+)
+
+record(
+    "7.8 every effort strips as a suffix, longest first",
+    [catalog.strip_effort_suffix(f"m-{e}") for e in catalog.EFFORTS]
+    == [("m", e) for e in catalog.EFFORTS]
+    and catalog.strip_effort_suffix("gpt-6-astra-xhigh") == ("gpt-6-astra", "xhigh")
+    and catalog.strip_effort_suffix("gpt-6-astra") == ("gpt-6-astra", None),
+    str([catalog.strip_effort_suffix(f"m-{e}") for e in catalog.EFFORTS]),
+)
+
+# The published name is reconciled against the lane's model, reaching past an
+# effort suffix the *catalog* carries (gemini-3.8-flash-high). A suffix on the
+# *published* side is left alone on purpose: a row states its effort in its own
+# field, and reading `gpt-6-astra-max` as plain `gpt-6-astra` would let a name
+# and a field disagree with nobody noticing. bench.py's aa_match_info is where
+# a suffixed published name is split, and it keeps the effort it split off.
+record(
+    "7.8 a suffix on the published side is not silently dropped",
+    resolve("gpt-6-astra-max", {"lanes": {
+        "a@codex": {"model": "gpt-6-astra", "effort": "high"},
+    }}) is None
+    and resolve("Gemini 3.8 Flash", {"lanes": {
+        "a@agy": {"model": "gemini-3.8-flash-high", "effort": "high"},
+    }}) == "gemini-3.8-flash-high",
+)
+
 
 sys.exit(1 if fails else 0)

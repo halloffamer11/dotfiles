@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 Lane catalog and validators.
 
-**Status:** landed 2026-09-09 in the working tree (uncommitted); items left unticked are Orin's
+**Status:** landed 2026-09-09, committed on `bench-aa-effort-slugs`; the report was rebuilt twice since — per-effort figures (ticket 17) and the HTML page. The one unticked box is Orin's: reading one report and confirming it is enough to set a tier from.
 
 - [x] Running `bench.py` writes one dated file under the cache directory with attribution lines for both sources
 - [x] Only models present in the catalog appear; a catalog model missing from a source is listed with a gap note

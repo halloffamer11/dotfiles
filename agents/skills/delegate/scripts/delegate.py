@@ -22,6 +22,8 @@ Run directory layout:
 Status mapping:
   completed:
     - with return block (status in done, partial, blocked) -> block status
+    - without block, a tool cancelled at the permission gate
+      (events.jsonl)                                       -> blocked (reason: permission gate cancelled the run at <tool>)
     - without block and non-empty finalMessage             -> partial (open_question added)
     - with empty finalMessage                              -> blocked (reason: empty final message)
   timeout                                                  -> blocked (reason: timeout after <timeout>)
@@ -32,10 +34,10 @@ Status mapping:
 CLI:
   python3 delegate.py dispatch (--lane <name> | --model <slug>) [--class <c>] --brief <path> --cwd <dir>
           [--write <worktree>] [--effort <e>] [--harness <h>] [--config-dir DIR]
-          [--ads-dir DIR] [--runs-dir DIR] [--no-probe]
-  python3 delegate.py run <class> --brief <path> --cwd <dir> [--write <worktree>] [--effort <e>]
+          [--ads-dir DIR] [--runs-dir DIR] [--no-probe] [--no-leash]
+  python3 delegate.py run <class> --brief <path> --cwd <dir> [--write <worktree>] [--tier <n>]
           [--dry-run] [--config-dir DIR] [--meters FILE] [--harnesses a,b,c]
-          [--ads-dir DIR] [--runs-dir DIR] [--no-probe]
+          [--ads-dir DIR] [--runs-dir DIR] [--no-probe] [--no-leash]
 """
 import argparse
 from datetime import datetime, timezone
@@ -53,6 +55,10 @@ sys.path.insert(0, HERE)
 from catalog import load_catalog, CatalogError, HARNESSES, EFFORTS, CLASSES
 import events
 import rank
+
+# The harness whose lanes run natively, as subagents of the session; a future
+# Codex orchestrator changes it (ticket 22, out of scope).
+ORCHESTRATOR = "claude"
 
 
 def parse_timeout_s(timeout_str):
@@ -245,12 +251,44 @@ def resolve(lane_name, class_name, brief_path, cwd_dir, write_dir, effort_arg, c
     }
 
 
-def build_prompt(child_cwd, harness, write_dir, brief_path, run_dir=None):
+def should_leash(class_name, no_leash=False):
+    # The leash sentence is present for scout, mechanical and review, and absent
+    # for impl and hard-impl. Review is a reading job bounded by the diff, so it
+    # keeps the leash. Impl and hard-impl drop it because the real limit is the
+    # lane timeout. --no-leash drops the leash for one job of any class.
+    # If class is unspecified, conservative reading is to keep the leash.
+    if no_leash:
+        return False
+    if class_name in ("impl", "hard-impl"):
+        return False
+    return True
+
+
+def build_prompt(child_cwd, harness, write_dir, brief_path, run_dir=None, class_=None, no_leash=False):
     preamble_path = os.path.abspath(os.path.join(HERE, "..", "assets", "preamble.md"))
+    leash_path = os.path.abspath(os.path.join(HERE, "..", "assets", "preamble-leash.md"))
     schema_path = os.path.abspath(os.path.join(HERE, "..", "assets", "schemas", "return.json"))
 
     with open(preamble_path, "rb") as f:
         preamble_bytes = f.read()
+
+    leash_active = should_leash(class_, no_leash=no_leash)
+    if leash_active:
+        with open(leash_path, "rb") as f:
+            leash_bytes = f.read().strip()
+        anchor = b"no messages. Your final message"
+        if anchor not in preamble_bytes:
+            # The leash is spliced into the base paragraph at this anchor. Reword
+            # preamble.md and the splice would silently drop the sentence, so fail
+            # loudly here rather than dispatch a worker with no leash.
+            raise RuntimeError(
+                f"{preamble_path}: cannot splice the leash: the text "
+                f"{anchor.decode()!r} is no longer in the preamble"
+            )
+        preamble_bytes = preamble_bytes.replace(
+            anchor, b"no messages. " + leash_bytes + b" Your final message",
+        )
+
     if not preamble_bytes.endswith(b"\n"):
         preamble_bytes += b"\n"
 
@@ -300,7 +338,7 @@ def build_prompt(child_cwd, harness, write_dir, brief_path, run_dir=None):
     return prompt_bytes, prompt_path
 
 
-def allocate_run_dir(runs_dir_param, lane, harness, model, effort, timeout, class_name, cwd, write, brief_path, prompt_bytes):
+def allocate_run_dir(runs_dir_param, lane, harness, model, effort, timeout, class_name, cwd, write, brief_path, prompt_bytes, leash=True):
     runs_dir = os.path.abspath(os.path.expanduser(runs_dir_param)) if runs_dir_param else os.path.expanduser("~/.cache/delegate/runs")
     os.makedirs(runs_dir, exist_ok=True)
 
@@ -322,6 +360,7 @@ def allocate_run_dir(runs_dir_param, lane, harness, model, effort, timeout, clas
         "effort": effort,
         "timeout": timeout,
         "class": class_name,
+        "leash": leash,
         "cwd": cwd,
         "write": write,
         "brief": brief_path,
@@ -414,6 +453,43 @@ def run_relay(ads_dir, harness, model, effort, timeout_str, prompt_path, child_c
     return relay_exit, secs
 
 
+def gate_cancelled_tool(run_dir):
+    """The tool a permission gate cancelled, if that is how the run ended.
+
+    grok's event stream records a gate refusal as a failed tool_call_update whose
+    text says the execution was cancelled, then an end event with
+    stopReason=cancelled. Both must hold: a cancel with no cancelled tool is some
+    other stop. Returns the tool name ("" if the call was never announced), or
+    None when the run did not end at the gate. Other harnesses' event shapes do
+    not match and return None.
+    """
+    events_path = os.path.join(run_dir, "events.jsonl")
+    if not os.path.isfile(events_path):
+        return None
+    tool_names = {}
+    cancelled_tool = None
+    stop_reason = None
+    with open(events_path, "r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            try:
+                ev = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(ev, dict):
+                continue
+            kind = ev.get("type")
+            if kind == "tool_call":
+                tool_names[ev.get("toolCallId")] = ev.get("toolName") or ev.get("title") or ""
+            elif kind == "tool_call_update" and ev.get("status") == "failed":
+                if "cancel" in json.dumps(ev.get("content")).lower():
+                    cancelled_tool = tool_names.get(ev.get("toolCallId"), "")
+            elif kind == "end":
+                stop_reason = ev.get("stopReason")
+    if stop_reason == "cancelled" and cancelled_tool is not None:
+        return cancelled_tool
+    return None
+
+
 def map_result(run_dir, lane_timeout, relay_exit, write_dir):
     result_path = os.path.join(run_dir, "result.json")
     stderr_path = os.path.join(run_dir, "relay.stderr")
@@ -455,6 +531,7 @@ def map_result(run_dir, lane_timeout, relay_exit, write_dir):
 
         if relay_status == "completed":
             block = find_return_block(final_message)
+            gated_tool = gate_cancelled_tool(run_dir) if block is None else None
             if block is not None:
                 status = block.get("status")
                 deliv = block.get("deliverable", "")
@@ -487,6 +564,16 @@ def map_result(run_dir, lane_timeout, relay_exit, write_dir):
 
                 if status == "blocked":
                     reason = deliverable
+            elif gated_tool is not None:
+                # The relay says completed, but a gated tool was refused and
+                # the turn ended there, so the worker did not finish. Reading
+                # it as partial hides the cause (ticket 14). As on timeout, the
+                # final message stays in final.txt.
+                status = "blocked"
+                reason = "permission gate cancelled the run"
+                if gated_tool:
+                    reason += f" at {gated_tool}"
+                deliverable = f"blocked: {reason}"
             elif final_message.strip():
                 status = "partial"
                 deliverable = "\n".join(final_message.splitlines()[:60])
@@ -593,7 +680,7 @@ def print_and_exit(lane, status, secs, run_dir, thread_id, class_name, relay_exi
         sys.exit(1)
 
 
-def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None, ads_dir=None, runs_dir=None, no_probe=False, harness=None, model=None):
+def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None, ads_dir=None, runs_dir=None, no_probe=False, harness=None, model=None, no_leash=False):
     # Step 1: Resolve
     resolved = resolve(
         lane_name=lane,
@@ -615,12 +702,16 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
     child_cwd = resolved["child_cwd"]
     ads_d = resolved["ads_dir"]
 
+    effective_leash = should_leash(class_, no_leash=no_leash)
+
     # Step 2: Build the prompt
     prompt_bytes, _ = build_prompt(
         child_cwd=child_cwd,
         harness=harness,
         write_dir=write,
         brief_path=brief,
+        class_=class_,
+        no_leash=no_leash,
     )
 
     # Step 3: Allocate the run directory
@@ -636,7 +727,14 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
         write=write,
         brief_path=brief,
         prompt_bytes=prompt_bytes,
+        leash=effective_leash,
     )
+
+    if harness == ORCHESTRATOR:
+        model_effort = lane.split("@")[0]
+        abs_prompt = os.path.abspath(prompt_path)
+        print(f"delegate: native lane={lane} agent=lane-{model_effort} prompt={abs_prompt}")
+        sys.exit(0)
 
     return_path = os.path.join(run_dir, "return.json")
 
@@ -714,7 +812,7 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
     )
 
 
-def _print_rank_output(cls, cat, rows):
+def _print_rank_output(cls, cat, rows, tier=None):
     has_pick = bool(rows and rows[0].get("pick"))
     if not has_pick:
         print(f"STOP: no lane eligible for {cls}")
@@ -722,21 +820,23 @@ def _print_rank_output(cls, cat, rows):
             print(line)
         return False
     routing = cat["routing"]
-    need = routing["classTier"][cls]
+    cls_config = routing.get("classes", {}).get(cls, {})
+    floor = tier if tier is not None else cls_config.get("floor")
+    ceiling = cls_config.get("ceiling")
     margin = routing["margin"]
     gate = routing["gate"]
     project_file = cat.get("files", {}).get("project")
     override_str = project_file if project_file else "none"
     gate_pct = f"{int(round(gate * 100))}%"
-    print(f"# {cls}  need=tier {need}  margin={margin}  gate={gate_pct}  (routing: global; project override: {override_str})")
+    print(f"# {cls}  floor={floor} ceiling={ceiling}  margin={margin}  gate={gate_pct}  (routing: global; project override: {override_str})")
     for line in rank.format_rows(rows):
         print(line)
     return True
 
 
-def run(class_, brief, cwd, write=None, effort=None, dry_run=False, config_dir=None, meters=None, harnesses=None, ads_dir=None, runs_dir=None, no_probe=False):
+def run(class_, brief, cwd, write=None, tier=None, dry_run=False, config_dir=None, meters=None, harnesses=None, ads_dir=None, runs_dir=None, no_probe=False, no_leash=False):
     if class_ not in CLASSES:
-        sys.stderr.write(f"delegate: invalid class '{class_}'; must be one of {", ".join(CLASSES)}\n")
+        sys.stderr.write(f"delegate: invalid class '{class_}'; must be one of {', '.join(CLASSES)}\n")
         sys.exit(2)
 
     try:
@@ -744,6 +844,16 @@ def run(class_, brief, cwd, write=None, effort=None, dry_run=False, config_dir=N
     except CatalogError as e:
         sys.stderr.write(f"delegate: {e}\n")
         sys.exit(2)
+
+    cls_config = cat.get("routing", {}).get("classes", {}).get(class_, {})
+    floor = cls_config.get("floor")
+    ceiling = cls_config.get("ceiling")
+    if tier is not None:
+        if floor is not None and ceiling is not None and (tier < floor or tier > ceiling):
+            sys.stderr.write(
+                f"delegate: tier {tier} outside [{floor}, {ceiling}] for class '{class_}'\n"
+            )
+            sys.exit(2)
 
     if meters:
         try:
@@ -759,8 +869,8 @@ def run(class_, brief, cwd, write=None, effort=None, dry_run=False, config_dir=N
     else:
         present = {h for h in HARNESSES if shutil.which(h)}
 
-    rows = rank.rank(class_, cat, meters_doc, present)
-    has_pick = _print_rank_output(class_, cat, rows)
+    rows = rank.rank(class_, cat, meters_doc, present, tier=tier)
+    has_pick = _print_rank_output(class_, cat, rows, tier=tier)
     if not has_pick:
         sys.exit(1)
 
@@ -769,18 +879,21 @@ def run(class_, brief, cwd, write=None, effort=None, dry_run=False, config_dir=N
         sys.exit(0)
 
     pick_lane = rows[0]["lane"]
-    print(f"delegate: dispatching {pick_lane}")
+    lane_harness = cat["lanes"][pick_lane]["harness"]
+    if lane_harness != ORCHESTRATOR:
+        print(f"delegate: dispatching {pick_lane}")
     dispatch(
         lane=pick_lane,
         class_=class_,
         brief=brief,
         cwd=cwd,
         write=write,
-        effort=effort,
+        effort=None,
         config_dir=config_dir,
         ads_dir=ads_dir,
         runs_dir=runs_dir,
         no_probe=no_probe,
+        no_leash=no_leash,
     )
 
 
@@ -804,13 +917,14 @@ def main(argv=None):
     p_dispatch.add_argument("--ads-dir", default=None, help="directory of amElnagdy/delegate-skills clone")
     p_dispatch.add_argument("--runs-dir", default=None, help="directory where run artifacts are stored")
     p_dispatch.add_argument("--no-probe", action="store_true", help="skip probing usage meters")
+    p_dispatch.add_argument("--no-leash", action="store_true", help="drop the 40-tool-call leash for this job")
 
     p_run = sub.add_parser("run", help="rank and dispatch in one step")
     p_run.add_argument("class_", metavar="class", help="work class")
     p_run.add_argument("--brief", required=True, help="absolute path to brief file")
     p_run.add_argument("--cwd", required=True, help="working directory")
     p_run.add_argument("--write", default=None, help="writable worktree directory")
-    p_run.add_argument("--effort", default=None, help="reasoning effort override")
+    p_run.add_argument("--tier", type=int, default=None, help="override floor tier for this job")
     p_run.add_argument("--dry-run", action="store_true", help="print ranking only; do not dispatch")
     p_run.add_argument("--config-dir", default=None, help="directory containing lanes.json and routing.json")
     p_run.add_argument("--meters", default=None, help="path to usage document JSON file")
@@ -818,6 +932,7 @@ def main(argv=None):
     p_run.add_argument("--ads-dir", default=None, help="directory of amElnagdy/delegate-skills clone")
     p_run.add_argument("--runs-dir", default=None, help="directory where run artifacts are stored")
     p_run.add_argument("--no-probe", action="store_true", help="skip probing usage meters")
+    p_run.add_argument("--no-leash", action="store_true", help="drop the 40-tool-call leash for this job")
 
     args = parser.parse_args(argv)
     if args.cmd == "dispatch":
@@ -834,6 +949,7 @@ def main(argv=None):
             no_probe=args.no_probe,
             harness=args.harness,
             model=args.model,
+            no_leash=args.no_leash,
         )
     elif args.cmd == "run":
         run(
@@ -841,7 +957,7 @@ def main(argv=None):
             brief=args.brief,
             cwd=args.cwd,
             write=args.write,
-            effort=args.effort,
+            tier=args.tier,
             dry_run=args.dry_run,
             config_dir=args.config_dir,
             meters=args.meters,
@@ -849,6 +965,7 @@ def main(argv=None):
             ads_dir=args.ads_dir,
             runs_dir=args.runs_dir,
             no_probe=args.no_probe,
+            no_leash=args.no_leash,
         )
 
 

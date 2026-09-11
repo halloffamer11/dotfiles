@@ -47,7 +47,61 @@
         "out": 50
       },
       "tier": 4,
-      "basis": "frontier; protect: orchestrator meter"
+      "basis": "frontier; protect: orchestrator meter",
+      "published_as": [
+        "Fable 5.1"
+      ]
+    },
+    "haiku-high@claude": {
+      "harness": "claude",
+      "model": "claude-haiku-4-5-20251001",
+      "effort": "high",
+      "meter": "claude-general",
+      "meter_weight": 1,
+      "timeout": "40m",
+      "price": {
+        "in": null,
+        "cache_read": null,
+        "cache_write": null,
+        "out": null
+      },
+      "tier": 1,
+      "basis": "Claude general pool; native lane (ticket 22)",
+      "note": "PROVISIONAL: tier set 2026-09-11 pending the wizard; meter_weight and timeout are placeholders; price not sourced. Haiku 4.5 does not accept effort; high is a label only."
+    },
+    "sonnet-high@claude": {
+      "harness": "claude",
+      "model": "claude-sonnet-5",
+      "effort": "high",
+      "meter": "claude-general",
+      "meter_weight": 3,
+      "timeout": "40m",
+      "price": {
+        "in": null,
+        "cache_read": null,
+        "cache_write": null,
+        "out": null
+      },
+      "tier": 2,
+      "basis": "Claude general pool; native lane (ticket 22)",
+      "note": "PROVISIONAL: tier set 2026-09-11 pending the wizard; meter_weight and timeout are placeholders; price not sourced."
+    },
+    "opus-high@claude": {
+      "harness": "claude",
+      "model": "claude-opus-5",
+      "effort": "high",
+      "meter": "claude-general",
+      "meter_weight": 5,
+      "timeout": "40m",
+      "price": {
+        "in": null,
+        "cache_read": null,
+        "cache_write": null,
+        "out": null
+      },
+      "tier": 3,
+      "basis": "Claude general pool; native lane (ticket 22)",
+      "note": "PROVISIONAL: tier set 2026-09-11 pending the wizard; meter_weight and timeout are placeholders; price not sourced."
     },
     "astra-high@codex": {
       "harness": "codex",
@@ -66,6 +120,92 @@
       "basis": "frontier codex model, priority 1 in the CLI; added 2026-09-09",
       "note": "PROVISIONAL: meter_weight 40 is a placeholder set by the session, not measured. price is null because GPT-6-Astra token pricing was not sourced. Confirm both in the wizard."
     },
+    "astra-low@codex": {
+      "harness": "codex",
+      "model": "gpt-6-astra",
+      "effort": "low",
+      "meter": "codex",
+      "meter_weight": 40,
+      "timeout": "40m",
+      "price": {
+        "in": null,
+        "cache_read": null,
+        "cache_write": null,
+        "out": null
+      },
+      "tier": 1,
+      "basis": "same model as astra-high@codex; effort 'low' offered by codex, discovered by discover.py --efforts 2026-09-10",
+      "note": "PROVISIONAL: meter_weight and timeout are copied from astra-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is 1 because this effort is weaker than astra-high@codex's and nothing has measured it: a ceiling too low leaves the lane unused, a ceiling too high sends it work it cannot do."
+    },
+    "astra-medium@codex": {
+      "harness": "codex",
+      "model": "gpt-6-astra",
+      "effort": "medium",
+      "meter": "codex",
+      "meter_weight": 40,
+      "timeout": "40m",
+      "price": {
+        "in": null,
+        "cache_read": null,
+        "cache_write": null,
+        "out": null
+      },
+      "tier": 1,
+      "basis": "same model as astra-high@codex; effort 'medium' offered by codex, discovered by discover.py --efforts 2026-09-10",
+      "note": "PROVISIONAL: meter_weight and timeout are copied from astra-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is 1 because this effort is weaker than astra-high@codex's and nothing has measured it: a ceiling too low leaves the lane unused, a ceiling too high sends it work it cannot do."
+    },
+    "astra-xhigh@codex": {
+      "harness": "codex",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "meter": "codex",
+      "meter_weight": 40,
+      "timeout": "40m",
+      "price": {
+        "in": null,
+        "cache_read": null,
+        "cache_write": null,
+        "out": null
+      },
+      "tier": 4,
+      "basis": "same model as astra-high@codex; effort 'xhigh' offered by codex, discovered by discover.py --efforts 2026-09-10",
+      "note": "PROVISIONAL: meter_weight and timeout are copied from astra-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is astra-high@codex's: the same model reasoning harder is at least as capable, so it claims nothing new."
+    },
+    "astra-max@codex": {
+      "harness": "codex",
+      "model": "gpt-6-astra",
+      "effort": "max",
+      "meter": "codex",
+      "meter_weight": 40,
+      "timeout": "40m",
+      "price": {
+        "in": null,
+        "cache_read": null,
+        "cache_write": null,
+        "out": null
+      },
+      "tier": 4,
+      "basis": "same model as astra-high@codex; effort 'max' offered by codex, discovered by discover.py --efforts 2026-09-10",
+      "note": "PROVISIONAL: meter_weight and timeout are copied from astra-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is astra-high@codex's: the same model reasoning harder is at least as capable, so it claims nothing new."
+    },
+    "astra-ultra@codex": {
+      "harness": "codex",
+      "model": "gpt-6-astra",
+      "effort": "ultra",
+      "meter": "codex",
+      "meter_weight": 40,
+      "timeout": "40m",
+      "price": {
+        "in": null,
+        "cache_read": null,
+        "cache_write": null,
+        "out": null
+      },
+      "tier": 4,
+      "basis": "unscoreable: no published source reports ultra on any benchmark for any model; ultra is maximum reasoning with automatic task delegation, which contradicts the worker preamble",
+      "note": "PROVISIONAL: meter_weight and timeout are copied from astra-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is astra-high@codex's: the same model reasoning harder is at least as capable, so it claims nothing new.",
+      "enabled": false
+    },
     "sol-high@codex": {
       "harness": "codex",
       "model": "gpt-5.6-sol",
@@ -82,6 +222,92 @@
       "tier": 4,
       "basis": "hardest impl and adversarial review"
     },
+    "sol-low@codex": {
+      "harness": "codex",
+      "model": "gpt-5.6-sol",
+      "effort": "low",
+      "meter": "codex",
+      "meter_weight": 20,
+      "timeout": "40m",
+      "price": {
+        "in": 4,
+        "cache_read": 0.4,
+        "cache_write": null,
+        "out": 20
+      },
+      "tier": 1,
+      "basis": "same model as sol-high@codex; effort 'low' offered by codex, discovered by discover.py --efforts 2026-09-10",
+      "note": "PROVISIONAL: meter_weight and timeout are copied from sol-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is 1 because this effort is weaker than sol-high@codex's and nothing has measured it: a ceiling too low leaves the lane unused, a ceiling too high sends it work it cannot do."
+    },
+    "sol-medium@codex": {
+      "harness": "codex",
+      "model": "gpt-5.6-sol",
+      "effort": "medium",
+      "meter": "codex",
+      "meter_weight": 20,
+      "timeout": "40m",
+      "price": {
+        "in": 4,
+        "cache_read": 0.4,
+        "cache_write": null,
+        "out": 20
+      },
+      "tier": 1,
+      "basis": "same model as sol-high@codex; effort 'medium' offered by codex, discovered by discover.py --efforts 2026-09-10",
+      "note": "PROVISIONAL: meter_weight and timeout are copied from sol-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is 1 because this effort is weaker than sol-high@codex's and nothing has measured it: a ceiling too low leaves the lane unused, a ceiling too high sends it work it cannot do."
+    },
+    "sol-xhigh@codex": {
+      "harness": "codex",
+      "model": "gpt-5.6-sol",
+      "effort": "xhigh",
+      "meter": "codex",
+      "meter_weight": 20,
+      "timeout": "40m",
+      "price": {
+        "in": 4,
+        "cache_read": 0.4,
+        "cache_write": null,
+        "out": 20
+      },
+      "tier": 4,
+      "basis": "same model as sol-high@codex; effort 'xhigh' offered by codex, discovered by discover.py --efforts 2026-09-10",
+      "note": "PROVISIONAL: meter_weight and timeout are copied from sol-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is sol-high@codex's: the same model reasoning harder is at least as capable, so it claims nothing new."
+    },
+    "sol-max@codex": {
+      "harness": "codex",
+      "model": "gpt-5.6-sol",
+      "effort": "max",
+      "meter": "codex",
+      "meter_weight": 20,
+      "timeout": "40m",
+      "price": {
+        "in": 4,
+        "cache_read": 0.4,
+        "cache_write": null,
+        "out": 20
+      },
+      "tier": 4,
+      "basis": "same model as sol-high@codex; effort 'max' offered by codex, discovered by discover.py --efforts 2026-09-10",
+      "note": "PROVISIONAL: meter_weight and timeout are copied from sol-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is sol-high@codex's: the same model reasoning harder is at least as capable, so it claims nothing new."
+    },
+    "sol-ultra@codex": {
+      "harness": "codex",
+      "model": "gpt-5.6-sol",
+      "effort": "ultra",
+      "meter": "codex",
+      "meter_weight": 20,
+      "timeout": "40m",
+      "price": {
+        "in": 4,
+        "cache_read": 0.4,
+        "cache_write": null,
+        "out": 20
+      },
+      "tier": 4,
+      "basis": "unscoreable: no published source reports ultra on any benchmark for any model; ultra is maximum reasoning with automatic task delegation, which contradicts the worker preamble",
+      "note": "PROVISIONAL: meter_weight and timeout are copied from sol-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is sol-high@codex's: the same model reasoning harder is at least as capable, so it claims nothing new.",
+      "enabled": false
+    },
     "terra-high@codex": {
       "harness": "codex",
       "model": "gpt-5.6-terra",
@@ -97,6 +323,92 @@
       },
       "tier": 3,
       "basis": "preferred reviewer and implementor"
+    },
+    "terra-low@codex": {
+      "harness": "codex",
+      "model": "gpt-5.6-terra",
+      "effort": "low",
+      "meter": "codex",
+      "meter_weight": 10,
+      "timeout": "25m",
+      "price": {
+        "in": 2,
+        "cache_read": 0.2,
+        "cache_write": null,
+        "out": 12
+      },
+      "tier": 1,
+      "basis": "same model as terra-high@codex; effort 'low' offered by codex, discovered by discover.py --efforts 2026-09-10",
+      "note": "PROVISIONAL: meter_weight and timeout are copied from terra-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is 1 because this effort is weaker than terra-high@codex's and nothing has measured it: a ceiling too low leaves the lane unused, a ceiling too high sends it work it cannot do."
+    },
+    "terra-medium@codex": {
+      "harness": "codex",
+      "model": "gpt-5.6-terra",
+      "effort": "medium",
+      "meter": "codex",
+      "meter_weight": 10,
+      "timeout": "25m",
+      "price": {
+        "in": 2,
+        "cache_read": 0.2,
+        "cache_write": null,
+        "out": 12
+      },
+      "tier": 1,
+      "basis": "same model as terra-high@codex; effort 'medium' offered by codex, discovered by discover.py --efforts 2026-09-10",
+      "note": "PROVISIONAL: meter_weight and timeout are copied from terra-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is 1 because this effort is weaker than terra-high@codex's and nothing has measured it: a ceiling too low leaves the lane unused, a ceiling too high sends it work it cannot do."
+    },
+    "terra-xhigh@codex": {
+      "harness": "codex",
+      "model": "gpt-5.6-terra",
+      "effort": "xhigh",
+      "meter": "codex",
+      "meter_weight": 10,
+      "timeout": "25m",
+      "price": {
+        "in": 2,
+        "cache_read": 0.2,
+        "cache_write": null,
+        "out": 12
+      },
+      "tier": 3,
+      "basis": "same model as terra-high@codex; effort 'xhigh' offered by codex, discovered by discover.py --efforts 2026-09-10",
+      "note": "PROVISIONAL: meter_weight and timeout are copied from terra-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is terra-high@codex's: the same model reasoning harder is at least as capable, so it claims nothing new."
+    },
+    "terra-max@codex": {
+      "harness": "codex",
+      "model": "gpt-5.6-terra",
+      "effort": "max",
+      "meter": "codex",
+      "meter_weight": 10,
+      "timeout": "25m",
+      "price": {
+        "in": 2,
+        "cache_read": 0.2,
+        "cache_write": null,
+        "out": 12
+      },
+      "tier": 3,
+      "basis": "same model as terra-high@codex; effort 'max' offered by codex, discovered by discover.py --efforts 2026-09-10",
+      "note": "PROVISIONAL: meter_weight and timeout are copied from terra-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is terra-high@codex's: the same model reasoning harder is at least as capable, so it claims nothing new."
+    },
+    "terra-ultra@codex": {
+      "harness": "codex",
+      "model": "gpt-5.6-terra",
+      "effort": "ultra",
+      "meter": "codex",
+      "meter_weight": 10,
+      "timeout": "25m",
+      "price": {
+        "in": 2,
+        "cache_read": 0.2,
+        "cache_write": null,
+        "out": 12
+      },
+      "tier": 3,
+      "basis": "unscoreable: no published source reports ultra on any benchmark for any model; ultra is maximum reasoning with automatic task delegation, which contradicts the worker preamble",
+      "note": "PROVISIONAL: meter_weight and timeout are copied from terra-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is terra-high@codex's: the same model reasoning harder is at least as capable, so it claims nothing new.",
+      "enabled": false
     },
     "grok46-high@grok": {
       "harness": "grok",
@@ -129,6 +441,74 @@
       },
       "tier": 1,
       "basis": "benchmarks overstate it (Orin)"
+    },
+    "luna-medium@codex": {
+      "harness": "codex",
+      "model": "gpt-5.6-luna",
+      "effort": "medium",
+      "meter": "codex",
+      "meter_weight": 1,
+      "timeout": "10m",
+      "price": {
+        "in": 0.2,
+        "cache_read": 0.02,
+        "cache_write": null,
+        "out": 1.2
+      },
+      "tier": 1,
+      "basis": "same model as luna-low@codex; effort 'medium' offered by codex, discovered by discover.py --efforts 2026-09-10",
+      "note": "PROVISIONAL: meter_weight and timeout are copied from luna-low@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is luna-low@codex's: the same model reasoning harder is at least as capable, so it claims nothing new."
+    },
+    "luna-high@codex": {
+      "harness": "codex",
+      "model": "gpt-5.6-luna",
+      "effort": "high",
+      "meter": "codex",
+      "meter_weight": 1,
+      "timeout": "10m",
+      "price": {
+        "in": 0.2,
+        "cache_read": 0.02,
+        "cache_write": null,
+        "out": 1.2
+      },
+      "tier": 1,
+      "basis": "same model as luna-low@codex; effort 'high' offered by codex, discovered by discover.py --efforts 2026-09-10",
+      "note": "PROVISIONAL: meter_weight and timeout are copied from luna-low@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is luna-low@codex's: the same model reasoning harder is at least as capable, so it claims nothing new."
+    },
+    "luna-xhigh@codex": {
+      "harness": "codex",
+      "model": "gpt-5.6-luna",
+      "effort": "xhigh",
+      "meter": "codex",
+      "meter_weight": 1,
+      "timeout": "10m",
+      "price": {
+        "in": 0.2,
+        "cache_read": 0.02,
+        "cache_write": null,
+        "out": 1.2
+      },
+      "tier": 1,
+      "basis": "same model as luna-low@codex; effort 'xhigh' offered by codex, discovered by discover.py --efforts 2026-09-10",
+      "note": "PROVISIONAL: meter_weight and timeout are copied from luna-low@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is luna-low@codex's: the same model reasoning harder is at least as capable, so it claims nothing new."
+    },
+    "luna-max@codex": {
+      "harness": "codex",
+      "model": "gpt-5.6-luna",
+      "effort": "max",
+      "meter": "codex",
+      "meter_weight": 1,
+      "timeout": "10m",
+      "price": {
+        "in": 0.2,
+        "cache_read": 0.02,
+        "cache_write": null,
+        "out": 1.2
+      },
+      "tier": 1,
+      "basis": "same model as luna-low@codex; effort 'max' offered by codex, discovered by discover.py --efforts 2026-09-10",
+      "note": "PROVISIONAL: meter_weight and timeout are copied from luna-low@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is luna-low@codex's: the same model reasoning harder is at least as capable, so it claims nothing new."
     },
     "flash-high@agy": {
       "harness": "agy",

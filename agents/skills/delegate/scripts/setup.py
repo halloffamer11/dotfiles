@@ -9,7 +9,9 @@ import sys
 import tempfile
 
 import bench
+import bench_page
 import catalog
+import discover
 import setup_tui
 from catalog import CatalogError, CLASSES, HARNESSES, load_json, validate_lanes, validate_routing, write_json
 
@@ -189,7 +191,8 @@ def ask_lanes(lanes_doc):
 
 def show_routing(routing_doc):
     for name in CLASSES:
-        print(f"classTier.{name}: {routing_doc['classTier'][name]}")
+        cls_info = routing_doc["classes"][name]
+        print(f"classes.{name}: floor={cls_info['floor']} ceiling={cls_info['ceiling']}")
     print(f"margin: {routing_doc['margin']}")
     print(f"gate: {routing_doc['gate']}")
 
@@ -199,11 +202,28 @@ def ask_routing(routing_doc):
     if read_answer("keep routing as shown? [Y/n] ").strip().lower() != "n":
         return
     for name in CLASSES:
-        routing_doc["classTier"][name] = ask_int(
-            f"{name} tier", routing_doc["classTier"][name], 1, 4
-        )
+        cls_info = routing_doc["classes"][name]
+        f = ask_int(f"{name} floor", cls_info["floor"], 1, 4)
+        c = ask_int(f"{name} ceiling", max(f, cls_info["ceiling"]), f, 4)
+        cls_info["floor"] = f
+        cls_info["ceiling"] = c
     routing_doc["margin"] = ask_fraction("margin", routing_doc["margin"])
     routing_doc["gate"] = ask_fraction("gate", routing_doc["gate"])
+
+
+def load_effort_rows(path):
+    if not path:
+        return None, ""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except OSError as e:
+        return None, f"effort-rows: {e}"
+    except json.JSONDecodeError as e:
+        return None, f"effort-rows: invalid JSON: {e}"
+    if not isinstance(data, list):
+        return None, "effort-rows: expected a JSON list"
+    return data, ""
 
 
 def confirm_and_write(lanes_doc, routing_doc, lanes_path, routing_path):
@@ -234,6 +254,9 @@ def main(argv=None):
     bench_group.add_argument("--no-bench", action="store_true", help="skip benchmark display")
     parser.add_argument("--epoch-csv", default=None, help="local Epoch CSV for bench.py")
     parser.add_argument("--aa-json", default=None, help="local Artificial Analysis JSON for bench.py")
+    parser.add_argument("--effort-rows", default=None, help="effort.py check accepted.json for the pre-screen and benchmark page")
+    parser.add_argument("--no-discover", action="store_true", help="skip model discovery")
+    parser.add_argument("--fixture-dir", default=None, help="fixture directory for harness discovery")
     args = parser.parse_args(argv)
 
     try:
@@ -242,6 +265,14 @@ def main(argv=None):
         lanes_doc, routing_doc, lanes_path, routing_path = load_or_propose(config_dir, discovered)
         plain = args.plain or not sys.stdin.isatty() or not sys.stdout.isatty()
         if plain:
+            if args.effort_rows:
+                # The pre-screen is a selectable screen; there is no prompt-driven
+                # form of it yet. Saying so is the point: the instruction a human
+                # is given names --effort-rows, and a flag that reads as accepted
+                # while nothing acts on it is worse than one that is refused.
+                print("note: --effort-rows drives the pre-screen, which the prompt-driven "
+                      "interface does not have; no lane will be proposed off. Run on a "
+                      "terminal without --plain to use it.")
             show_bench(args, lanes_doc, routing_doc)
             ask_lanes(lanes_doc)
             ask_routing(routing_doc)
@@ -261,9 +292,34 @@ def main(argv=None):
                     )
                 except bench.BenchError as e:
                     initial_message = f"bench: {e}"
+            effort_rows, effort_message = load_effort_rows(args.effort_rows)
+            if effort_message:
+                initial_message = f"{initial_message}; {effort_message}" if initial_message else effort_message
+            fd, page_path = tempfile.mkstemp(prefix="delegate-bench-", suffix=".html")
+            os.close(fd)
+            try:
+                bench_page.write(page_path, bench_data, lanes_doc, effort_rows)
+            except OSError as e:
+                page_path = None
+                page_message = f"benchmark page: {e}"
+                initial_message = f"{initial_message}; {page_message}" if initial_message else page_message
+            # Discovery shells out to three harness CLIs. It reports drift at the
+            # moment the human is already deciding tiers, and it must never be
+            # able to stop them getting there: any failure becomes the reason
+            # string the start screen prints.
+            if args.no_discover:
+                discovery_data = "skipped (--no-discover)"
+            else:
+                try:
+                    discovery_data = discover.discover(lanes_doc, fixture_dir=args.fixture_dir)
+                except Exception as e:
+                    discovery_data = str(e)
             wizard = setup_tui.Wizard(
                 lanes_doc, routing_doc, bench_data, discovered,
                 lanes_path, routing_path, initial_message,
+                bench_page_path=page_path,
+                effort_rows=effort_rows,
+                discovery=discovery_data,
             )
             result = setup_tui.run_curses(wizard)
             if result is None:

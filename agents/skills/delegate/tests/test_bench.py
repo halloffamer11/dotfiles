@@ -12,6 +12,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DELEGATE_DIR = os.path.abspath(os.path.join(HERE, "..", "scripts"))
 SAMPLES_DIR = os.path.abspath(os.path.join(HERE, "..", "assets", "samples"))
 BENCH_PY = os.path.join(DELEGATE_DIR, "bench.py")
+sys.path.insert(0, DELEGATE_DIR)
+
+import bench  # noqa: E402  (after sys.path, as the other test files do)
+import catalog  # noqa: E402
 
 HEADER = (
     "model_id,benchmark_id,performance,benchmark,benchmark_release_date,"
@@ -568,5 +572,140 @@ with tempfile.TemporaryDirectory() as td:
         and "gpt-5.6-luna Artificial Analysis used effort" not in effort_gaps,
         f"luna_aa={luna_aa!r} gaps={effort_gaps}",
     )
+
+
+# --- attribution: a figure reaches only the lane that ran its effort ----------
+# Ticket 17. Two lanes on one model at different efforts is the case that was
+# wrong: every figure of the model landed on both, so the six astra lanes read
+# the same three scores and a tier was assigned on numbers none of them
+# produced. Driven through collect() from a CSV fixture; no network.
+
+ATTRIB_LANES = {
+    "version": "delegate-lanes.v1",
+    "lanes": {
+        "astra-high@codex": {"harness": "codex", "model": "gpt-6-astra", "effort": "high",
+                             "tier": 4, "meter": "codex"},
+        "astra-max@codex": {"harness": "codex", "model": "gpt-6-astra", "effort": "max",
+                            "tier": 4, "meter": "codex"},
+        "astra-low@codex": {"harness": "codex", "model": "gpt-6-astra", "effort": "low",
+                            "tier": 4, "meter": "codex"},
+        "sol-high@codex": {"harness": "codex", "model": "gpt-5.6-sol", "effort": "high",
+                           "tier": 4, "meter": "codex"},
+    },
+}
+
+with tempfile.TemporaryDirectory() as td:
+    attrib_csv = os.path.join(td, "attrib.csv")
+    write_epoch_csv(attrib_csv, [
+        # one model, one benchmark, three efforts, one of them unstated
+        epoch_row("gpt-6-astra", "high", "DeepSWE", "0.58", "alpha", "GPT-6 Astra"),
+        epoch_row("gpt-6-astra", "max", "DeepSWE", "0.59", "alpha", "GPT-6 Astra"),
+        epoch_row("gpt-6-astra", "", "DeepSWE", "0.47", "alpha", "GPT-6 Astra"),
+        epoch_row("gpt-6-astra", "max", "FrontierCode", "0.66", "alpha", "GPT-6 Astra"),
+        epoch_row("gpt-5.6-sol", "high", "DeepSWE", "0.90", "alpha", "GPT-5.6 Sol"),
+    ])
+    data = bench.collect(ATTRIB_LANES, epoch_csv=attrib_csv, key_file=None)
+    cell = data["models"]["gpt-6-astra"]["epoch"]["cells"]["DeepSWE"]
+    lanes = data["lanes"]
+
+    record(
+        "every measured effort survives collection, keyed by effort, unknown included",
+        set(cell) == {"high", "max", bench.UNKNOWN_EFFORT}
+        and cell["high"]["performance"] == 0.58
+        and cell["max"]["performance"] == 0.59
+        and cell[bench.UNKNOWN_EFFORT]["performance"] == 0.47,
+        str(cell),
+    )
+
+    record(
+        "two lanes on one model at different efforts each get their own figure",
+        lanes["astra-high@codex"]["cells"]["DeepSWE"]["performance"] == 0.58
+        and lanes["astra-max@codex"]["cells"]["DeepSWE"]["performance"] == 0.59
+        and "FrontierCode" not in lanes["astra-high@codex"]["cells"]
+        and lanes["astra-max@codex"]["cells"]["FrontierCode"]["performance"] == 0.66,
+        str({k: v["cells"] for k, v in lanes.items()}),
+    )
+
+    record(
+        "a lane whose effort nobody measured gets no figure, not its model's",
+        lanes["astra-low@codex"]["cells"] == {}
+        and lanes["astra-low@codex"]["n"] == 0
+        and lanes["astra-low@codex"]["mean"] is None
+        and lanes["astra-low@codex"]["mean_s"] == "— (n=0)",
+        str(lanes["astra-low@codex"]),
+    )
+
+    record(
+        "an unstated effort reaches no lane and is still in the model view",
+        all(bench.UNKNOWN_EFFORT not in [f.get("effort") for f in rec["cells"].values()]
+            for rec in lanes.values())
+        and bench.UNKNOWN_EFFORT in cell,
+        str({k: v["cells"] for k, v in lanes.items()}),
+    )
+
+    # ranks compare lane against lane at its own effort. On DeepSWE:
+    # sol 0.90 r1, astra-max 0.59 r2, astra-high 0.58 r3. On FrontierCode only
+    # astra-max has a figure, so it ranks 1 there and means (2+1)/2 = 1.5.
+    record(
+        "mean rank and n count only the figures attributed to that lane",
+        lanes["astra-max@codex"]["n"] == 2
+        and lanes["astra-max@codex"]["mean_s"] == "1.5 (n=2)"
+        and lanes["astra-high@codex"]["n"] == 1
+        and lanes["astra-high@codex"]["mean_s"] == "3.0 (n=1)"
+        and lanes["sol-high@codex"]["mean_s"] == "1.0 (n=1)",
+        str({k: v["mean_s"] for k, v in lanes.items()}),
+    )
+
+    # the Artificial Analysis figure carries its own effort through collect(),
+    # so it can be attributed the same way an Epoch figure is
+    aa_path = os.path.join(td, "attrib-aa.json")
+    with open(aa_path, "w", encoding="utf-8") as f:
+        json.dump({"data": [
+            {"slug": "gpt-6-astra-max",
+             "evaluations": {"coding_index": 92, "agentic_index": 80},
+             "median_output_tokens_per_second": 120},
+            {"slug": "gpt-5.6-sol",
+             "evaluations": {"coding_index": 80, "agentic_index": 75},
+             "median_output_tokens_per_second": 100},
+        ]}, f)
+    aa_data = bench.collect(ATTRIB_LANES, epoch_csv=attrib_csv, aa_json=aa_path, key_file=None)
+    aa_lanes = aa_data["lanes"]
+
+    record(
+        "an Artificial Analysis figure carries its measured effort through collect",
+        aa_data["models"]["gpt-6-astra"]["aa"]["effort"] == "max"
+        and aa_data["models"]["gpt-5.6-sol"]["aa"]["effort"] is None,
+        str({m: (r["aa"] or {}).get("effort") for m, r in aa_data["models"].items()}),
+    )
+
+    record(
+        "an Artificial Analysis figure reaches only the lane that ran its effort",
+        aa_lanes["astra-max@codex"]["aa"]["cols"]["Coding Index"] == 92
+        and aa_lanes["astra-high@codex"]["aa"] is None
+        and aa_lanes["astra-low@codex"]["aa"] is None
+        and aa_lanes["sol-high@codex"]["aa"] is None,
+        str({k: v["aa"] for k, v in aa_lanes.items()}),
+    )
+
+    record(
+        "the notes name the measured efforts that reach no lane",
+        "gpt-6-astra DeepSWE also measured at an unstated effort (0.47); "
+        "no lane runs that effort" in data["notes"],
+        str(data["notes"]),
+    )
+
+record(
+    "ultra never stands for a model, even when a lane carries it",
+    bench.lane_effort_of({"lanes": ["a", "b"], "efforts": ["ultra", "high"]}) == "high"
+    and bench.lane_effort_of({"lanes": ["a"], "efforts": ["ultra"]}) == "ultra"
+    and bench.choose_effort({"ultra": 1, "high": 1}, ["ultra", "high"]) == "high",
+    str(bench.EFFORT_PREFERENCE),
+)
+
+record(
+    "LANE_EFFORT_ORDER covers every effort a lane can carry",
+    set(bench.LANE_EFFORT_ORDER) == set(catalog.EFFORTS),
+    f"order={bench.LANE_EFFORT_ORDER} efforts={catalog.EFFORTS}",
+)
 
 sys.exit(1 if fails else 0)

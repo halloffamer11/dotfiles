@@ -3,10 +3,12 @@ Note: crate moved to tools/delegate-mon/ on 2026-09-09.
 # Delegate monitoring TUI — Design Spec
 
 - **Date:** 2026-09-02
-- **Status:** Approved
+- **Status:** Approved; built out to every step of the plan. The crate is
+  `tools/delegate-mon/`, which owns its own CLAUDE.md.
 - **Working dir:** `/Users/dreiss/dotfiles`
-- **Research:** `agents/skills/delegate/tui-research.md`
-- **Mockup:** `agents/skills/delegate/tui-mockup.txt`
+- **Research and mockup:** deleted 2026-09-10 once the crate shipped — they
+  described `dispatch.sh` and an unimplemented binary, and this spec is the record
+  that survives. `git log -- agents/skills/delegate/references/` has them.
 
 ## 1. Goal
 
@@ -187,7 +189,7 @@ Messages: `Key`, `FileChanged`, `ProbeDone`, `RankDone`, `Tick`, `Quit`.
 
 ## 6. UI
 
-Follow `tui-mockup.txt`. Density over chrome. Rounded `Block` borders.
+Density over chrome. Rounded `Block` borders.
 
 **Meters (left).** One meter = two `LineGauge`s (5h, weekly) plus a metadata line: binding, reset of the binding window, pace, ahead/behind. Missing 5h (Grok) is `—`. `ratio` clamped to 0..=1 before the widget (Ratatui panics outside that range). Null pace renders `—`.
 

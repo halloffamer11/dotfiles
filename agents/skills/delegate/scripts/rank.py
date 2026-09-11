@@ -6,13 +6,15 @@ for a given task class, taking into account model tier requirements,
 subscription meter gate thresholds, harness CLI availability, and pacing.
 
 The selection rule:
-  1. Determine task tier requirement: need = routing.classTier[class].
+  1. Determine task tier requirement: floor and ceiling from routing.classes[class].
+     If tier is given, it replaces floor (must satisfy floor <= tier <= ceiling).
   2. Filter eligible lanes:
-       tier >= need,
+       enabled is True (defaults to True if absent),
+       floor <= tier <= ceiling,
        meter gate passed: meter r is None (unknown) or r >= routing.gate,
        harness CLI is present (found in PATH or specified via --harnesses).
      Vetoed lanes fail one or more conditions (reported in precedence order:
-     ceiling, gate, cli).
+     disabled, floor, ceiling, gate, cli).
   3. Sort eligible lanes by:
        tier ascending,
        pace descending,
@@ -33,12 +35,14 @@ Reason vocabulary (exactly one per lane):
   - stolen by pace: <pace> >= <pick0 pace> + <margin>: steal rule moved pick
   - eligible: any other eligible lane
   - unknown meter, sorted last: eligible lane with unknown pace (overrides eligible)
-  - vetoed: ceiling (tier <t> < need <n>)
-  - vetoed: gate (r <pct> < <gate pct>)
-  - vetoed: cli absent (<harness>)
+  - vetoed:disabled, <lane>
+  - vetoed:floor, <lane> (tier t) < <class> floor (tier f)
+  - vetoed:ceiling, <lane> (tier t) > <class> ceiling (tier c)
+  - vetoed:gate, <lane>: <meter> meter N% left < gate G%
+  - vetoed:cli, <lane>: <harness> not on PATH
 
 CLI forms:
-  rank.py <class> [--cwd DIR] [--config-dir DIR] [--meters FILE] [--harnesses a,b,c] [--json]
+  rank.py <class> [--tier N] [--cwd DIR] [--config-dir DIR] [--meters FILE] [--harnesses a,b,c] [--json]
 """
 import argparse
 import json
@@ -55,22 +59,32 @@ import catalog
 from catalog import CatalogError, CLASSES, HARNESSES, load_catalog
 
 
-def rank(cls, cat, meters, present, effort=None):
+def rank(cls, cat, meters, present, tier=None, effort=None):
     """Rank catalog lanes for a given class.
 
     cat: dict from catalog.load_catalog
     meters: usage document dict (or {})
     present: set of harness names
+    tier: optional floor override (must be between class floor and ceiling)
     effort: optional effort override (unused in base ranking rule)
     """
     routing = cat.get("routing", {})
-    class_tier = routing.get("classTier", {})
-    if cls not in class_tier and cls not in CLASSES:
+    classes = routing.get("classes", {})
+    if cls not in classes and cls not in CLASSES:
         raise ValueError(f"unknown class '{cls}'; must be one of {', '.join(CLASSES)}")
 
-    need = class_tier.get(cls)
+    cls_config = classes.get(cls, {})
+    floor = cls_config.get("floor")
+    ceiling = cls_config.get("ceiling")
     margin = routing.get("margin", 0.2)
     gate = routing.get("gate", 0.1)
+
+    if tier is not None:
+        if floor is not None and ceiling is not None and (tier < floor or tier > ceiling):
+            raise ValueError(f"tier {tier} outside [{floor}, {ceiling}] for class '{cls}'")
+        effective_floor = tier
+    else:
+        effective_floor = floor
 
     meter_map = {}
     if isinstance(meters, dict):
@@ -102,27 +116,31 @@ def rank(cls, cat, meters, present, effort=None):
             remaining_weekly = None
             meter_status = "unknown"
 
-        tier = lane_def.get("tier")
+        lane_tier = lane_def.get("tier")
         harness = lane_def.get("harness")
         model = lane_def.get("model")
         lane_effort = lane_def.get("effort")
 
         veto_reason = None
-        if tier is not None and need is not None and tier < need:
-            veto_reason = f"vetoed: ceiling (tier {tier} < need {need})"
+        if not lane_def.get("enabled", True):
+            veto_reason = f"vetoed:disabled, {lane_name}"
+        elif lane_tier is not None and effective_floor is not None and lane_tier < effective_floor:
+            veto_reason = f"vetoed:floor, {lane_name} (tier {lane_tier}) < {cls} floor (tier {effective_floor})"
+        elif lane_tier is not None and ceiling is not None and lane_tier > ceiling:
+            veto_reason = f"vetoed:ceiling, {lane_name} (tier {lane_tier}) > {cls} ceiling (tier {ceiling})"
         elif r is not None and r < gate:
             r_pct = f"{int(round(r * 100)):d}%"
             gate_pct = f"{int(round(gate * 100)):d}%"
-            veto_reason = f"vetoed: gate (r {r_pct} < {gate_pct})"
+            veto_reason = f"vetoed:gate, {lane_name}: {meter_name} meter {r_pct} left < gate {gate_pct}"
         elif harness not in present_set:
-            veto_reason = f"vetoed: cli absent ({harness})"
+            veto_reason = f"vetoed:cli, {lane_name}: {harness} not on PATH"
 
         row = {
             "lane": lane_name,
             "harness": harness,
             "model": model,
             "effort": lane_effort,
-            "tier": tier,
+            "tier": lane_tier,
             "meter": meter_name,
             "pace": pace,
             "r": r,
@@ -223,6 +241,7 @@ def main(argv=None):
         description="Rank execution lanes for a class."
     )
     parser.add_argument("cls", metavar="class", help=f"class to rank: {', '.join(CLASSES)}")
+    parser.add_argument("--tier", type=int, default=None, help="override floor tier for this job")
     parser.add_argument("--cwd", default=None, help="working directory to find git root from")
     parser.add_argument("--config-dir", default=None, help="config directory containing lanes.json and routing.json")
     parser.add_argument("--meters", default=None, help="path to usage document JSON file")
@@ -255,18 +274,25 @@ def main(argv=None):
     else:
         present = {h for h in HARNESSES if shutil.which(h)}
 
-    rows = rank(args.cls, cat, meters_doc, present)
+    try:
+        rows = rank(args.cls, cat, meters_doc, present, tier=args.tier)
+    except ValueError as e:
+        sys.stderr.write(f"rank: {e}\n")
+        sys.exit(2)
     has_pick = bool(rows and rows[0]["pick"])
 
     routing = cat["routing"]
-    need = routing["classTier"][args.cls]
+    cls_config = routing.get("classes", {}).get(args.cls, {})
+    floor = args.tier if args.tier is not None else cls_config.get("floor")
+    ceiling = cls_config.get("ceiling")
     margin = routing["margin"]
     gate = routing["gate"]
 
     if args.json:
         out = {
             "class": args.cls,
-            "need": need,
+            "floor": floor,
+            "ceiling": ceiling,
             "margin": margin,
             "gate": gate,
             "pick": rows[0]["lane"] if has_pick else None,
@@ -284,7 +310,7 @@ def main(argv=None):
     project_file = cat.get("files", {}).get("project")
     override_str = project_file if project_file else "none"
     gate_pct = f"{int(round(gate * 100))}%"
-    print(f"# {args.cls}  need=tier {need}  margin={margin}  gate={gate_pct}  (routing: global; project override: {override_str})")
+    print(f"# {args.cls}  floor={floor} ceiling={ceiling}  margin={margin}  gate={gate_pct}  (routing: global; project override: {override_str})")
     for line in format_rows(rows):
         print(line)
     sys.exit(0)

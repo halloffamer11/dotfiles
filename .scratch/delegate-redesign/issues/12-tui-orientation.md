@@ -30,13 +30,45 @@ one-line explanations onto the confirm screen. Acceptance below is extended.
 
 **Blocked by:** nothing. 07b landed.
 
-**Status:** open, raised by Orin 2026-09-09 from the first live run of the wizard.
+**Status:** landed 2026-09-10 (`54de330`, `1d6b7f8`, `b530b89`). All boxes ticked. The wizard has been through two design passes since — one per screen on 2026-09-10, and then Orin's "one decision per line, one marker on every page" rule (`23f7061`), which is recorded in the project CLAUDE.md as settled.
 
-- [ ] A start screen states the task, names both files, and says nothing is written before confirm
-- [ ] Tier is defined on the start screen and recalled in the tier screens' footer
-- [ ] The routing screen shows a tier-to-lanes map built from this session's assignments
-- [ ] Margin and gate carry a one-line explanation each on the routing screen
-- [ ] The confirm screen carries the same one-line explanations for `classTier`, `margin` and `gate`, so the values are not bare at the moment of writing
-- [ ] The wizard renders the gathered benchmark data as a local HTML page for side-by-side reading, read-only, with no decision entered there
-- [ ] `tests/test_setup_tui.py` covers the start screen in the key sequence and asserts the routing view carries the tier map
-- [ ] The written `lanes.json` and `routing.json` are byte-identical to what the same key sequence produced before this ticket
+- [x] A start screen states the task, names both files, and says nothing is written before confirm
+- [x] Tier is defined on the start screen and recalled in the tier screens' footer
+- [x] The routing screen shows a tier-to-lanes map built from this session's assignments
+- [x] Margin and gate carry a one-line explanation each on the routing screen
+- [x] The confirm screen carries the same one-line explanations for `classTier`, `margin` and `gate`, so the values are not bare at the moment of writing
+- [x] The wizard renders the gathered benchmark data as a local HTML page for side-by-side reading, read-only, with no decision entered there
+- [x] `tests/test_setup_tui.py` covers the start screen in the key sequence and asserts the routing view carries the tier map
+- [x] The written `lanes.json` and `routing.json` are byte-identical to what the same key sequence produced before this ticket
+
+## Landed 2026-09-10
+
+`view()` gained two keys, `body` (prose lines, for a screen that is not a table)
+and `legend` (lines rendered between the table and the footer). `run_curses`
+renders both. Everything else about the render contract is unchanged, so
+`_fit_table` was not touched.
+
+Two deviations from the wording above, both to keep the screens legible at the
+80x16 minimum the wizard already enforces:
+
+- The tier definition is the **last legend line**, not inside the footer string.
+  The definition and the key hints together run to about 165 characters; in an
+  80-column footer that truncation would have eaten the key hints. The legend's
+  last line renders directly above the footer, so it reads as a second footer
+  line. Every legend sentence is now under 80 characters for the same reason — a
+  legend cut mid-sentence explains nothing.
+- The table region scrolls to keep the cursor row visible. The routing screen
+  carries six legend lines, which at 16 rows left too little room for its seven
+  settings, so the cursor could have sat on a row that was not on screen.
+
+An empty tier reads `tier 4: (none)` rather than a label with nothing after it.
+
+The HTML page is `scripts/bench_page.py`, self-contained: no script tag, no
+remote stylesheet, no web font, verified by a test. `setup.py` writes it to a
+temp file before curses starts and `--effort-rows` feeds it an `effort.py check`
+`accepted.json`; all 26 rows of the real swerb output render, grouped by model
+then by effort in capability order. `o` opens it as a `file://` URI, wrapped so a
+headless machine cannot take the TUI down.
+
+Verified by driving the real curses renderer in an 80x16 pty: the tier map, both
+legends and the cursor row on the last setting are all on screen.
