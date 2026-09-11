@@ -15,6 +15,8 @@ The session plans, adjudicates, and synthesizes. Worker-shaped work goes out on 
 - **Class**: the kind of job. `scout` (find, ground, summarize), `mechanical` (renames, transforms, extraction), `impl` (implementation with a spec), `review` (independent review of a diff; reviewer family differs from author), `hard-impl`. Each class needs a **tier**.
 - **Tier**: capability level 1 (lowest) to 4 (frontier), set by the human per lane after reading the benchmark ranking. Nothing computes it. It is the only human-set ranking input; lanes alike on tier are treated as equivalent and separated by pace.
 - **Pace**: weekly remaining divided by the fraction of the weekly cycle still to run. 1.0 is spending evenly; above 1 the quota will expire unspent.
+- **Disposable browser**: a fresh browser that Playwright starts for one run, with no logins and no saved state. A worker may read and write in it.
+- **Agent profile**: a browser profile kept only for workers and signed in to a few chosen accounts, reached through the Playwright extension. Workers never reach the human's personal profile; the extension is installed only in the agent profile.
 - **Brief**: the task file the session writes. **Run**: one relay invocation and its directory under `~/.cache/delegate/runs/`, never reused.
 
 ## Files
