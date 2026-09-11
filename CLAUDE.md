@@ -28,7 +28,9 @@ path lets workers use a browser a harness already has — a disposable browser
 everywhere, and the Helium "GenAI" agent profile through the Playwright extension — on
 the Mac and omarchy. No new config file, flag or ranking change; machine setup happens
 in conversation with Orin. Ticket 01 (the runner `scripts/browser_probes.py` and the
-prompt changes) is built; its Mac proof is next. Facts and setup rules:
+prompt changes) is built, and its agy disposable row passes on the Mac; the full
+table waits on the claude row (native lanes, see the ticket) and codex quota. Facts
+and setup rules:
 `.scratch/delegate-browser/research/2026-09-10-browser-routes.md`.
 
 **Ticket 22 landed on `main` as `71e285c`** (2026-09-11), on top of `ea5430b`: each
