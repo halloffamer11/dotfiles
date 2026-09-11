@@ -21,10 +21,10 @@ The delegate redesign is the only live thread. Spec
 (14 closed 2026-09-10); the boxes left unticked are Orin's own confirmations, and
 each ticket's Status line says which.
 
-**Branch `bench-aa-effort-slugs` is unmerged**, 33 commits ahead of `main` and 2
+**Branch `bench-aa-effort-slugs` is unmerged**, 34 commits ahead of `main` and 2
 behind, suite green at 374 assertions across 12 files (two of the twelve report one
 summary line rather than one line per assertion, so other counts of the same suite
-run higher). It contains `delegate-lane-catalog`, which is 36 commits behind it;
+run higher). It contains `delegate-lane-catalog`, which is 37 commits behind it;
 that branch is history now, not a second thread. Tickets 01-17 are implemented, and
 the catalog carries every effort each codex model offers — 26 lanes, 19 of them
 generated and provisionally tiered.
@@ -118,3 +118,20 @@ run high; the report prints that caveat per model.
 
 Preserve unrelated working-tree changes. Validate the smallest affected surface
 before committing.
+
+## Agent skills
+
+### Issue tracker
+
+Local markdown: tickets in `.scratch/<effort>/issues/`, specs in
+`docs/superpowers/specs/`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five default roles, written as a waiting ticket's `**Status:**` value. See
+`docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `CONTEXT.md` and `docs/adr/` at the root; neither exists yet.
+See `docs/agents/domain.md`.
