@@ -21,20 +21,18 @@ The delegate redesign is the only live thread. Spec
 (14 closed 2026-09-10); the boxes left unticked are Orin's own confirmations, and
 each ticket's Status line says which.
 
-**Branch `bench-aa-effort-slugs` has `main` merged in** (2026-09-10) and is 35
-commits ahead of it, 0 behind; `main` has not fast-forwarded to it yet. Suite green
+**`main` is at `ea5430b`, the tip of `bench-aa-effort-slugs`** (2026-09-11): `main`
+was merged into the branch on 2026-09-10, then `main` fast-forwarded to it. Commits
+after `ea5430b` are on the branch only until `main` fast-forwards again. Suite green
 at 374 assertions across 12 files (two of the twelve report one summary line rather
-than one line per assertion, so other counts of the same suite run higher). It
-contains `delegate-lane-catalog`, which is 40 commits behind it; that branch is
-history now, not a second thread. Tickets 01-17 are implemented, and the catalog
-carries every effort each codex model offers — 26 lanes, 19 of them generated and
-provisionally tiered.
+than one line per assertion, so other counts of the same suite run higher). The
+branch contains `delegate-lane-catalog`, which is history now, not a second thread.
+Tickets 01-17 are implemented, and the catalog carries every effort each codex model
+offers — 26 lanes, 19 of them generated and provisionally tiered.
 
-`~/.claude/skills/delegate` symlinks to `~/dotfiles`, the **main** checkout, so the
-installed skill is main's: no `discover.py`, no `bench_page.py`, no pre-screen, no
-per-effort attribution, no permission-gate reading (ticket 14), and the four
-`/delegate-*` wrappers cannot be exercised until `main` fast-forwards. The
-fast-forward cannot conflict.
+`~/.claude/skills/delegate` and the four `delegate-*` wrappers symlink into
+`~/dotfiles`, the **main** checkout, so the installed skill is whatever `main` holds —
+since `ea5430b`, all of the redesign.
 
 **Open, in priority order:**
 
@@ -54,11 +52,6 @@ fast-forward cannot conflict.
 
 **Waiting on Orin** (nothing else blocks on these):
 
-- Fast-forward `main`: `git -C ~/dotfiles merge --ff-only bench-aa-effort-slugs`.
-  Checked 2026-09-10: the main checkout had no uncommitted changes, and the live
-  `~/.config/delegate/lanes.json` and `routing.json` pass this branch's
-  `catalog.py check` and rank under `delegate.py run --dry-run`, so nothing else
-  must change first.
 - Run the wizard once to close tickets 06, 07, 07b and 15's last box, and to
   confirm or correct the provisional tiers on the 19 generated lanes. From the
   worktree root:
@@ -70,7 +63,7 @@ fast-forward cannot conflict.
   sourced", and its `meter_weight` 40 is a placeholder. Find the source before
   pasting the figures.
 - Type each of the four `/delegate-*` wrappers once with a plain-language
-  constraint (ticket 11) — needs the fast-forward first.
+  constraint (ticket 11).
 - Two one-liners in his own files, outside this repo (ticket 09):
   `~/.claude/hooks/delegate-gate.py` names `{SKILL_DIR}/delegate.py`, which moved to
   `scripts/delegate.py`, so the hook advises every session to run a path that does
