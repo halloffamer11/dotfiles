@@ -18,14 +18,20 @@ Two ledgers exist and they are not the same file:
                 knows this, so only the lead writes it.
 Run ledger path: $DELEGATE_RUNS else ~/.cache/delegate/runs.jsonl.
 """
-import argparse, json, os, subprocess, sys, time
+import argparse, json, os, re, shutil, subprocess, sys, time
+from collections import Counter
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 
 try:
-    from catalog import load_catalog, CatalogError
+    from catalog import load_catalog, CatalogError, HARNESSES
 except ImportError:
-    from .catalog import load_catalog, CatalogError
+    from .catalog import load_catalog, CatalogError, HARNESSES
+
+try:
+    from rank import rank
+except ImportError:
+    from .rank import rank
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUNS = os.environ.get("DELEGATE_RUNS") or os.path.expanduser("~/.cache/delegate/runs.jsonl")
@@ -379,6 +385,247 @@ def cmd_runs(a):
     print(line)
 
 
+# ---------------------------------------------------------------- statusline
+ANSI = re.compile(r"\033\[[0-9;]*m")
+TIER_GLYPH = {1: "①", 2: "②", 3: "③", 4: "④"}
+
+
+def vis(s):
+    return len(ANSI.sub("", s))
+
+
+def pad(s, w):
+    return s + " " * max(0, w - vis(s))
+
+
+def rpad(s, w):
+    return " " * max(0, w - vis(s)) + s
+
+
+def get_colors(no_color):
+    if no_color:
+        return {
+            "R": "", "BOLD": "", "DIM": "",
+            "GRN": "", "CYAN": "", "YEL": "", "MAG": "",
+            "RED": "", "MUTE": "", "FG": "",
+            "TIER_COL": {1: "", 2: "", 3: "", 4: ""}
+        }
+    def rgb(h):
+        return f"\033[38;2;{int(h[0:2], 16)};{int(h[2:4], 16)};{int(h[4:6], 16)}m"
+    grn = rgb("78bd74")
+    cyan = rgb("1fb5bc")
+    yel = rgb("c68f32")
+    mag = rgb("be80ca")
+    red = rgb("d76563")
+    mute = rgb("8d8d89")
+    fg = rgb("e7e7e7")
+    return {
+        "R": "\033[0m", "BOLD": "\033[1m", "DIM": "\033[2m",
+        "GRN": grn, "CYAN": cyan, "YEL": yel, "MAG": mag,
+        "RED": red, "MUTE": mute, "FG": fg,
+        "TIER_COL": {1: grn, 2: cyan, 3: yel, 4: mag}
+    }
+
+
+def dur_short(t, now):
+    """Coarse: largest whole unit, floored — 4d, 2h, 46m."""
+    if t is None:
+        return ""
+    s = max(0, int(t - now))
+    return f"{s // 86400}d" if s >= 86400 else f"{s // 3600}h" if s >= 3600 else f"{s // 60}m"
+
+
+def bar(u, n=5, gated=False, c=None):
+    """Remaining as a fuel gauge: full cells from the left."""
+    if u is None:
+        return f"{c['MUTE']}{'·' * n}{c['R']}"
+    blocks = " ▏▎▍▌▋▊▉█"
+    full = min(n, int(u * n))
+    eighth = round((u * n - full) * 8) if full < n else 0
+    part = blocks[eighth] if eighth else ""
+    col = c["RED"] if gated else c["FG"]
+    return f"{col}{'█' * full}{part}{c['R']}{c['MUTE']}{'░' * (n - full - len(part))}{c['R']}"
+
+
+def pct_cell(u, gated=False, c=None):
+    if u is None:
+        return f"{c['MUTE']}—{c['R']}"
+    col = c["RED"] if gated else c["FG"]
+    return f"{col}{round(u * 100)}%{c['R']}"
+
+
+def num(u, reset, now, gated=False, c=None):
+    """'58%·2h', or a lone dash when the meter has no such window."""
+    if u is None:
+        return rpad(pct_cell(u, gated, c), 4)
+    d = dur_short(reset, now)
+    return f"{rpad(pct_cell(u, gated, c), 4)}{c['DIM']}·{d}{c['R']}"
+
+
+def gauge(u, reset, now, gated=False, c=None):
+    return f"{bar(u, gated=gated, c=c)} {num(u, reset, now, gated=gated, c=c)}"
+
+
+def get_meter_label(m_key, meter_def, all_meters):
+    harness = meter_def.get("harness") or m_key
+    harness_meters = [k for k, m in all_meters.items() if m.get("harness") == harness]
+    if len(harness_meters) <= 1:
+        return harness
+    suffix = m_key.split("-", 1)[1] if "-" in m_key else m_key
+    if suffix == "general":
+        return harness
+    return suffix
+
+
+def format_label(lbl, won_tiers, c):
+    won = sorted(won_tiers)
+    col = c["TIER_COL"][won[0]] if won else c["MUTE"]
+    return f"{col}{c['BOLD']}{lbl}{c['R']}"
+
+
+def format_badge(won_tiers, c):
+    if not won_tiers:
+        return ""
+    return "".join(f"{c['TIER_COL'][t]}{TIER_GLYPH[t]}{c['R']}" for t in sorted(won_tiers))
+
+
+def running_glyphs(running_tiers, c):
+    return "".join(
+        f"{c['TIER_COL'][t]}{TIER_GLYPH[t] * running_tiers[t]}{c['R']}"
+        for t in sorted(running_tiers)
+        if running_tiers[t] > 0
+    )
+
+
+def cmd_statusline(a):
+    no_color = a.no_color or bool(os.environ.get("NO_COLOR"))
+    c = get_colors(no_color)
+    catalog = load_catalog_or_die(a.config_dir)
+
+    cache_path = os.environ.get("DELEGATE_CACHE") or CACHE
+    if not os.path.exists(cache_path):
+        return
+    try:
+        with open(cache_path, "r", encoding="utf-8") as f:
+            usage = json.load(f)
+    except Exception:
+        return
+    if not isinstance(usage, dict) or not isinstance(usage.get("lanes"), list):
+        return
+
+    now = time.time()
+    present = {h for h in HARNESSES if shutil.which(h)}
+    routing = catalog.get("routing", {})
+    classes = routing.get("classes", {})
+    gate_threshold = routing.get("gate", 0.10)
+
+    won_by_meter = {}
+    for cls in classes:
+        try:
+            rows = rank(cls, catalog, usage, present)
+        except Exception:
+            continue
+        if rows and rows[0].get("pick"):
+            picked = rows[0]
+            m_name = picked.get("meter")
+            tier = picked.get("tier")
+            if m_name and tier is not None:
+                won_by_meter.setdefault(m_name, set()).add(tier)
+
+    ledger_path = os.environ.get("DELEGATE_LEDGER") or os.path.expanduser("~/.cache/delegate/ledger.jsonl")
+    running_by_lane = Counter()
+    if os.path.exists(ledger_path):
+        try:
+            starts = {}
+            with open(ledger_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        e = json.loads(line)
+                    except Exception:
+                        continue
+                    k = e.get("kind")
+                    tid = e.get("thread_id")
+                    if k == "dispatch.start" and tid:
+                        starts[tid] = e
+                    elif k == "dispatch.finish" and tid:
+                        starts.pop(tid, None)
+            for e in starts.values():
+                ts_str = e.get("ts")
+                timeout_s = e.get("timeout_s") or 0
+                if ts_str:
+                    try:
+                        t = datetime.fromisoformat(ts_str).timestamp()
+                    except Exception:
+                        continue
+                    if now <= t + timeout_s:
+                        lane_name = e.get("lane")
+                        if lane_name:
+                            running_by_lane[lane_name] += 1
+        except Exception:
+            return
+
+    by_meter = {L["lane"]: L for L in usage.get("lanes", []) if isinstance(L, dict) and "lane" in L}
+    all_meters = catalog.get("meters", {})
+    catalog_order = list(all_meters.keys())
+
+    def sort_key(m_key):
+        won = won_by_meter.get(m_key)
+        has_badge = bool(won)
+        min_t = min(won) if has_badge else 99
+        cat_idx = catalog_order.index(m_key) if m_key in catalog_order else 999
+        return (0 if has_badge else 1, min_t, cat_idx)
+
+    sorted_meters = sorted(catalog_order, key=sort_key)
+
+    out_lines = []
+    for m_key in sorted_meters:
+        m_def = all_meters.get(m_key, {})
+        lbl = get_meter_label(m_key, m_def, all_meters)
+        u_row = by_meter.get(m_key, {})
+        rem5 = u_row.get("remaining_5h")
+        reset5 = u_row.get("reset_5h")
+        remw = u_row.get("remaining_weekly")
+        resetw = u_row.get("reset_weekly")
+        model_remw = u_row.get("remaining_weekly_model")
+        shares5 = (model_remw is not None) or (m_key == "claude-fable")
+        if model_remw is not None:
+            remw = model_remw
+
+        is_gated = (remw is not None and remw <= gate_threshold) or (u_row.get("status") == "unavailable")
+
+        won_tiers = won_by_meter.get(m_key, set())
+        badge_str = format_badge(won_tiers, c)
+        label_str = format_label(lbl, won_tiers, c)
+
+        if shares5:
+            five_str = " " * 15
+        else:
+            five_str = f"{c['DIM']}5h{c['R']} {gauge(rem5, reset5, now, gated=False, c=c)}"
+
+        gate_char = f"{c['RED']}{c['BOLD']}✗{c['R']}" if is_gated else ""
+        wk_str = f"{c['DIM']}wk{c['R']} {gauge(remw, resetw, now, gated=is_gated, c=c)}{gate_char}"
+
+        line = f"{pad(badge_str, 3)}{pad(label_str, 7)}{pad(five_str, 17)}{pad(wk_str, 17)}"
+
+        if not a.no_running:
+            running_tiers = Counter()
+            for lane_name, count in running_by_lane.items():
+                lane_def = catalog.get("lanes", {}).get(lane_name)
+                if lane_def and lane_def.get("meter") == m_key:
+                    running_tiers[lane_def["tier"]] += count
+            glyphs = running_glyphs(running_tiers, c)
+            if glyphs:
+                line += " " + glyphs
+
+        out_lines.append(line.rstrip())
+
+    for l in out_lines:
+        print(l)
+
+
 # ---------------------------------------------------------------- main
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -417,6 +664,11 @@ def main():
     cost = sub.add_parser("cost", parents=[cfg], help="token cost for one run")
     cost.add_argument("run_dir", help="run directory with dispatch.json")
     cost.set_defaults(fn=cmd_cost)
+
+    sl = sub.add_parser("statusline", parents=[cfg], help="Claude Code statusline meter rows")
+    sl.add_argument("--no-color", action="store_true", help="strip ANSI color escapes")
+    sl.add_argument("--no-running", action="store_true", help="suppress the running agents column")
+    sl.set_defaults(fn=cmd_statusline)
 
     a = p.parse_args()
     a.fn(a)

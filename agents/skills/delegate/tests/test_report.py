@@ -246,5 +246,76 @@ with tempfile.TemporaryDirectory() as tmp:
     check("missing catalog prints report: on stderr", "report:" in err, err)
     check("missing catalog does not print the limits table", "**Current limits:**" not in out, out)
 
+    # statusline tests
+    from datetime import datetime
+    sl_cache = os.path.join(tmp, "sl_usage.json")
+    sl_now = time.time()
+    with open(sl_cache, "w") as f:
+        json.dump({"probed_at": sl_now, "lanes": [
+            {"lane": "agy-gemini", "harness": "agy", "meter": "gemini", "remaining_5h": 0.44,
+             "remaining_weekly": 0.68, "r": 0.44, "reset_5h": sl_now + 3 * 3600 + 60,
+             "reset_weekly": sl_now + 5 * 86400 + 60, "status": "ok"},
+            {"lane": "grok", "harness": "grok", "meter": None, "remaining_5h": None,
+             "remaining_weekly": 0.20, "r": 0.20, "reset_5h": None,
+             "reset_weekly": sl_now + 4 * 86400 + 60, "status": "ok"},
+            {"lane": "codex", "harness": "codex", "meter": None, "remaining_5h": 1.0,
+             "remaining_weekly": 0.08, "r": 0.08, "reset_5h": sl_now + 4 * 3600 + 60,
+             "reset_weekly": sl_now + 3 * 86400 + 60, "status": "unavailable"},
+            {"lane": "claude-general", "harness": "claude", "meter": "general", "remaining_5h": 0.58,
+             "remaining_weekly": 0.46, "r": 0.46, "reset_5h": sl_now + 2 * 3600 + 60,
+             "reset_weekly": sl_now + 4 * 86400 + 60, "status": "ok"},
+            {"lane": "claude-fable", "harness": "claude", "meter": "fable", "remaining_5h": 0.58,
+             "remaining_weekly": 0.46, "r": 0.46, "remaining_weekly_model": 0.59,
+             "reset_5h": sl_now + 2 * 3600 + 60, "reset_weekly": sl_now + 4 * 86400 + 60, "status": "ok"},
+        ]}, f)
+
+    sl_ledger = os.path.join(tmp, "sl_ledger.jsonl")
+    with open(sl_ledger, "w") as f:
+        # 1. open start inside timeout (flash-high@agy -> tier 1)
+        t_in = datetime.fromtimestamp(sl_now - 100).astimezone().isoformat(timespec="seconds")
+        f.write(json.dumps({"v": 1, "kind": "dispatch.start", "ts": t_in, "thread_id": "tid-running",
+                            "lane": "flash-high@agy", "timeout_s": 600}) + "\n")
+        # 2. open start past timeout (terra-high@codex, timeout 300s, started 1000s ago)
+        t_stale = datetime.fromtimestamp(sl_now - 1000).astimezone().isoformat(timespec="seconds")
+        f.write(json.dumps({"v": 1, "kind": "dispatch.start", "ts": t_stale, "thread_id": "tid-stale",
+                            "lane": "terra-high@codex", "timeout_s": 300}) + "\n")
+        # 3. start/finish pair (grok46-high@grok)
+        t_fin = datetime.fromtimestamp(sl_now - 200).astimezone().isoformat(timespec="seconds")
+        f.write(json.dumps({"v": 1, "kind": "dispatch.start", "ts": t_fin, "thread_id": "tid-finished",
+                            "lane": "grok46-high@grok", "timeout_s": 600}) + "\n")
+        f.write(json.dumps({"v": 1, "kind": "dispatch.finish", "ts": t_fin, "thread_id": "tid-finished",
+                            "lane": "grok46-high@grok", "secs": 50, "rc": 0, "status": "done"}) + "\n")
+
+    sl_env = {"DELEGATE_CACHE": sl_cache, "DELEGATE_LEDGER": sl_ledger}
+    rc, out, err = run(["statusline", "--no-color"] + cfg, sl_env)
+    check("statusline exits 0", rc == 0, err)
+    sl_lines = [l for l in out.splitlines() if l.strip()]
+    check("statusline prints 5 rows", len(sl_lines) == 5, f"got {len(sl_lines)} lines: {out}")
+    labels = [l.split()[1] for l in sl_lines if len(l.split()) > 1]
+    check("statusline badged sort first, rest keep catalog order",
+          sl_lines[0].startswith("①  agy") and sl_lines[1].startswith("②  grok"), out)
+    check("statusline row order has agy first, grok second",
+          "agy" in sl_lines[0] and "grok" in sl_lines[1], out)
+    check("statusline grok shows em dash for 5h", "grok   5h ·····    —" in sl_lines[1], sl_lines[1])
+    check("statusline fable leaves 5h blank", "fable                   wk" in sl_lines[2], sl_lines[2])
+    check("statusline fable shows remaining_weekly_model", "59%·4d" in sl_lines[2], sl_lines[2])
+    check("statusline codex carries ✗ when gated", "8%·3d✗" in sl_lines[4], sl_lines[4])
+    check("statusline running agent shows tier glyph on agy", sl_lines[0].endswith("①"), sl_lines[0])
+    check("statusline stale start not in running", not any("③" in l.split("wk")[-1] for l in sl_lines), out)
+    check("statusline finished start not in running", not any("②" in sl_lines[1].split("wk")[-1] for l in [sl_lines[1]]), sl_lines[1])
+
+    rc, out_norun, _ = run(["statusline", "--no-color", "--no-running"] + cfg, sl_env)
+    check("statusline --no-running drops running glyph", "①" not in out_norun.splitlines()[0].split("wk")[-1], out_norun)
+
+    rc, out_color, _ = run(["statusline"] + cfg, sl_env)
+    check("statusline with color has ANSI escapes", "\033[" in out_color, out_color)
+
+    rc, out_nocache, _ = run(["statusline"] + cfg, {"DELEGATE_CACHE": os.path.join(tmp, "missing_cache.json")})
+    check("statusline with missing cache exits 0 and prints nothing", rc == 0 and out_nocache == "", out_nocache)
+
+    rc, out_badcat, err_badcat = run(["statusline", "--config-dir", missing], sl_env)
+    check("statusline with missing catalog exits 1", rc == 1, err_badcat)
+    check("statusline missing catalog prints report: on stderr", "report:" in err_badcat, err_badcat)
+
 print("\n" + ("ALL PASS" if not fails else f"{len(fails)} FAILED: {', '.join(fails)}"))
 sys.exit(1 if fails else 0)
