@@ -293,7 +293,32 @@ def case_effort_rows_says_the_prompt_interface_has_no_prescreen():
                 f"said={said} wrote={wrote} untouched={untouched} stdout={result.stdout[:300]!r}")
 
 
+def case_effort_rows_from_several_files_combine():
+    """--effort-rows may be repeated, so two sources share one benchmark page.
+    Every file's rows arrive in order, and a bad file is named, not skipped."""
+    import setup
+    row = {"source": "t", "model": "gpt-5.6-luna", "effort": "low", "benchmark": "b",
+           "score": 4.0, "cost_usd": 1.7, "uncertain": False}
+    with tempfile.TemporaryDirectory() as td:
+        paths = []
+        for i, source in enumerate(("aa", "tbench")):
+            paths.append(os.path.join(td, f"rows{i}.json"))
+            with open(paths[-1], "w", encoding="utf-8") as f:
+                json.dump([dict(row, source=source)], f)
+        bad = os.path.join(td, "bad.json")
+        with open(bad, "w", encoding="utf-8") as f:
+            json.dump({"not": "a list"}, f)
+        rows, message = setup.load_effort_rows(paths)
+        one, _ = setup.load_effort_rows(paths[0])
+        refused, why = setup.load_effort_rows([paths[0], bad])
+    ok = ([r["source"] for r in rows] == ["aa", "tbench"] and message == ""
+          and [r["source"] for r in one] == ["aa"]
+          and refused is None and bad in why and "expected a JSON list" in why)
+    return ok, f"rows={rows} message={message!r} refused={refused} why={why!r}"
+
+
 for name, case in (
+    ("effort rows from several files combine", case_effort_rows_from_several_files_combine),
     ("all harnesses write canonical samples", case_all_harnesses_write_canonical_samples),
     ("subset filters lanes and meters", case_subset_filters_lanes_and_meters),
     ("existing values are prompt defaults", case_existing_values_are_prompt_defaults),

@@ -4,11 +4,16 @@
 One person opens this from the tier screens, once every few months, to decide
 which paid lanes to carry and what tier each deserves. The page has to answer
 at a glance: which model is better, whether a dearer effort level is buying
-anything, and what the pre-screen is about to switch off. So the chart comes
-first and everything else is the evidence behind it.
+anything, and what the pre-screen is about to switch off. So the plots come
+first, each with its own settings, and every table is the evidence behind
+them, collapsed until asked for.
 
-Self-contained: inline CSS and inline SVG, no script, no remote resource. It
-is opened as a file:// URL and may be read with the network off.
+Self-contained: inline CSS, one inline script (`assets/bench_page.js`) and the
+data it draws as inline JSON; no remote resource. It is opened as a file://
+URL and may be read with the network off. Every decision in the data (the
+kind of each point, what the pre-screen proposes off, which effort beats
+which) is made here, from `setup_tui` and `bench`; the script only filters
+what is shown, finds the frontier of it, and lays it out.
 """
 import html
 import json
@@ -32,19 +37,14 @@ NO_LANE = "no lane"
 # which is why both are drawn the same way and the legend says so.
 WEAK_PROVENANCE = ("self-reported",)
 
-SOURCES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                            "..", "assets", "sources.json")
+ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets")
+SOURCES_PATH = os.path.join(ASSETS, "sources.json")
+SCRIPT_PATH = os.path.join(ASSETS, "bench_page.js")
 
-# The four kinds of point on a chart. A lane is a thing the reader pays for
+# The four kinds of point on a plot. A lane is a thing the reader pays for
 # and can dispatch to; the rest is context, and the distinction has to survive
 # at a glance, so each kind has its own shape and fill, not just a colour.
 LANE, LANE_OFF, OWN_OTHER, COMPARATOR = "lane", "lane_off", "own_other", "comparator"
-KIND_WORDS = {
-    LANE: "a lane you carry, at the effort it runs",
-    LANE_OFF: "a lane you carry that the pre-screen proposes to switch off",
-    OWN_OTHER: "a model you carry, at an effort no lane runs",
-    COMPARATOR: "a model no lane runs, for comparison",
-}
 
 
 # --- small formatting helpers ------------------------------------------------
@@ -173,7 +173,7 @@ def _load_sources():
 
 def _cost_basis(source_meta):
     """What a dollar on this source's axis is. Costs are not comparable
-    across sources, so every chart says what its own cost is."""
+    across sources, so every plot says what its own cost is."""
     cost = (source_meta or {}).get("cost") or ""
     if cost == "usd_per_task":
         return "cost per task"
@@ -248,293 +248,33 @@ def _ordered_models(groups):
     return sorted(groups, key=key)
 
 
-# --- the chart ---------------------------------------------------------------
+def _plotted(item):
+    return item["_score"] is not None and item["_cost"] is not None and item["_cost"] > 0
 
-CHART_W, CHART_H = 760, 400
-PAD = {"l": 56, "r": 24, "t": 22, "b": 52}
-R_LANE, R_OTHER = 6.0, 5.0
-LABEL_PX = 6.3            # width of one character at the label size, roughly
-LABEL_H = 12
-# The panel ground, painted inside the SVG rather than left to the CSS
-# `background`, which is not part of the document: it goes when the plot is
-# saved out on its own or printed with background graphics off, and a hollow
-# marker's interior is that ground showing through. A CSS variable keeps it
-# theme-aware in the page; the fallback keeps it legible out of it.
+
+# --- the header glyphs ---------------------------------------------------------
+
+# The same marks the script draws, for the verdict line, which has to read with
+# the script off. A CSS variable keeps each theme-aware; the fallback keeps it
+# legible out of the page.
 GROUND = "var(--surface, #ffffff)"
-ACCENT = "var(--accent, #2a78d6)"
-OFF = "var(--off, #d03b3b)"
-MUTED = "var(--muted, #898781)"
+ACCENT = "var(--accent, #2b5fc4)"
+OFF = "var(--off, #c63d33)"
 
 
-def _log_ticks(lo, hi):
-    """Every 1-2-5 value inside [lo, hi], the ticks a person reads on a
-    dollar axis spanning a hundredfold."""
-    ticks = []
-    e = math.floor(math.log10(lo)) - 1
-    while 10 ** e <= hi:
-        for m in (1, 2, 5):
-            v = m * 10 ** e
-            if lo <= v <= hi:
-                ticks.append(v)
-        e += 1
-    return ticks
-
-
-def _log_domain(values):
-    """A round bound just outside the data on each side. The bounds use finer
-    mantissas than the ticks so a board ending at $9,604 is not drawn to
-    $20,000 with a third of the axis empty."""
-    lo, hi = min(values), max(values)
-    lo_bound = hi_bound = None
-    e = math.floor(math.log10(lo)) - 1
-    while 10 ** e <= hi * 10:
-        for m in (1, 1.5, 2, 3, 4, 5, 6, 8):
-            v = m * 10 ** e
-            if v <= lo * 0.92:
-                lo_bound = v
-            if v >= hi * 1.08 and hi_bound is None:
-                hi_bound = v
-        e += 1
-    return lo_bound or lo * 0.8, hi_bound or hi * 1.25
-
-
-def _lin_domain(values):
-    top = max(values)
-    if top <= 0:
-        return 0.0, 1.0, 0.2
-    step = 10.0 if top > 40 else (5.0 if top > 20 else 2.0)
-    hi = math.ceil(top * 1.06 / step) * step
-    return 0.0, hi, step
-
-
-def _tick_money(value):
-    if value >= 1000:
-        return f"${value:,.0f}"
-    if value >= 1:
-        return f"${value:g}"
-    return f"${value:.2f}".rstrip("0").rstrip(".")
-
-
-def _boxes_clear(placed, box):
-    x0, y0, x1, y1 = box
-    return not any(x0 < px1 and px0 < x1 and y0 < py1 and py0 < y1
-                   for px0, py0, px1, py1 in placed)
-
-
-def _place(text, cx, cy, placed, frame, width_px=LABEL_PX, prefer=None):
-    """A label beside its point that lands on no other label and no point.
-    Returns (x, y, anchor, fitted): fitted is False when no slot was clear and
-    the label took the first one anyway; the tests measure the geometry."""
-    width, height = len(text) * width_px + 3, LABEL_H
-    fx0, fy0, fx1, fy1 = frame
-    slots = [(9, 4, "start"), (-9, 4, "end"), (9, -8, "start"), (-9, -8, "end"),
-             (9, 15, "start"), (-9, 15, "end"), (0, -11, "middle"), (0, 19, "middle")]
-    if prefer:
-        slots = [s for s in slots if s[2] == prefer] + [s for s in slots if s[2] != prefer]
-    for dx, dy, anchor in slots:
-        x, y = cx + dx, cy + dy
-        x0 = x if anchor == "start" else (x - width if anchor == "end" else x - width / 2)
-        box = (x0, y - height + 3, x0 + width, y + 3)
-        if box[0] < fx0 or box[2] > fx1 or box[1] < fy0 or box[3] > fy1:
-            continue
-        if _boxes_clear(placed, box):
-            placed.append(box)
-            return x, y, anchor, True
-    x0 = cx + 9
-    placed.append((x0, cy - height + 7, x0 + width, cy + 7))
-    return x0, cy + 4, "start", False
-
-
-def _marker(kind, weak, cx, cy):
-    """The mark for one point. Shape and fill carry the kind; a dashed
-    outline carries weak provenance; hue is the third cue, never the only one."""
-    dash = ' stroke-dasharray="2.5 2"' if weak else ""
-    if kind == COMPARATOR:
-        r = R_OTHER + 1
-        d = f"M{cx:.1f},{cy - r:.1f} L{cx + r:.1f},{cy:.1f} L{cx:.1f},{cy + r:.1f} L{cx - r:.1f},{cy:.1f} Z"
-        return (f'<path d="{d}" fill="{GROUND}" stroke="{MUTED}" stroke-width="2"{dash} />')
-    if kind == OWN_OTHER or weak:
-        return (f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{R_OTHER}" fill="{GROUND}" '
-                f'stroke="{ACCENT if kind != LANE_OFF else OFF}" stroke-width="2"{dash} />')
+def _legend_glyph(kind):
+    """A lane or a proposed-off lane's mark, in a 16x16 box."""
     if kind == LANE_OFF:
-        k = 3.2
-        return (f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{R_LANE + 0.5}" fill="{OFF}" '
-                f'stroke="{GROUND}" stroke-width="2" />'
-                f'<path d="M{cx - k:.1f},{cy - k:.1f} L{cx + k:.1f},{cy + k:.1f} '
-                f'M{cx - k:.1f},{cy + k:.1f} L{cx + k:.1f},{cy - k:.1f}" '
-                f'stroke="{GROUND}" stroke-width="2" stroke-linecap="round" />')
-    return (f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{R_LANE}" fill="{ACCENT}" '
-            f'stroke="{GROUND}" stroke-width="2" />')
-
-
-def _legend_glyph(kind, weak=False):
-    """The same marker at legend size, in a 16x16 box."""
+        mark = (f'<circle cx="8" cy="8" r="6.5" fill="{OFF}" stroke="{GROUND}" stroke-width="1.5" />'
+                f'<path d="M5,5 L11,11 M5,11 L11,5" stroke="{GROUND}" stroke-width="1.8" '
+                'stroke-linecap="round" />')
+    else:
+        mark = f'<circle cx="8" cy="8" r="6" fill="{ACCENT}" stroke="{GROUND}" stroke-width="1.5" />'
     return (f'<svg class="key" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">'
-            f'{_marker(kind, weak, 8, 8)}</svg>')
+            f"{mark}</svg>")
 
 
-def _chart(source, benchmark, items, source_meta):
-    """One chart per source and benchmark: the only scope on which two costs
-    are the same kind of dollar. Score up, cost right on a log axis, one
-    model's efforts joined cheapest to dearest. A point up and to the left of
-    another dominates it, and a segment that runs flat or down to the right
-    is money buying nothing — the picture the pre-screen acts on."""
-    plotted = [r for r in items if r["_score"] is not None and r["_cost"] is not None and r["_cost"] > 0]
-    unplotted = [r for r in items if r not in plotted]
-    groups = _group_by_model(plotted)
-    order = _ordered_models(groups)
-    unit = next((r.get("score_unit") for r in items if r.get("score_unit")), None)
-    basis = _cost_basis(source_meta)
-    observed = sorted({r.get("observed") for r in items if r.get("observed")})
-    when = (observed[0] if len(observed) == 1 else f"{observed[0]} to {observed[-1]}") if observed else "date not stated"
-    url = source_meta.get("url") if source_meta else None
-    url = url or next((r.get("url") for r in items if r.get("url")), None)
-    parts = ['<section class="board">',
-             f'<h2>{_esc(benchmark)}</h2>',
-             '<p class="meta">'
-             + (f'<a href="{_esc(url)}">{_esc(source)}</a>' if url else _esc(source))
-             + f", {_esc(basis)}, observed {_esc(when)}. "
-             f"{len(items)} rows, {len(groups)} models.</p>"]
-
-    if not plotted:
-        parts.append('<p class="missing">No row on this board carries both a score and a '
-                     "positive cost, so there is nothing to draw. The rows are in the table "
-                     "below.</p>")
-        parts.append(_sweep_table(items, unit))
-        parts.append("</section>")
-        return parts
-
-    xs = [r["_cost"] for r in plotted]
-    ys = [r["_score"] for r in plotted]
-    xlo, xhi = _log_domain(xs)
-    ylo, yhi, ystep = _lin_domain(ys)
-    iw = CHART_W - PAD["l"] - PAD["r"]
-    ih = CHART_H - PAD["t"] - PAD["b"]
-    lxlo, lxhi = math.log10(xlo), math.log10(xhi)
-
-    def x(c):
-        return PAD["l"] + (math.log10(c) - lxlo) / (lxhi - lxlo) * iw
-
-    def y(s):
-        return PAD["t"] + ih - (s - ylo) / (yhi - ylo) * ih
-
-    off_points = [r for r in plotted if r["_kind"] == LANE_OFF]
-    finding = _finding(groups, order, off_points, unit)
-    svg = [f'<svg viewBox="0 0 {CHART_W} {CHART_H}" width="100%" role="img" '
-           f'aria-label="Score against {_esc(basis)} on {_esc(benchmark)} from {_esc(source)}: '
-           f'{len(plotted)} points across {len(groups)} models. {_esc(finding)} '
-           'The numbers are in the table that follows.">',
-           f'<rect x="0" y="0" width="{CHART_W}" height="{CHART_H}" fill="{GROUND}" />']
-    # gridlines and ticks: hairline, solid, recessive
-    v = ylo
-    while v <= yhi + 1e-9:
-        gy = y(v)
-        svg.append(f'<line x1="{PAD["l"]}" y1="{gy:.1f}" x2="{CHART_W - PAD["r"]}" y2="{gy:.1f}" class="grid" />')
-        svg.append(f'<text x="{PAD["l"] - 8}" y="{gy + 3.5:.1f}" class="tick" text-anchor="end">'
-                   f'{v:g}{"%" if unit == "%" else ""}</text>')
-        v += ystep
-    for t in _log_ticks(xlo, xhi):
-        gx = x(t)
-        svg.append(f'<line x1="{gx:.1f}" y1="{PAD["t"]}" x2="{gx:.1f}" y2="{CHART_H - PAD["b"]}" class="grid" />')
-        svg.append(f'<text x="{gx:.1f}" y="{CHART_H - PAD["b"] + 16}" class="tick" '
-                   f'text-anchor="middle">{_tick_money(t)}</text>')
-    svg.append(f'<line x1="{PAD["l"]}" y1="{CHART_H - PAD["b"]}" x2="{CHART_W - PAD["r"]}" '
-               f'y2="{CHART_H - PAD["b"]}" class="axis" />')
-    svg.append(f'<text x="{PAD["l"] + iw / 2:.1f}" y="{CHART_H - 12}" class="axis-title" '
-               f'text-anchor="middle">{_esc(basis)}, dollars, log scale. Left is cheaper.</text>')
-    svg.append(f'<text x="14" y="{PAD["t"] + ih / 2:.1f}" class="axis-title" '
-               f'transform="rotate(-90 14 {PAD["t"] + ih / 2:.1f})" text-anchor="middle">'
-               f'score{", percent" if unit == "%" else ""}. Up is better.</text>')
-
-    # sweeps first, so every marker sits on top of every line
-    for model in order:
-        rows = groups[model]
-        if len(rows) < 2:
-            continue
-        ours = bool(rows[0]["_lane_model"])
-        path = " ".join(f"{x(r['_cost']):.1f},{y(r['_score']):.1f}" for r in rows)
-        svg.append(f'<polyline points="{path}" fill="none" '
-                   f'stroke="{ACCENT if ours else MUTED}" stroke-width="1.5" '
-                   f'stroke-linejoin="round" opacity="{0.55 if ours else 0.45}" />')
-
-    placed = []
-    frame = (2, 2, CHART_W - 2, CHART_H - PAD["b"] + 6)
-    for r in plotted:
-        cx, cy = x(r["_cost"]), y(r["_score"])
-        placed.append((cx - 8, cy - 8, cx + 8, cy + 8))
-    points_markup = []
-    labels_markup = []
-    for model in order:
-        rows = groups[model]
-        sweep = len(rows) > 1
-        # the model's name goes once, beside its best point; the efforts go
-        # beside each point. A single point wears both in one label.
-        best = max(rows, key=lambda r: (r["_score"], -r["_cost"]))
-        for r in rows:
-            cx, cy = x(r["_cost"]), y(r["_score"])
-            kind, weak = r["_kind"], r["_weak"]
-            effort = r.get("effort") or "?"
-            name = _short_model(r.get("model"), r["_lane_model"])
-            tip = [f"{name} {effort}: {_fmt_score(r['_score'], unit)} for {_fmt_money(r['_cost'])}"]
-            if r["_lanes"]:
-                tip.append("lane " + ", ".join(r["_lanes"]))
-            elif r["_lane_model"]:
-                tip.append("no lane runs this effort")
-            else:
-                tip.append("no lane runs this model")
-            if r["_dominated_by"]:
-                tip.append(f"dominated by {r['_dominated_by']}")
-            if r["_off_reason"]:
-                tip.append("pre-screen proposes off: " + r["_off_reason"])
-            if weak:
-                tip.append("weak provenance: " + ("uncertain" if r.get("uncertain") else str(r.get("provenance"))))
-            tip.append(f"{r.get('source')}, observed {r.get('observed') or 'date not stated'}")
-            points_markup.append(
-                f'<g class="pt {kind}{" weak" if weak else ""}">'
-                f'<title>{_esc("; ".join(tip))}</title>'
-                f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="12" fill="transparent" />'
-                + _marker(kind, weak, cx, cy) + "</g>")
-            if sweep and not (kind in (LANE, LANE_OFF) or r is rows[0] or r is rows[-1] or r is best):
-                # label selectively: the lanes, the two ends and the best
-                # point; the rest is in the tooltip and the table, and six
-                # efforts a few dollars apart labelled in full read as noise
-                continue
-            if sweep:
-                text = effort + ("?" if weak else "")
-                lx, ly, anchor, _fitted = _place(text, cx, cy, placed, frame, prefer="start")
-                cls = "effort" + (" off" if kind == LANE_OFF else "")
-                labels_markup.append(f'<text x="{lx:.1f}" y="{ly:.1f}" class="{cls}" '
-                                     f'text-anchor="{anchor}">{_esc(text)}</text>')
-            else:
-                text = f"{name} {effort}" + ("?" if weak else "")
-                lx, ly, anchor, _fitted = _place(text, cx, cy, placed, frame, width_px=LABEL_PX + 0.2)
-                cls = "name" + (" off" if kind == LANE_OFF else "") + ("" if r["_lane_model"] else " cmp")
-                labels_markup.append(f'<text x="{lx:.1f}" y="{ly:.1f}" class="{cls}" '
-                                     f'text-anchor="{anchor}">{_esc(text)}</text>')
-        if sweep:
-            cx, cy = x(best["_cost"]), y(best["_score"])
-            text = _short_model(best.get("model"), best["_lane_model"])
-            lx, ly, anchor, _fitted = _place(text, cx, cy - 14, placed, frame, width_px=LABEL_PX + 0.6)
-            cls = "name" + ("" if best["_lane_model"] else " cmp")
-            labels_markup.append(f'<text x="{lx:.1f}" y="{ly:.1f}" class="{cls}" '
-                                 f'text-anchor="{anchor}">{_esc(text)}</text>')
-    svg.extend(points_markup)
-    svg.extend(labels_markup)
-    svg.append("</svg>")
-
-    parts.append("<figure>")
-    parts.extend(svg)
-    parts.append(f"<figcaption>{_esc(finding)}</figcaption>")
-    parts.append("</figure>")
-    if unplotted:
-        names = ", ".join(sorted({f"{_short_model(r.get('model'), r['_lane_model'])} {r.get('effort')}"
-                                  for r in unplotted}))
-        parts.append(f'<p class="aside">Not drawn, no usable score or cost: {_esc(names)}. '
-                     "Their rows are in the table.</p>")
-    parts.append(_sweep_table(items, unit))
-    parts.append("</section>")
-    return parts
-
+# --- what each board says -------------------------------------------------------
 
 def _finding(groups, order, off_points, unit):
     """The sentence a sighted reader takes from the shape, for the caption
@@ -576,8 +316,139 @@ def _finding(groups, order, off_points, unit):
     return " ".join(sentences)
 
 
+NOTHING_TO_DRAW = ("No row on this board carries both a score and a positive cost, so there is "
+                   "nothing to draw. The rows are in its table.")
+
+
+def _boards(items):
+    """{(source, benchmark): rows}, ordered so the board where a decision can
+    be made comes first: most carried lanes measured at the effort they run,
+    then a composite index before its components, then most of our models."""
+    boards = defaultdict(list)
+    for r in items:
+        boards[(r.get("source") or "?", r.get("benchmark") or "?")].append(r)
+
+    def board_key(key):
+        rows = boards[key]
+        return (-sum(1 for r in rows if r["_kind"] in (LANE, LANE_OFF)),
+                not any(r.get("composite") for r in rows),
+                -sum(1 for r in rows if r["_lane_model"]), key)
+
+    return [(key, boards[key]) for key in sorted(boards, key=board_key)]
+
+
+def _board_facts(source, benchmark, items, source_meta):
+    """What one board is and what it says, shared by the plot's data and its
+    table in the evidence section."""
+    plotted = [r for r in items if _plotted(r)]
+    groups = _group_by_model(plotted)
+    unit = next((r.get("score_unit") for r in items if r.get("score_unit")), None)
+    observed = sorted({r.get("observed") for r in items if r.get("observed")})
+    when = (observed[0] if len(observed) == 1 else f"{observed[0]} to {observed[-1]}") if observed else "date not stated"
+    url = (source_meta or {}).get("url") or next((r.get("url") for r in items if r.get("url")), None)
+    if plotted:
+        off_points = [r for r in plotted if r["_kind"] == LANE_OFF]
+        finding = _finding(groups, _ordered_models(groups), off_points, unit)
+    else:
+        finding = NOTHING_TO_DRAW
+    unplotted = sorted({f"{_short_model(r.get('model'), r['_lane_model'])} {r.get('effort')}"
+                        for r in items if not _plotted(r)})
+    return {"source": source, "benchmark": benchmark,
+            "composite": any(bool(r.get("composite")) for r in items),
+            "basis": _cost_basis(source_meta), "url": url, "when": when, "unit": unit,
+            "finding": finding, "rows": len(items),
+            "models": len({_model_key(r) for r in items}), "unplotted": unplotted}
+
+
+def _point(r, lanes):
+    """One row as the script draws it."""
+    at = [{"name": n, "harness": lanes[n].get("harness"), "tier": lanes[n].get("tier")}
+          for n in r["_lanes"]]
+    harness = sorted({lane["harness"] for lane in at if lane["harness"]}) or \
+        sorted({lanes[n].get("harness") for n in r["_model_lanes"] if lanes[n].get("harness")})
+    tiers = [lane["tier"] for lane in at if isinstance(lane["tier"], int)]
+    if r.get("uncertain"):
+        provenance = "uncertain"
+    else:
+        provenance = str(r.get("provenance") or "unlabelled")
+    return {"model": _model_key(r), "name": _short_model(r.get("model"), r["_lane_model"]),
+            "published": r.get("model"), "ours": bool(r["_lane_model"]),
+            "effort": r.get("effort") or "?", "score": r["_score"], "cost": r["_cost"],
+            "plotted": _plotted(r), "kind": r["_kind"], "weak": r["_weak"], "lanes": at,
+            "harness": harness, "tier": min(tiers) if tiers else None,
+            "off": r["_off_reason"], "beatenBy": r["_dominated_by"],
+            "provenance": provenance, "observed": r.get("observed")}
+
+
+def plot_data(effort_rows, lanes_doc, proposals=None):
+    """Everything the plots draw, as one JSON-ready dict: every board with its
+    points, the two boards the page opens on, and the harnesses, efforts and
+    tiers the settings offer."""
+    if proposals is None:
+        proposals = _proposals(lanes_doc, effort_rows)
+    items = _annotate(effort_rows, lanes_doc, proposals)
+    sources = _load_sources()
+    lanes = _lanes(lanes_doc)
+    boards = []
+    for i, ((source, benchmark), rows) in enumerate(_boards(items)):
+        board = _board_facts(source, benchmark, rows, sources.get(source) or {})
+        board["id"] = f"b{i}"
+        board["points"] = [_point(r, lanes) for r in rows]
+        boards.append(board)
+    # Two plots to start: the board a decision is made on, and the best board
+    # from another source if there is one, else the next board of this one.
+    defaults = [b["id"] for b in boards[:1]]
+    if boards:
+        other = next((b for b in boards if b["source"] != boards[0]["source"]), None)
+        other = other or (boards[1] if len(boards) > 1 else None)
+        if other:
+            defaults.append(other["id"])
+    efforts = {r.get("effort") for r in items if r.get("effort")}
+    return {"boards": boards, "defaults": defaults,
+            "harnesses": sorted({lane.get("harness") for lane in lanes.values() if lane.get("harness")}),
+            "efforts": sorted(efforts, key=_effort_key),
+            "tiers": sorted({lane.get("tier") for lane in lanes.values() if isinstance(lane.get("tier"), int)})}
+
+
+def _json_for_script(data):
+    """JSON that cannot end the script element it sits in, whatever a
+    benchmark page printed as a model name."""
+    text = json.dumps(data, separators=(",", ":"), ensure_ascii=False)
+    return text.replace("&", "\\u0026").replace("<", "\\u003c").replace(">", "\\u003e")
+
+
+def _script():
+    with open(SCRIPT_PATH, encoding="utf-8") as f:
+        text = f.read()
+    if "</script" in text.lower():
+        raise ValueError(f"{SCRIPT_PATH} must not contain a closing script tag")
+    return text
+
+
+def _plots_section(effort_rows, lanes_doc, proposals):
+    out = ['<section class="plots">', "<h2>Score against cost</h2>"]
+    if effort_rows is None:
+        return out + [_missing("Per-effort"), "</section>"]
+    data = plot_data(effort_rows, lanes_doc, proposals)
+    if not data["boards"]:
+        return out + ["<p>No per-effort rows.</p>", "</section>"]
+    out += ['<p class="lede">Up is better and left is cheaper. The amber line is the best score '
+            "the money buys, and everything in the shade under it is beaten by a point on the "
+            "line. Each plot is one benchmark from one source, because a dollar on one board is "
+            "not a dollar on another. Hover a point for its lane and tier.</p>",
+            '<div id="plots"></div>',
+            '<button id="add-plot" type="button" class="add" hidden>Add a plot</button>',
+            '<noscript><p class="missing">The plots need JavaScript. Every number is in the '
+            "tables under “The numbers”.</p></noscript>",
+            f'<script type="application/json" id="bench-data">{_json_for_script(data)}</script>',
+            "</section>"]
+    return out
+
+
+# --- the evidence: every table, collapsed ---------------------------------------
+
 def _sweep_table(items, unit):
-    """The chart as a table: each model's efforts in order, with the step
+    """The plot as a table: each model's efforts in order, with the step
     from the previous effort, so 'is xhigh worth 44 percent more' is a number."""
     groups = _group_by_model(items)
     order = _ordered_models(groups)
@@ -643,68 +514,115 @@ def _sweep_table(items, unit):
     return "\n".join(out)
 
 
-def _chart_legend():
-    keys = [(LANE, False, KIND_WORDS[LANE]),
-            (LANE_OFF, False, KIND_WORDS[LANE_OFF]),
-            (OWN_OTHER, False, KIND_WORDS[OWN_OTHER]),
-            (COMPARATOR, False, KIND_WORDS[COMPARATOR]),
-            (OWN_OTHER, True, "dashed: uncertain or self-reported. Uncertain rows never decide "
-                              "anything; self-reported rows still count in the pre-screen's rule.")]
-    items = "".join(f'<li>{_legend_glyph(k, w)}<span>{_esc(t)}</span></li>' for k, w, t in keys)
-    return (f'<ul class="legend">{items}</ul>'
-            "<p>A line joins one model's efforts, cheapest to dearest. A point up and to "
-            "the left of another beats it: at least the score for no more money. A segment "
-            "that runs flat or down to the right is money buying nothing, and that is what "
-            "the pre-screen switches a lane off for. Each board has its own cost axis; a "
-            "dollar on one board is not a dollar on another.</p>")
+def _details(summary, count, body):
+    """One collapsed block of the evidence. Closed by default: the tables are
+    there to check a figure, not to read."""
+    counted = f' <span class="count">{_esc(count)}</span>' if count else ""
+    return [f"<details><summary>{summary}{counted}</summary>", '<div class="inner">', *body,
+            "</div>", "</details>"]
 
 
-def _charts_section(effort_rows, lanes_doc, proposals):
+def _boards_block(effort_rows, lanes_doc, proposals):
     if effort_rows is None:
-        return ["<h2>Score against cost</h2>", _missing("Per-effort")]
+        return []
     items = _annotate(effort_rows, lanes_doc, proposals)
     if not items:
-        return ["<h2>Score against cost</h2>", "<p>No per-effort rows.</p>"]
+        return []
     sources = _load_sources()
-    boards = defaultdict(list)
+    body = ["<p>Each model's efforts in order, with what each step up costs and buys. A "
+            "lane's efforts sit in full ink; a comparator is nobody's lane.</p>"]
+    boards = _boards(items)
+    for (source, benchmark), rows in boards:
+        facts = _board_facts(source, benchmark, rows, sources.get(source) or {})
+        src = (f'<a href="{_esc(facts["url"])}">{_esc(source)}</a>' if facts["url"] else _esc(source))
+        body += [f'<details class="board"><summary>{_esc(benchmark)} '
+                 f'<span class="count">{_esc(source)}, {facts["rows"]} rows</span></summary>',
+                 f'<p class="meta">{src}, {_esc(facts["basis"])}, observed {_esc(facts["when"])}.</p>',
+                 f'<p class="finding">{_esc(facts["finding"])}</p>']
+        if facts["unplotted"] and facts["finding"] != NOTHING_TO_DRAW:
+            body.append(f'<p class="aside">Not drawn, no usable score or cost: '
+                        f'{_esc(", ".join(facts["unplotted"]))}.</p>')
+        unit = next((r.get("score_unit") for r in rows if r.get("score_unit")), None)
+        body += [_sweep_table(rows, unit), "</details>"]
+    return _details("Each board, model by model", f"{len(boards)} boards", body)
+
+
+def _rows_block(effort_rows, lanes_doc, proposals):
+    if effort_rows is None:
+        return []
+    items = _annotate(effort_rows, lanes_doc, proposals)
+    if not items:
+        return []
+    items.sort(key=lambda r: (r.get("source") or "", r.get("benchmark") or "",
+                              r["_lane_model"] is None, _model_key(r), _effort_key(r.get("effort"))))
+    head = ["source", "benchmark", "published as", "lane model", "effort", "score", "cost",
+            "observed", "provenance", "note"]
+    body = ["<p>Where each number came from. A row that names no lane model is the "
+            "board's context; a published name that ought to be one of ours needs a "
+            "<span class=\"mono\">published_as</span> entry on its lane. Rows with weak "
+            "provenance are flagged.</p>",
+            '<div class="scroll"><table class="rows"><thead><tr>'
+            + "".join(f'<th{" class=num" if h in ("score", "cost") else ""}>{_esc(h)}</th>' for h in head)
+            + "</tr></thead><tbody>"]
     for r in items:
-        boards[(r.get("source") or "?", r.get("benchmark") or "?")].append(r)
+        url = r.get("url")
+        src = f'<a href="{_esc(url)}">{_esc(r.get("source"))}</a>' if url else _esc(r.get("source"))
+        note = []
+        if r.get("uncertain"):
+            note.append("uncertain")
+        if r["_dominated_by"]:
+            note.append(f"beaten by {r['_dominated_by']}")
+        if r["_off_reason"]:
+            note.append("proposed off")
+        unit = r.get("score_unit")
+        body.append(f'<tr class="{"weak" if r["_weak"] else ""}{" nolane" if r["_lane_model"] is None else ""}">'
+                    f"<td>{src}</td><td>{_esc(r.get('benchmark'))}</td>"
+                    f"<td>{_esc(r.get('model'))}</td>"
+                    f'<td>{"<span class=mono>" + _esc(r["_lane_model"]) + "</span>" if r["_lane_model"] else NO_LANE}</td>'
+                    f"<td>{_esc(r.get('effort'))}</td>"
+                    f'<td class="num">{_esc(_fmt_score(r["_score"], unit)) if r["_score"] is not None else _esc(r.get("score"))}</td>'
+                    f'<td class="num">{_esc(_fmt_money(r["_cost"])) if r["_cost"] is not None else _esc(r.get("cost_usd"))}</td>'
+                    f"<td>{_esc(r.get('observed'))}</td>"
+                    f'<td class="{"flag" if r.get("provenance") in WEAK_PROVENANCE else ""}">{_esc(r.get("provenance"))}</td>'
+                    f"<td>{_esc(', '.join(note)) if note else ''}</td></tr>")
+    body.append("</tbody></table></div>")
+    return _details("Every row, with its provenance", f"{len(items)} rows", body)
 
-    def board_key(key):
-        # the board with the most carried lanes measured at the effort they
-        # run comes first: that is where a decision can be made
-        rows = boards[key]
-        return (-sum(1 for r in rows if r["_kind"] in (LANE, LANE_OFF)),
-                -sum(1 for r in rows if r["_lane_model"]), key)
 
-    out = ['<section class="charts">', _chart_legend()]
-    for key in sorted(boards, key=board_key):
-        source, benchmark = key
-        out.extend(_chart(source, benchmark, boards[key], sources.get(source) or {}))
-    out.append("</section>")
-    return out
-
-
-# --- the header ----------------------------------------------------------------
-
-def _header(lanes_doc, effort_rows, proposals):
+def _catalog_block(lanes_doc, proposals):
     lanes = _lanes(lanes_doc)
-    off = _proposed_off(proposals)
-    carried = sum(1 for name, lane in lanes.items() if lane.get("enabled", True) and lane.get("effort") != "ultra")
-    out = ["<header>", "<h1>Benchmark evidence for the lane catalog</h1>",
-           "<p>Read-only. Tiers are set in the wizard; nothing is entered here. "
-           f"{len(lanes)} lanes in the catalog, {carried} carried."
-           + (f" {len(effort_rows)} per-effort rows." if effort_rows else "")
-           + "</p>"]
-    if off:
-        names = "; ".join(f'<span class="mono">{_esc(n)}</span>, {_esc(why)}' for n, why in sorted(off.items()))
-        out.append(f'<p class="verdict">{_legend_glyph(LANE_OFF)} The pre-screen proposes to '
-                   f"switch off {len(off)} lane{'s' if len(off) != 1 else ''}: {names}.</p>")
-    elif effort_rows:
-        out.append(f'<p class="verdict">{_legend_glyph(LANE)} The pre-screen proposes to switch '
-                   "nothing off: no carried lane is beaten by a cheaper effort of its own model.</p>")
-    out.append("</header>")
-    return out
+    if not lanes:
+        return []
+    meters = (lanes_doc or {}).get("meters") or {}
+    head = ["lane", "model", "effort", "tier", "meter", "plan", "pre-screen"]
+    body = ["<p>The incoming catalog, read-only. The last column is the pre-screen's "
+            "proposal for each lane; the wizard is where it is accepted or overruled.</p>",
+            '<div class="scroll"><table class="catalog"><thead><tr>'
+            + "".join(f"<th>{_esc(h)}</th>" for h in head) + "</tr></thead><tbody>"]
+    for name in lanes:
+        lane = lanes[name]
+        meter = meters.get(lane.get("meter")) or {}
+        plan = meter.get("plan")
+        price = meter.get("price_month")
+        plan_cell = f"{_esc(plan)}, ${price}/mo" if plan and price is not None else _esc(plan)
+        verdict = proposals.get(name)
+        if verdict is None:
+            verdict_cell = ('<span class="quiet">recorded off</span>' if lane.get("enabled") is False
+                            else '<span class="quiet">—</span>')
+        else:
+            on, why = verdict
+            cls = "" if on else ("off" if is_dominated_reason(why) else "quiet")
+            verdict_cell = f'<span class="{cls}">{"carry" if on else "off"}: {_esc(why)}</span>'
+        body.append("<tr>"
+                    f'<td><span class="mono">{_esc(name)}</span></td>'
+                    f'<td><span class="mono">{_esc(lane.get("model"))}</span></td>'
+                    f"<td>{_esc(lane.get('effort'))}</td>"
+                    f'<td class="num">{_esc(lane.get("tier"))}</td>'
+                    f"<td>{_esc(lane.get('meter'))}</td>"
+                    f"<td>{plan_cell}</td>"
+                    f"<td>{verdict_cell}</td></tr>")
+    body.append("</tbody></table></div>")
+    return _details("Catalog lanes and the pre-screen's proposal", f"{len(lanes)} lanes", body)
 
 
 # --- per-model benchmark scores (bench.collect) -------------------------------
@@ -759,24 +677,25 @@ def _figure_cell(entries, model_lanes, model, column_max):
     return f'<td class="num {"attributed" if attributed else "unattributed"}">' + "".join(parts) + "</td>"
 
 
-def _scores_section(bench, lanes_doc):
+def _scores_block(bench, lanes_doc):
     """Epoch and Artificial Analysis figures, one row per catalog model. A
     figure is attributed to a lane only when it was measured at that lane's
     effort; a figure measured at an effort no lane runs, or at an unstated
     effort, is shown as that model's context and belongs to no lane."""
+    title = "Published scores per model, from Epoch AI and Artificial Analysis"
+    if bench is None:
+        return _details(title, "", [_missing("Benchmark collection")])
     epoch_names = bench.get("epoch_benchmarks") or []
     aa_names = bench.get("aa_columns") or []
     models = bench.get("models") or {}
-    out = ["<h2>Published scores per model</h2>",
-           "<p>Catalog models only, from Epoch AI and Artificial Analysis. Each figure "
-           "carries the effort it was measured at. A figure in full ink was measured at an "
-           "effort one of your lanes runs, and that lane is named; a figure in grey was "
-           "measured at an effort no lane runs, or at an effort the source did not state, "
-           "and belongs to no lane. The bar under a figure is its share of the column's "
-           "largest, so two models compare down a column. Comparators are not collected "
-           "here; they are on the charts above.</p>"]
+    out = ["<p>Catalog models only. Each figure carries the effort it was measured at. A "
+           "figure in full ink was measured at an effort one of your lanes runs, and that "
+           "lane is named; a figure in grey was measured at an effort no lane runs, or at an "
+           "effort the source did not state, and belongs to no lane. The bar under a figure is "
+           "its share of the column's largest, so two models compare down a column. "
+           "Comparators are not collected here; they are on the plots above.</p>"]
     if not models:
-        return out + [_missing("Epoch benchmark")]
+        return _details(title, "", out + [_missing("Epoch benchmark")])
     aa_skipped = bench.get("aa_skipped")
     lanes = _lanes(lanes_doc)
 
@@ -829,157 +748,166 @@ def _scores_section(bench, lanes_doc):
         out.append(f'<p class="aside">Artificial Analysis data is missing ({_esc(aa_skipped)}).</p>')
     notes = bench.get("notes") or []
     if notes:
-        out.append('<details><summary>Collection notes</summary><ul class="notes">'
+        out.append('<details class="notes-block"><summary>Collection notes</summary><ul class="notes">'
                    + "".join(f"<li>{_esc(n)}</li>" for n in notes) + "</ul></details>")
-    return out
-
-
-# --- every row, with its provenance -------------------------------------------
-
-def _rows_section(effort_rows, lanes_doc, proposals):
-    if effort_rows is None:
-        return []
-    items = _annotate(effort_rows, lanes_doc, proposals)
-    if not items:
-        return []
-    items.sort(key=lambda r: (r.get("source") or "", r.get("benchmark") or "",
-                              r["_lane_model"] is None, _model_key(r), _effort_key(r.get("effort"))))
-    head = ["source", "benchmark", "published as", "lane model", "effort", "score", "cost",
-            "observed", "provenance", "note"]
-    out = ["<h2>Every row, with its provenance</h2>",
-           "<p>Where each number came from. A row that names no lane model is the "
-           "board's context; a published name that ought to be one of ours needs a "
-           "<span class=\"mono\">published_as</span> entry on its lane. Rows with weak "
-           "provenance are flagged.</p>",
-           '<div class="scroll"><table class="rows"><thead><tr>'
-           + "".join(f'<th{" class=num" if h in ("score", "cost") else ""}>{_esc(h)}</th>' for h in head)
-           + "</tr></thead><tbody>"]
-    for r in items:
-        url = r.get("url")
-        src = f'<a href="{_esc(url)}">{_esc(r.get("source"))}</a>' if url else _esc(r.get("source"))
-        note = []
-        if r.get("uncertain"):
-            note.append("uncertain")
-        if r["_dominated_by"]:
-            note.append(f"beaten by {r['_dominated_by']}")
-        if r["_off_reason"]:
-            note.append("proposed off")
-        unit = r.get("score_unit")
-        out.append(f'<tr class="{"weak" if r["_weak"] else ""}{" nolane" if r["_lane_model"] is None else ""}">'
-                   f"<td>{src}</td><td>{_esc(r.get('benchmark'))}</td>"
-                   f"<td>{_esc(r.get('model'))}</td>"
-                   f'<td>{"<span class=mono>" + _esc(r["_lane_model"]) + "</span>" if r["_lane_model"] else NO_LANE}</td>'
-                   f"<td>{_esc(r.get('effort'))}</td>"
-                   f'<td class="num">{_esc(_fmt_score(r["_score"], unit)) if r["_score"] is not None else _esc(r.get("score"))}</td>'
-                   f'<td class="num">{_esc(_fmt_money(r["_cost"])) if r["_cost"] is not None else _esc(r.get("cost_usd"))}</td>'
-                   f"<td>{_esc(r.get('observed'))}</td>"
-                   f'<td class="{"flag" if r.get("provenance") in WEAK_PROVENANCE else ""}">{_esc(r.get("provenance"))}</td>'
-                   f"<td>{_esc(', '.join(note)) if note else ''}</td></tr>")
-    out.append("</tbody></table></div>")
-    return out
-
-
-# --- the catalog ---------------------------------------------------------------
-
-def _catalog_section(lanes_doc, proposals):
-    lanes = _lanes(lanes_doc)
-    if not lanes:
-        return []
-    meters = (lanes_doc or {}).get("meters") or {}
-    head = ["lane", "model", "effort", "tier", "meter", "plan", "pre-screen"]
-    out = ["<h2>Catalog lanes</h2>",
-           "<p>The incoming catalog, read-only. The last column is the pre-screen's "
-           "proposal for each lane; the wizard is where it is accepted or overruled.</p>",
-           '<div class="scroll"><table class="catalog"><thead><tr>'
-           + "".join(f"<th>{_esc(h)}</th>" for h in head) + "</tr></thead><tbody>"]
-    for name in lanes:
-        lane = lanes[name]
-        meter = meters.get(lane.get("meter")) or {}
-        plan = meter.get("plan")
-        price = meter.get("price_month")
-        plan_cell = f"{_esc(plan)}, ${price}/mo" if plan and price is not None else _esc(plan)
-        verdict = proposals.get(name)
-        if verdict is None:
-            verdict_cell = ('<span class="quiet">recorded off</span>' if lane.get("enabled") is False
-                            else '<span class="quiet">—</span>')
-        else:
-            on, why = verdict
-            cls = "" if on else ("off" if is_dominated_reason(why) else "quiet")
-            verdict_cell = f'<span class="{cls}">{"carry" if on else "off"}: {_esc(why)}</span>'
-        out.append("<tr>"
-                   f'<td><span class="mono">{_esc(name)}</span></td>'
-                   f'<td><span class="mono">{_esc(lane.get("model"))}</span></td>'
-                   f"<td>{_esc(lane.get('effort'))}</td>"
-                   f'<td class="num">{_esc(lane.get("tier"))}</td>'
-                   f"<td>{_esc(lane.get('meter'))}</td>"
-                   f"<td>{plan_cell}</td>"
-                   f"<td>{verdict_cell}</td></tr>")
-    out.append("</tbody></table></div>")
-    return out
+    return _details(title, f"{len(models)} models", out)
 
 
 def _missing(kind):
     return f'<p class="missing">{_esc(kind)} data is missing.</p>'
 
 
+# --- the header ----------------------------------------------------------------
+
+def _header(lanes_doc, effort_rows, proposals):
+    lanes = _lanes(lanes_doc)
+    off = _proposed_off(proposals)
+    carried = sum(1 for name, lane in lanes.items() if lane.get("enabled", True) and lane.get("effort") != "ultra")
+    out = ["<header>", "<h1>Benchmark evidence for the lane catalog</h1>",
+           "<p>Read-only. Tiers are set in the wizard; nothing is entered here. "
+           f"{len(lanes)} lanes in the catalog, {carried} carried."
+           + (f" {len(effort_rows)} per-effort rows." if effort_rows else "")
+           + "</p>"]
+    if off:
+        names = "; ".join(f'<span class="mono">{_esc(n)}</span>, {_esc(why)}' for n, why in sorted(off.items()))
+        out.append(f'<p class="verdict">{_legend_glyph(LANE_OFF)} The pre-screen proposes to '
+                   f"switch off {len(off)} lane{'s' if len(off) != 1 else ''}: {names}.</p>")
+    elif effort_rows:
+        out.append(f'<p class="verdict">{_legend_glyph(LANE)} The pre-screen proposes to switch '
+                   "nothing off: no carried lane is beaten by a cheaper effort of its own model.</p>")
+    out.append("</header>")
+    return out
+
+
 # --- style ---------------------------------------------------------------------
 
 STYLE = """
 :root { color-scheme: light;
-  --page: #f2f3f5; --surface: #ffffff; --ink: #14171c; --ink-2: #4b535e;
-  --muted: #7b8290; --grid: #e4e7eb; --rule: #d5d9df; --head: #eceef1;
-  --accent: #2a78d6; --off: #d03b3b; --off-ink: #a12727; --flag: #f7edd6; --flag-ink: #6b4d00;
+  --page: #eceee9; --surface: #fbfbf8; --ink: #1a1e1c; --ink-2: #4c5450;
+  --muted: #7c8480; --grid: #e3e6e0; --rule: #cdd2ca; --head: #f0f2ed;
+  --accent: #2b5fc4; --off: #c63d33; --off-ink: #a3291f;
+  --frontier: #c27806; --frontier-ink: #7f4d00; --flag: #f6ecd2; --flag-ink: #6b4d00;
+  --h-codex: #2b5fc4; --h-claude: #7a4cc2; --h-agy: #13866a; --h-grok: #b3306f;
+  --tier-1: #a9c2ea; --tier-2: #6d98dc; --tier-3: #3566c0; --tier-4: #163a80;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace; }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) { color-scheme: dark;
-    --page: #121417; --surface: #1a1d21; --ink: #f1f2f4; --ink-2: #b9bfc8;
-    --muted: #8a919c; --grid: #2a2f36; --rule: #363c45; --head: #22262c;
-    --accent: #3987e5; --off: #d9403f; --off-ink: #f08a8a; --flag: #3a2f12; --flag-ink: #e9c36a; } }
+    --page: #121513; --surface: #1a1e1b; --ink: #edf0ec; --ink-2: #b3bbb5;
+    --muted: #848c87; --grid: #272c28; --rule: #363c37; --head: #20241f;
+    --accent: #6b95f0; --off: #e2574c; --off-ink: #f39a90;
+    --frontier: #f0a53a; --frontier-ink: #f6c47a; --flag: #3a2f12; --flag-ink: #e9c36a;
+    --h-codex: #6b95f0; --h-claude: #a784e6; --h-agy: #3cbf98; --h-grok: #e0679f;
+    --tier-1: #2c4470; --tier-2: #3f67ad; --tier-3: #6f98e6; --tier-4: #b4cdf7; } }
 :root[data-theme="dark"] { color-scheme: dark;
-  --page: #121417; --surface: #1a1d21; --ink: #f1f2f4; --ink-2: #b9bfc8;
-  --muted: #8a919c; --grid: #2a2f36; --rule: #363c45; --head: #22262c;
-  --accent: #3987e5; --off: #d9403f; --off-ink: #f08a8a; --flag: #3a2f12; --flag-ink: #e9c36a; }
+  --page: #121513; --surface: #1a1e1b; --ink: #edf0ec; --ink-2: #b3bbb5;
+  --muted: #848c87; --grid: #272c28; --rule: #363c37; --head: #20241f;
+  --accent: #6b95f0; --off: #e2574c; --off-ink: #f39a90;
+  --frontier: #f0a53a; --frontier-ink: #f6c47a; --flag: #3a2f12; --flag-ink: #e9c36a;
+  --h-codex: #6b95f0; --h-claude: #a784e6; --h-agy: #3cbf98; --h-grok: #e0679f;
+  --tier-1: #2c4470; --tier-2: #3f67ad; --tier-3: #6f98e6; --tier-4: #b4cdf7; }
 * { box-sizing: border-box; }
 body { font-family: var(--sans); font-size: 14px; line-height: 1.5; color: var(--ink);
   background: var(--page); margin: 0; padding-block: 2rem 4rem; padding-inline: 1.25rem; }
-main { max-width: 64rem; margin: 0 auto; }
-h1 { font-size: 1.5rem; font-weight: 600; letter-spacing: -0.015em; margin: 0 0 0.35rem; }
-h2 { font-size: 1.1rem; font-weight: 600; letter-spacing: -0.01em; margin: 2.4rem 0 0.4rem; }
-p { margin: 0.35rem 0; max-width: 46rem; }
+main { max-width: 84rem; margin: 0 auto; }
+h1 { font-size: 1.55rem; font-weight: 650; letter-spacing: -0.02em; margin: 0 0 0.35rem; }
+h2 { font-size: 1.15rem; font-weight: 650; letter-spacing: -0.01em; margin: 2.4rem 0 0.3rem; }
+h3 { font-size: 1rem; font-weight: 650; margin: 1.1rem 0 0.15rem; }
+p { margin: 0.35rem 0; max-width: 48rem; }
 a { color: inherit; text-decoration: underline; text-decoration-color: var(--muted); text-underline-offset: 2px; }
-a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 header p { color: var(--ink-2); }
 .verdict { font-size: 1rem; color: var(--ink); margin-top: 0.8rem; max-width: none; }
 .verdict .key { vertical-align: -3px; margin-right: 0.35rem; }
 .mono { font-family: var(--mono); font-size: 0.93em; }
-.meta { color: var(--ink-2); margin-top: -0.2rem; }
+.meta { color: var(--ink-2); margin: 0.25rem 0 0; }
 .aside, .quiet { color: var(--muted); }
 .aside { font-size: 13px; }
 .off { color: var(--off-ink); }
 .flag { background: var(--flag); color: var(--flag-ink); }
 .missing { border: 1px dashed var(--muted); padding: 0.5rem 0.7rem; background: var(--surface); }
-.charts { margin-top: 1.6rem; }
-.legend { list-style: none; padding: 0; margin: 0.4rem 0 0.2rem; display: flex; flex-wrap: wrap;
-  gap: 0.3rem 1.4rem; color: var(--ink-2); font-size: 13px; }
-.legend li { display: inline-flex; align-items: flex-start; gap: 0.45rem; max-width: 30rem; }
-.legend .key { flex: none; margin-top: 3px; }
-.charts > p { color: var(--ink-2); font-size: 13px; }
-.board { margin-top: 2rem; }
-.board h2 { margin-top: 0; }
-figure { margin: 0.8rem 0 0; }
-figure svg { display: block; border: 1px solid var(--rule); border-radius: 3px; }
-figcaption { margin: 0.6rem 0 0.2rem; font-size: 15px; line-height: 1.45; max-width: 46rem; }
+.lede { color: var(--ink-2); }
+.plot { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px;
+  padding: 0.9rem 1.1rem 1.1rem; margin-top: 1.1rem; }
+.plot-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; }
+.pick { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.6rem; color: var(--ink-2); max-width: 100%; }
+.pick select { font: inherit; font-size: 1.1rem; font-weight: 650; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--rule); border-radius: 4px; padding: 0.25rem 0.45rem; max-width: 100%; }
+.finding { font-size: 15px; line-height: 1.45; margin-top: 0.45rem; max-width: 60rem; }
+.plot-body { display: grid; grid-template-columns: minmax(0, 1fr) 15.5rem; gap: 1.1rem; margin-top: 0.7rem; align-items: start; }
+.chart { position: relative; }
+.chart > svg { display: block; width: 100%; height: auto; border: 1px solid var(--grid); border-radius: 4px;
+  cursor: crosshair; touch-action: none; user-select: none; -webkit-user-select: none; }
+.hint { font-size: 12.5px; color: var(--muted); margin-top: 0.35rem; }
+.reset { position: absolute; top: 0.5rem; right: 0.5rem; font: inherit; font-size: 12.5px; padding: 0.2rem 0.6rem;
+  background: var(--surface); color: var(--ink); border: 1px solid var(--rule); border-radius: 4px; cursor: pointer; }
+.tip { position: absolute; z-index: 2; pointer-events: none; background: var(--surface); color: var(--ink);
+  border: 1px solid var(--rule); border-radius: 4px; box-shadow: 0 3px 10px rgba(0, 0, 0, 0.14);
+  font-size: 12.5px; line-height: 1.4; padding: 0.45rem 0.6rem; max-width: 21rem; }
+.tip .tip-head { font-weight: 650; }
+.tip .quiet { color: var(--muted); }
+.tip .flag { background: none; }
+.rail { display: flex; flex-direction: column; gap: 0.75rem; font-size: 13px; min-width: 0; }
+.rail fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.rail legend { font-weight: 650; color: var(--ink); padding: 0; margin-bottom: 0.2rem; }
+.radios { display: flex; flex-direction: column; }
+.radios label, .check { display: flex; align-items: center; gap: 0.4rem; color: var(--ink-2); cursor: pointer; }
+.radios input, .check input, .model-row input { margin: 0; accent-color: var(--accent); }
+.chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.chip { font: inherit; font-size: 12.5px; padding: 0.1rem 0.55rem; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--rule); background: transparent; color: var(--muted); text-decoration: line-through; }
+.chip[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--surface); text-decoration: none; }
+.model-tools input { width: 100%; font: inherit; padding: 0.25rem 0.45rem; color: var(--ink);
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 4px; }
+.bulk { display: flex; flex-wrap: wrap; gap: 0.2rem 0.8rem; margin: 0.35rem 0 0.25rem; }
+.model-list { max-height: 16rem; overflow-y: auto; border: 1px solid var(--grid); border-radius: 4px; padding: 0.1rem 0.45rem 0.3rem; }
+.model-list .group { margin: 0.35rem 0 0.05rem; font-size: 12px; color: var(--muted); }
+.model-row { display: flex; align-items: center; gap: 0.4rem; cursor: pointer; }
+.model-row .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-row .tag { font-size: 11.5px; color: var(--muted); }
+.quiet-button { font: inherit; font-size: 12.5px; background: none; border: 0; padding: 0; cursor: pointer;
+  color: var(--ink-2); text-decoration: underline; text-decoration-color: var(--muted); text-underline-offset: 2px; }
+.wide { align-self: flex-start; }
+.add { font: inherit; margin-top: 1rem; padding: 0.35rem 0.9rem; cursor: pointer; color: var(--ink);
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 4px; }
+.plot-legend { display: flex; flex-wrap: wrap; gap: 0.25rem 1.1rem; margin-top: 0.5rem; font-size: 12.5px; color: var(--ink-2); }
+.plot-legend .item { display: inline-flex; align-items: center; gap: 0.35rem; }
+.plot-legend .note { color: var(--muted); }
+.key { flex: none; }
 svg text { font-family: var(--sans); fill: var(--ink-2); }
 svg .grid { stroke: var(--grid); stroke-width: 1; }
 svg .axis { stroke: var(--rule); stroke-width: 1; }
-svg text.tick { font-size: 10.5px; fill: var(--muted); font-variant-numeric: tabular-nums; }
-svg text.axis-title { font-size: 11px; fill: var(--muted); }
-svg text.effort { font-size: 11px; fill: var(--ink); }
-svg text.name { font-size: 11px; font-weight: 600; fill: var(--ink); }
-svg text.name.cmp { font-weight: 500; fill: var(--ink-2); }
-svg text.off { text-decoration: line-through; fill: var(--off-ink); }
-svg .pt:hover circle:first-of-type { fill: var(--grid); opacity: 0.6; }
+svg text.tick { font-size: 11px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+svg text.axis-title { font-size: 11.5px; fill: var(--muted); }
+svg text.empty { font-size: 14px; fill: var(--muted); }
+svg .wash { fill: var(--frontier); opacity: 0.1; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) svg .wash { opacity: 0.06; } }
+:root[data-theme="dark"] svg .wash { opacity: 0.06; }
+svg .steps { fill: none; stroke: var(--frontier); stroke-width: 2.4; stroke-linejoin: round; }
+svg .halo { fill: none; stroke: var(--frontier); stroke-width: 2; }
+svg .sweep { fill: none; stroke: var(--muted); stroke-width: 1.2; opacity: 0.3; }
+svg .sweep.ours { stroke: var(--accent); opacity: 0.45; }
+svg text.label { font-size: 11.5px; fill: var(--ink); paint-order: stroke; stroke: var(--surface);
+  stroke-width: 3px; stroke-linejoin: round; }
+svg text.label.cmp { fill: var(--ink-2); }
+svg text.label.fr { font-weight: 650; fill: var(--frontier-ink); }
+svg text.label.off { text-decoration: line-through; fill: var(--off-ink); }
+svg .band { fill: var(--accent); fill-opacity: 0.08; stroke: var(--accent); stroke-dasharray: 3 3; }
+svg.focusing .pt, svg.focusing text.label, svg.focusing .sweep { opacity: 0.16; }
+svg.focusing .hot { opacity: 1 !important; }
+svg.focusing .sweep.hot { stroke-width: 2.2; }
+.frontier-table .quiet { font-size: 13px; }
+table.frontier tr.hot td { background: var(--head); }
+table.frontier tr.off-row td { color: var(--off-ink); }
+.evidence > p { color: var(--ink-2); }
+.evidence details { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; margin-top: 0.6rem; }
+.evidence summary { padding: 0.55rem 0.9rem; font-weight: 650; cursor: pointer; }
+.evidence details[open] > summary { border-bottom: 1px solid var(--grid); }
+.evidence .inner { padding: 0.3rem 0.9rem 0.8rem; }
+.evidence details details { border: 0; border-top: 1px solid var(--grid); border-radius: 0; margin: 0; }
+.evidence details details summary { font-weight: 600; padding-inline: 0; }
+.evidence .count { font-weight: 400; color: var(--muted); margin-left: 0.35rem; }
+.evidence .notes-block summary { font-weight: 400; }
 .scroll { overflow-x: auto; margin: 0.6rem 0 0.4rem; }
 table { border-collapse: collapse; width: 100%; font-size: 13px; background: var(--surface); }
 th, td { padding: 0.32rem 0.55rem; text-align: left; vertical-align: top;
@@ -988,6 +916,7 @@ th { background: var(--head); font-weight: 600; color: var(--ink-2); white-space
 th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
 td.model { border-right: 1px solid var(--grid); }
 .sub { display: block; font-size: 12px; color: var(--muted); font-family: var(--sans); }
+.sub.off { color: var(--off-ink); }
 .sweep tr.first td { border-top: 1px solid var(--rule); }
 .sweep td.step { color: var(--ink-2); }
 .sweep tr.comparator td, .sweep tr.own_other td { color: var(--ink-2); }
@@ -1005,11 +934,11 @@ td.model { border-right: 1px solid var(--grid); }
 .scores tr.sub th { font-weight: 500; font-size: 12px; text-align: center; }
 .rows tr.weak td { border-left: 3px solid var(--flag-ink); }
 .rows tr.nolane td { color: var(--ink-2); }
-details { margin-top: 0.6rem; color: var(--ink-2); }
-summary { cursor: pointer; }
 .notes { font-size: 12.5px; padding-left: 1.2rem; }
 footer { margin-top: 3rem; color: var(--muted); font-size: 12.5px; }
-@media (max-width: 40rem) { body { padding-inline: 1rem; } figcaption { font-size: 14px; } }
+@media (max-width: 62rem) { .plot-body { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 40rem) { body { padding-inline: 1rem; } .plot { padding-inline: 0.7rem; } .finding { font-size: 14px; } }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
 """.strip()
 
 
@@ -1031,18 +960,18 @@ def render(bench, lanes_doc, effort_rows=None):
         "<main>",
     ]
     chunks.extend(_header(lanes_doc, effort_rows, proposals))
-    chunks.extend(_charts_section(effort_rows, lanes_doc, proposals))
-    if bench is None:
-        chunks.append("<h2>Published scores per model</h2>")
-        chunks.append(_missing("Benchmark collection"))
-    else:
-        chunks.extend(_scores_section(bench, lanes_doc))
-    chunks.extend(_rows_section(effort_rows, lanes_doc, proposals))
-    chunks.extend(_catalog_section(lanes_doc, proposals))
+    chunks.extend(_plots_section(effort_rows, lanes_doc, proposals))
+    chunks += ['<section class="evidence">', "<h2>The numbers</h2>",
+               "<p>Every figure behind the plots and the pre-screen, closed until you open one.</p>"]
+    chunks.extend(_boards_block(effort_rows, lanes_doc, proposals))
+    chunks.extend(_rows_block(effort_rows, lanes_doc, proposals))
+    chunks.extend(_catalog_block(lanes_doc, proposals))
+    chunks.extend(_scores_block(bench, lanes_doc))
+    chunks.append("</section>")
     chunks.append("<footer>Epoch AI data is CC-BY 4.0. Artificial Analysis data requires "
                   "attribution. Terminal-Bench scores an agent-model pair, never a model "
                   "alone. Costs are never comparable across sources.</footer>")
-    chunks.extend(["</main>", "</body>", "</html>", ""])
+    chunks.extend(["</main>", f"<script>\n{_script()}</script>", "</body>", "</html>", ""])
     return "\n".join(chunks)
 
 

@@ -25,7 +25,7 @@ each ticket's Status line names.
 **`main` is at `ea5430b`, the tip of `bench-aa-effort-slugs`** (2026-09-11): `main`
 was merged into the branch on 2026-09-10, then `main` fast-forwarded to it. Commits
 after `ea5430b` are on the branch only until `main` fast-forwards again. Suite green
-at 389 `PASS` lines across 12 files after ticket 18 (two of the twelve report one
+at 394 `PASS` lines across 12 files after ticket 22 (two of the twelve report one
 summary line rather than one line per assertion, so other counts run higher). The
 branch contains `delegate-lane-catalog`, which is history now, not a second thread.
 Tickets 01-17 are implemented, and the catalog carries every effort each codex model
@@ -60,7 +60,9 @@ since `ea5430b`, all of the redesign.
   The carry page should propose `astra-xhigh@codex` off as "high wins on tbench" and
   the three `ultra` lanes off as never carried. With
   `--effort-rows .scratch/delegate-redesign/_data/aa-accepted.json` instead, it
-  proposes the same lanes off, the first as "high wins on aa". It should also settle
+  proposes the same lanes off, the first as "high wins on aa". `--effort-rows` may be
+  repeated; with both files, the `o` key's page opens on the AA Intelligence Index
+  and on Terminal-Bench, one plot each, with the tables collapsed. It should also settle
   `astra-high@codex`: `main`'s notes (`6e0f0b1`) said its price is sourced as
   `10 / 1 / 12.5 / 50`, but the stowed catalog has `price` null with the note "not
   sourced", and its `meter_weight` 40 is a placeholder. Find the source before

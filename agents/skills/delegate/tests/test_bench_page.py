@@ -1,18 +1,25 @@
 #!/usr/bin/env python3
-"""Tests for bench_page.py. Run: python3 tests/test_bench_page.py"""
+"""Tests for bench_page.py. Run: python3 tests/test_bench_page.py
+
+The plots are drawn by assets/bench_page.js from JSON the page carries. The
+decisions in that JSON are Python's and are tested here directly; the frontier
+and the layout are the script's, and the tests that need them run its pure
+`layout` under node when node is on PATH."""
 import copy
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
-import xml.etree.ElementTree as ET
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DELEGATE_DIR = os.path.abspath(os.path.join(HERE, "..", "scripts"))
 FIXTURE = os.path.join(HERE, "fixture", "bench-epoch.csv")
-REAL_DATA = os.path.abspath(os.path.join(HERE, "..", "..", "..", "..",
-                                         ".scratch", "delegate-redesign", "_data"))
+REPO = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
+REAL_DATA = os.path.join(REPO, ".scratch", "delegate-redesign", "_data")
+STOWED_LANES = os.path.join(REPO, "stow", "delegate", ".config", "delegate", "lanes.json")
 sys.path.insert(0, DELEGATE_DIR)
 
 import bench
@@ -21,6 +28,7 @@ import catalog
 import setup_tui
 
 LANES = catalog.load_json(os.path.abspath(os.path.join(HERE, "..", "assets", "samples", "lanes.json")))
+NODE = shutil.which("node")
 fails = 0
 
 
@@ -37,31 +45,54 @@ def remote_resource(html):
     return re.search(r"""(?:src|href)\s*=\s*['"]https?://[^'"]*\.(?:js|css)""", html, re.I)
 
 
-def svgs_of(html):
-    return re.findall(r"<svg viewBox.*?</svg>", html, re.S)
+def data_of(html):
+    """The JSON the plots draw, or None when the page carries none."""
+    m = re.search(r'<script type="application/json" id="bench-data">(.*?)</script>', html, re.S)
+    return json.loads(m.group(1)) if m else None
 
 
-def label_boxes(svg):
-    """Label boxes as the placer sees them, to test that none overprint."""
-    boxes = []
-    for lx, ly, anchor, text in re.findall(
-            r'<text x="([\d.-]+)" y="([\d.-]+)" class="(?:effort|name)[^"]*" '
-            r'text-anchor="(\w+)">([^<]*)<', svg):
-        lx, ly, w = float(lx), float(ly), len(text) * 6.5 + 3
-        x0 = lx if anchor == "start" else (lx - w if anchor == "end" else lx - w / 2)
-        boxes.append((x0, ly - 9, x0 + w, ly + 3, text))
-    return boxes
+def board_named(data, benchmark):
+    return next(b for b in data["boards"] if b["benchmark"] == benchmark)
 
 
-def overlaps(boxes):
-    return [(a[4], b[4]) for i, a in enumerate(boxes) for b in boxes[i + 1:]
-            if a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]]
+def overlaps(labels):
+    boxes = [(l["box"], l["text"]) for l in labels]
+    return [(a[1], b[1]) for i, a in enumerate(boxes) for b in boxes[i + 1:]
+            if a[0][0] < b[0][2] and b[0][0] < a[0][2] and a[0][1] < b[0][3] and b[0][1] < a[0][3]]
 
 
-def marks(svg):
-    """[(kind classes, first mark tag)] for every point on a chart."""
-    return re.findall(r'<g class="pt ([^"]*)"><title>[^<]*</title>'
-                      r'<circle[^>]*fill="transparent" />(<(?:circle|path)[^>]*>)', svg)
+LAYOUT_DRIVER = r"""
+const fs = require("fs"), vm = require("vm");
+const mod = { exports: {} };
+vm.runInNewContext(fs.readFileSync(process.argv[2], "utf8"), { module: mod });
+const P = mod.exports;
+const cases = JSON.parse(fs.readFileSync(0, "utf8"));
+process.stdout.write(JSON.stringify({ W: P.W, H: P.H, PAD: P.PAD, out: cases.map(({ board, state }) => {
+  const st = Object.assign({ frontier: "lanes", labels: "lanes", lines: true, zoom: null }, state);
+  for (const k of ["hiddenModels", "hiddenHarness", "hiddenEfforts"]) st[k] = new Set(state[k] || []);
+  const lay = P.layout(board, st);
+  return { frontier: lay.frontier.map((p) => p.name + " " + p.effort),
+           labels: lay.labels.map((l) => ({ text: l.text, box: l.box })),
+           xTicks: lay.xTicks.map((t) => t.text), yTicks: lay.yTicks.map((t) => t.text),
+           points: lay.points.map((q) => [q.x, q.y]), shown: lay.shown.length };
+}) }));
+"""
+
+
+def run_layout(cases):
+    """The script's own layout for each (board, settings) case, run under
+    node. None when node is not on PATH."""
+    if not NODE:
+        return None
+    with tempfile.TemporaryDirectory() as td:
+        driver = os.path.join(td, "driver.js")
+        with open(driver, "w", encoding="utf-8") as f:
+            f.write(LAYOUT_DRIVER)
+        result = subprocess.run([NODE, driver, bench_page.SCRIPT_PATH], input=json.dumps(cases),
+                                capture_output=True, text=True, timeout=60)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr[-800:])
+    return json.loads(result.stdout)
 
 
 EFFORT_ROWS = [
@@ -111,9 +142,10 @@ try:
            "claude-fable-5-1" in html and "DeepSWE" in html and "98.0" in html
            and "<table" in html and "Read-only" in html,
            html[:400])
-    record("fixture page has no remote stylesheet or script",
+    record("the page loads nothing remote, and its one script is inline",
            remote_resource(html) is None and "<style>" in html
-           and "<script" not in html.lower() and "<link" not in html.lower(),
+           and not re.search(r"<script[^>]*\bsrc\s*=", html, re.I)
+           and "<link" not in html.lower() and html.count("<script>") == 1,
            html[:200])
 except Exception as e:
     record("page from epoch fixture", False, repr(e))
@@ -123,7 +155,7 @@ try:
     record("page with bench=None names missing data",
            "Benchmark collection data is missing" in html
            and "Per-effort data is missing" in html
-           and "<svg viewBox" not in html,
+           and data_of(html) is None,
            html[:400])
 except Exception as e:
     record("page with bench=None names missing data", False, repr(e))
@@ -136,7 +168,7 @@ try:
            and "19.0" in html and "$9.1" in html and "2026-09-10" in html
            and "example.invalid/leaderboard" in html and "gpt-5.6-sol" in html,
            html[:400])
-    record("effort page has no remote stylesheet or script", remote_resource(html) is None)
+    record("effort page loads nothing remote", remote_resource(html) is None)
 except Exception as e:
     record("page with per-effort rows carries every number and its provenance", False, repr(e))
 
@@ -161,8 +193,38 @@ try:
 except Exception as e:
     record("light and dark are both defined, and the toggle wins both ways", False, repr(e))
 
+try:
+    collected = bench.collect(copy.deepcopy(ASTRA), epoch_csv=FIXTURE, key_file=None)
+    page = bench_page.render(collected, ASTRA, SWEEP)
 
-# --- the chart ---------------------------------------------------------------------
+    def inside_details(index):
+        before = page[:index]
+        return len(re.findall(r"<details\b", before)) > before.count("</details>")
+
+    tables = [m.start() for m in re.finditer(r"<table\b", page)]
+    kinds = set(re.findall(r'<table class="(\w+)"', page))
+    record("every table is collapsed until asked for, under the plots",
+           kinds == {"sweep", "rows", "catalog", "scores"}
+           and all(inside_details(i) for i in tables)
+           and not re.search(r"<details[^>]*\bopen\b", page)
+           and page.find('id="plots"') < page.find("<details"),
+           f"kinds={kinds} tables={len(tables)}")
+except Exception as e:
+    record("every table is collapsed until asked for, under the plots", False, repr(e))
+
+try:
+    hostile = dict(SWEEP[5], model='</script><script>alert(1)</script> & "GLM"')
+    page = bench_page.render(None, ASTRA, [hostile])
+    data = data_of(page)
+    record("a model name from a benchmark page cannot end the data's script element",
+           data is not None and data["boards"][0]["points"][0]["name"] == hostile["model"]
+           and "<script>alert" not in page,
+           page[page.find("bench-data"):][:300])
+except Exception as e:
+    record("a model name from a benchmark page cannot end the data's script element", False, repr(e))
+
+
+# --- the plot data ------------------------------------------------------------------
 try:
     rows = [
         {"source": "t", "model": "m-a", "effort": "low", "benchmark": "B1",
@@ -173,7 +235,7 @@ try:
          "score": 5.0, "cost_usd": 3.0, "uncertain": False},
         {"source": "u", "model": "gpt-5.6-sol", "effort": "high", "benchmark": "B1",
          "score": 7.0, "cost_usd": 4.0, "uncertain": False},
-        # drawn dashed and hollow, and named weak in the table
+        # weak: drawn dashed and hollow, and named weak in the table
         {"source": "t", "model": "m-c", "effort": "low", "benchmark": "B1",
          "score": 9.0, "cost_usd": 9.0, "uncertain": True},
         # cannot be placed on a log axis; listed as not drawn
@@ -181,56 +243,53 @@ try:
          "score": 9.0, "cost_usd": 0, "uncertain": False},
     ]
     page = bench_page.render(None, LANES, rows)
-    svgs = svgs_of(page)
-    for svg in svgs:
-        ET.fromstring(svg)          # raises if the markup is malformed
+    data = data_of(page)
     boards = {(r["source"], r["benchmark"]) for r in rows}
-    weak = [m for m in marks(page) if "weak" in m[0]]
-    record("one well-formed chart per source and benchmark, never two sources on one cost axis",
-           len(svgs) == len(boards)
-           and "Not drawn" in page and "m-d low" in page
-           and len(weak) == 1 and "stroke-dasharray" in weak[0][1]
-           and 'fill="var(--surface' in weak[0][1]
+    seen = {(b["source"], b["benchmark"]) for b in data["boards"]}
+    t_b1 = next(b for b in data["boards"] if (b["source"], b["benchmark"]) == ("t", "B1"))
+    weak = [p for b in data["boards"] for p in b["points"] if p["weak"]]
+    record("one board per source and benchmark, never two sources on one cost axis",
+           len(data["boards"]) == len(boards) and seen == boards
+           and t_b1["unplotted"] == ["m-d low"]
+           and [p["plotted"] for p in t_b1["points"] if p["name"] == "m-d"] == [False]
+           and [p["name"] for p in weak] == ["m-c"]
            and "a dollar on one board is not a dollar on another" in page,
-           f"svgs={len(svgs)} boards={len(boards)} weak={weak}")
+           f"boards={seen} unplotted={t_b1['unplotted']} weak={weak}")
 except Exception as e:
-    record("one well-formed chart per source and benchmark, never two sources on one cost axis",
-           False, repr(e))
+    record("one board per source and benchmark, never two sources on one cost axis", False, repr(e))
 
 try:
     page = bench_page.render(None, LANES, [])
-    record("the chart section says so when there are no rows",
-           "No per-effort rows" in page and "<svg viewBox" not in page)
+    record("the plot section says so when there are no rows",
+           "No per-effort rows" in page and data_of(page) is None)
     page = bench_page.render(None, LANES, [{"source": "t", "model": "m", "effort": "low",
                                             "benchmark": "B", "score": 1, "cost_usd": 0}])
     record("a board with nothing drawable says so and still tables the row",
-           "nothing to draw" in page and "<svg viewBox" not in page and "<td>low</td>" in page)
+           "nothing to draw" in page and "<td>low</td>" in page
+           and data_of(page)["boards"][0]["finding"].startswith("No row on this board"))
 except Exception as e:
-    record("the chart section says so when there are no rows", False, repr(e))
+    record("the plot section says so when there are no rows", False, repr(e))
 
 try:
-    page = bench_page.render(None, ASTRA, SWEEP)
-    svg = svgs_of(page)[0]
+    data = bench_page.plot_data(SWEEP, ASTRA)
+    points = board_named(data, "Terminal-Bench 4.0")["points"]
     kinds = {}
-    for cls, tag in marks(svg):
-        kinds.setdefault(cls.split()[0], []).append(tag)
-    lane_ok = all("<circle" in t and 'fill="var(--accent' in t for t in kinds.get("lane", []))
-    off_ok = all("<circle" in t and 'fill="var(--off' in t for t in kinds.get("lane_off", []))
-    own_ok = all("<circle" in t and 'fill="var(--surface' in t and 'stroke="var(--accent'
-                 in t for t in kinds.get("own_other", []))
-    cmp_ok = all("<path" in t and 'fill="var(--surface' in t and 'stroke="var(--muted'
-                 in t for t in kinds.get("comparator", []))
+    for p in points:
+        kinds.setdefault(p["kind"], []).append(p)
+    lane = next(p for p in points if p["kind"] == "lane")
+    page = bench_page.render(None, ASTRA, SWEEP)
     record("a lane, a proposed-off lane, our model at another effort and a comparator "
-           "each have their own mark, by shape and fill, not hue alone",
-           set(kinds) == {"lane", "lane_off", "own_other", "comparator"}
-           and len(kinds["lane"]) == 4 and len(kinds["lane_off"]) == 1
-           and len(kinds["own_other"]) == 1 and len(kinds["comparator"]) == 2
-           and lane_ok and off_ok and own_ok and cmp_ok
+           "are each their own kind, and a lane point carries its harness and tier",
+           {k: len(v) for k, v in kinds.items()} == {"lane": 4, "lane_off": 1, "own_other": 1, "comparator": 2}
+           and lane["harness"] == ["codex"] and lane["tier"] == ASTRA["lanes"][lane["lanes"][0]["name"]]["tier"]
+           and all(p["harness"] == [] and not p["ours"] for p in kinds["comparator"])
+           and kinds["own_other"][0]["harness"] == ["codex"] and kinds["own_other"][0]["lanes"] == []
+           and data["harnesses"] == sorted({l["harness"] for l in ASTRA["lanes"].values()})
            and bench_page.NO_LANE in page,
-           f"kinds={ {k: len(v) for k, v in kinds.items()} } lane={lane_ok} off={off_ok} own={own_ok} cmp={cmp_ok}")
+           f"kinds={ {k: len(v) for k, v in kinds.items()} } lane={lane}")
 except Exception as e:
     record("a lane, a proposed-off lane, our model at another effort and a comparator "
-           "each have their own mark, by shape and fill, not hue alone", False, repr(e))
+           "are each their own kind, and a lane point carries its harness and tier", False, repr(e))
 
 # --- the page is the evidence for the pre-screen, so it has to say the same -----
 try:
@@ -238,15 +297,17 @@ try:
     proposals = setup_tui.propose_enabled(ASTRA, SWEEP)
     off = sorted(name for name, (on, _why) in proposals.items()
                  if not on and setup_tui.is_dominated_reason(_why))
-    struck = re.findall(r'<g class="pt lane_off"><title>([^<]*)</title>', page)
+    struck = [p for p in board_named(data_of(page), "Terminal-Bench 4.0")["points"] if p["kind"] == "lane_off"]
     verdict = re.search(r'<p class="verdict">(.*?)</p>', page, re.S).group(1)
-    caption = re.search(r"<figcaption>(.*?)</figcaption>", page, re.S).group(1)
+    finding = board_named(data_of(page), "Terminal-Bench 4.0")["finding"]
     body = page[page.find('<table class="sweep">'):]
     order = re.findall(r"<td>(low|medium|high|xhigh|max)</td><td>", body)
     record("the page marks what the wizard marks, names it at the top, and shows the arithmetic",
-           off == ["astra-xhigh@codex"] and len(struck) == 1 and "xhigh" in struck[0]
+           off == ["astra-xhigh@codex"] and len(struck) == 1 and struck[0]["effort"] == "xhigh"
+           and struck[0]["off"] == "high wins on tbench" and struck[0]["beatenBy"] == "high"
            and "astra-xhigh@codex" in verdict and "high wins on tbench" in verdict
-           and "scores the same as high" in caption and "$81.1 more (+4%)" in caption
+           and "scores the same as high" in finding and "$81.1 more (+4%)" in finding
+           and f'<p class="finding">{finding}</p>' in page
            and "off: high wins on tbench" in body
            and order[:5] == ["low", "medium", "high", "xhigh", "max"]
            and "GPT-6 Astra" in page and "gpt-6-astra" in page,
@@ -272,12 +333,12 @@ try:
             board.append({"source": "aa", "model": "gpt-5.6-luna", "effort": effort,
                           "benchmark": bench_name, "score": score, "cost_usd": cost,
                           "uncertain": False, "provenance": "unlabelled"})
-    page = bench_page.render(None, luna, board)
-    struck = re.findall(r'<g class="pt lane_off"><title>([^<]*)</title>', page)
-    kept = re.findall(r'<g class="pt lane"><title>([^<]*)</title>', page)
+    every = [p for b in bench_page.plot_data(board, luna)["boards"] for p in b["points"]]
+    struck = [p for p in every if p["kind"] == "lane_off"]
+    kept = [p for p in every if p["kind"] == "lane"]
     record("a lane dominated over its source is struck on every board of that source",
-           len(struck) == 3 and all("dominated by medium" in t for t in struck)
-           and len(kept) == 3 and not any("dominated by" in t for t in kept),
+           len(struck) == 3 and all(p["beatenBy"] == "medium" and p["effort"] == "high" for p in struck)
+           and len(kept) == 3 and not any(p["beatenBy"] for p in kept),
            f"struck={struck} kept={kept}")
 except Exception as e:
     record("a lane dominated over its source is struck on every board of that source",
@@ -296,70 +357,48 @@ except Exception as e:
     record("the sweep table gives each step's score and cost delta", False, repr(e))
 
 try:
-    page = bench_page.render(None, ASTRA, SWEEP)
-    svg = svgs_of(page)[0]
-    circles = [(float(a), float(b)) for a, b in
-               re.findall(r'<circle cx="([\d.]+)" cy="([\d.]+)" r="(?:5|6)', svg)]
-    closest = min(((cx - dx) ** 2 + (cy - dy) ** 2) ** 0.5
-                  for i, (cx, cy) in enumerate(circles) for dx, dy in circles[i + 1:])
-    clash = overlaps(label_boxes(svg))
-    inside = all(2 <= cx <= bench_page.CHART_W - 2 and 2 <= cy for cx, cy in circles)
-    ticks = re.findall(r'class="tick" text-anchor="middle">([^<]+)<', svg)
-    record("no two labels overprint, every point is inside the frame, and a tick is a dollar",
-           not clash and inside and closest >= 8
-           and ticks and all(t.startswith("$") and "e+" not in t for t in ticks),
-           f"closest={closest:.1f} clash={clash} inside={inside} ticks={ticks}")
-except Exception as e:
-    record("no two labels overprint, every point is inside the frame, and a tick is a dollar",
-           False, repr(e))
-
-try:
-    page = bench_page.render(None, ASTRA, SWEEP)
-    svg = svgs_of(page)[0]
-    ground = re.search(r'<rect[^>]*fill="([^"]*)"', svg)
-    first_child = svg.split(">", 1)[1].lstrip().startswith("<rect")
-    label = re.search(r'aria-label="([^"]*)"', svg).group(1)
-    record("the panel ground is in the document, hollow interiors are that ground, "
-           "and the image label carries the finding",
-           ground and ground.group(1) == bench_page.GROUND and first_child
-           and ground.group(1).startswith("var(--surface, #")
-           and "Proposed off: astra-xhigh@codex" in label and "table that follows" in label,
-           f"ground={ground and ground.group(1)} first={first_child} label={label!r}")
-except Exception as e:
-    record("the panel ground is in the document, hollow interiors are that ground, "
-           "and the image label carries the finding", False, repr(e))
-
-try:
     # self-reported rows still count in the wizard's rule; uncertain never do.
     # Either way the figure must not look verified.
     rows = [dict(SWEEP[2], provenance="self-reported"), dict(SWEEP[3])]
     page = bench_page.render(None, ASTRA, rows)
-    svg = svgs_of(page)[0]
-    weak = [m for m in marks(svg) if "weak" in m[0]]
+    weak = [p for p in data_of(page)["boards"][0]["points"] if p["weak"]]
     body = page[page.find('<table class="sweep">'):]
-    record("a weakly-sourced figure is drawn dashed and hollow and flagged in the table",
-           len(weak) == 1 and "stroke-dasharray" in weak[0][1]
-           and 'fill="var(--surface' in weak[0][1]
+    record("a weakly-sourced figure is marked weak and flagged in the table",
+           len(weak) == 1 and weak[0]["provenance"] == "self-reported" and weak[0]["kind"] == "lane"
            and 'class="flag">self-reported' in body
-           and 'class="lane weak' in body
-           and "self-reported rows still count" in page,
+           and 'class="lane weak' in body,
            f"weak={weak}")
 except Exception as e:
-    record("a weakly-sourced figure is drawn dashed and hollow and flagged in the table",
-           False, repr(e))
+    record("a weakly-sourced figure is marked weak and flagged in the table", False, repr(e))
 
 try:
     # a board where a carried lane is measured at its own effort comes before
-    # one that only has our models at efforts no lane runs
+    # one that only has our models at efforts no lane runs, and the page opens
+    # on it and on the best board from another source
     other = [{"source": "swerb", "model": "gpt-5.6-sol", "effort": e, "benchmark": "SWE Refactor Bench",
               "score": s, "cost_usd": c, "uncertain": False}
              for e, s, c in (("low", 7.0, 5.9), ("medium", 6.5, 6.0), ("xhigh", 9.5, 19.1), ("max", 28.5, 143.5))]
     page = bench_page.render(None, ASTRA, other + SWEEP)
-    record("the board with carried lanes measured at their effort comes first",
-           page.find("Terminal-Bench 4.0</h2>") < page.find("SWE Refactor Bench</h2>")
-           and page.find("SWE Refactor Bench</h2>") != -1)
+    data = data_of(page)
+    names = {b["id"]: b["benchmark"] for b in data["boards"]}
+    record("the board with carried lanes measured at their effort comes first, and the page "
+           "opens on it and on another source",
+           [names[i] for i in data["defaults"]] == ["Terminal-Bench 4.0", "SWE Refactor Bench"]
+           and page.find("Terminal-Bench 4.0 <span") < page.find("SWE Refactor Bench <span") != -1,
+           f"defaults={[names[i] for i in data['defaults']]}")
+    # one source, two boards with the same lanes on them: the composite index
+    # opens first, because it is the board that reads best at a glance
+    index = [dict(r, benchmark="Index", composite=True, source="aa") for r in SWEEP[:5]]
+    parts = [dict(r, benchmark="A part", source="aa") for r in SWEEP[:5]]
+    data = bench_page.plot_data(parts + index, ASTRA)
+    record("among boards that tie on lanes, the composite index opens first",
+           [data["boards"][0]["benchmark"], data["boards"][0]["composite"]] == ["Index", True]
+           and [b["benchmark"] for b in data["boards"]] == ["Index", "A part"]
+           and data["defaults"] == ["b0", "b1"],
+           f"boards={[b['benchmark'] for b in data['boards']]} defaults={data['defaults']}")
 except Exception as e:
-    record("the board with carried lanes measured at their effort comes first", False, repr(e))
+    record("the board with carried lanes measured at their effort comes first, and the page "
+           "opens on it and on another source", False, repr(e))
 
 
 # --- the trap: a per-model score is never a lane's score by default --------------
@@ -448,7 +487,7 @@ except Exception as e:
            "each attributed on its own, and the AA effort attributed too", False, repr(e))
 
 
-# --- comparators are context, and the real data stays legible --------------------
+# --- comparators are context -------------------------------------------------------
 try:
     page = bench_page.render(None, ASTRA, SWEEP)
     body = page[page.find('<table class="sweep">'):]
@@ -461,25 +500,88 @@ except Exception as e:
     record("a comparator is present as context and marked as nobody's lane, never dropped",
            False, repr(e))
 
+
+# --- the script's frontier and layout, under node ------------------------------------
+def lane_point(name, effort, score, cost, lanes=True, model=None):
+    return {"model": model or name, "name": name, "published": name, "ours": lanes, "effort": effort,
+            "score": score, "cost": cost, "plotted": True, "kind": "lane" if lanes else "comparator",
+            "weak": False, "lanes": [{"name": f"{name}-{effort}@codex", "harness": "codex", "tier": 1}] if lanes else [],
+            "harness": ["codex"] if lanes else [], "tier": 1 if lanes else None, "off": None,
+            "beatenBy": None, "provenance": "unlabelled", "observed": None}
+
+
 try:
-    real = [os.path.join(REAL_DATA, f) for f in ("tbench-accepted.json", "swerb-accepted.json")]
-    live = os.path.expanduser("~/.config/delegate/lanes.json")
-    if all(os.path.isfile(p) for p in real) and os.path.isfile(live):
+    toy = {"id": "b0", "benchmark": "toy", "unit": None, "points": [
+        lane_point("a", "low", 10.0, 1.0), lane_point("b", "low", 20.0, 2.0),
+        lane_point("c", "low", 15.0, 3.0),
+        # the same score as b for more money: beaten, so not on the frontier
+        lane_point("d", "low", 20.0, 4.0),
+        lane_point("e", "max", 30.0, 5.0, lanes=False)]}
+    runs = run_layout([{"board": toy, "state": {"frontier": "lanes"}},
+                       {"board": toy, "state": {"frontier": "shown"}},
+                       {"board": toy, "state": {"frontier": "lanes", "hiddenModels": ["b"]}},
+                       {"board": toy, "state": {"frontier": "shown", "hiddenHarness": ["none"]}},
+                       {"board": toy, "state": {"frontier": "off"}}])
+    if runs is None:
+        record("the frontier is every point that scores more than everything cheaper", True,
+               "(node not on PATH; skipped)")
+    else:
+        got = [r["frontier"] for r in runs["out"]]
+        record("the frontier is every point that scores more than everything cheaper, "
+               "over what is shown",
+               got == [["a low", "b low"], ["a low", "b low", "e max"],
+                       ["a low", "c low", "d low"], ["a low", "b low"], []],
+               f"got={got}")
+except Exception as e:
+    record("the frontier is every point that scores more than everything cheaper", False, repr(e))
+
+try:
+    fractions = {"id": "b0", "benchmark": "fr", "unit": None,
+                 "points": [lane_point("a", "low", 0.62, 1.0), lane_point("b", "low", 0.88, 3.0)]}
+    board = board_named(bench_page.plot_data(SWEEP, ASTRA), "Terminal-Bench 4.0")
+    runs = run_layout([{"board": board, "state": {"labels": "all"}},
+                       {"board": fractions, "state": {}}])
+    if runs is None:
+        record("no two labels overprint, every point is inside the frame, and a tick is a dollar", True,
+               "(node not on PATH; skipped)")
+    else:
+        W, H, PAD = runs["W"], runs["H"], runs["PAD"]
+        sweep, frac = runs["out"]
+        inside = all(PAD["l"] <= x <= W - PAD["r"] and PAD["t"] <= y <= H - PAD["b"] for x, y in sweep["points"])
+        framed = all(PAD["l"] <= l["box"][0] and l["box"][2] <= W - PAD["r"] and PAD["t"] <= l["box"][1]
+                     and l["box"][3] <= H - PAD["b"] for l in sweep["labels"])
+        record("no two labels overprint, every point is inside the frame, and a tick is a dollar",
+               not overlaps(sweep["labels"]) and inside and framed and len(sweep["labels"]) >= 5
+               and sweep["xTicks"] and all(t.startswith("$") and "e" not in t for t in sweep["xTicks"]),
+               f"labels={[l['text'] for l in sweep['labels']]} ticks={sweep['xTicks']}")
+        record("the score axis fits the points shown, not zero",
+               float(frac["yTicks"][0]) >= 0.5 and float(frac["yTicks"][-1]) <= 1.0,
+               f"yTicks={frac['yTicks']}")
+except Exception as e:
+    record("no two labels overprint, every point is inside the frame, and a tick is a dollar",
+           False, repr(e))
+
+try:
+    real = [os.path.join(REAL_DATA, f) for f in ("aa-accepted.json", "tbench-accepted.json", "swerb-accepted.json")]
+    if all(os.path.isfile(p) for p in real) and NODE:
         rows = []
         for p in real:
             with open(p, encoding="utf-8") as f:
                 rows.extend(json.load(f))
-        with open(live, encoding="utf-8") as f:
-            lanes = json.load(f)
-        page = bench_page.render(None, lanes, rows)
-        clashes = [overlaps(label_boxes(svg)) for svg in svgs_of(page)]
-        record("the real data draws with no overprinted label on either board",
-               len(clashes) == 2 and not any(clashes), f"clashes={clashes}")
+        lanes = catalog.load_json(STOWED_LANES)
+        data = data_of(bench_page.render(None, lanes, rows))
+        runs = run_layout([{"board": b, "state": {"labels": "all", "frontier": mode}}
+                           for b in data["boards"] for mode in ("lanes", "shown")])
+        clashes = [overlaps(r["labels"]) for r in runs["out"]]
+        record("the real data draws every board with no overprinted label",
+               len(data["boards"]) >= 11 and not any(clashes)
+               and all(r["frontier"] for r in runs["out"]),
+               f"boards={len(data['boards'])} clashes={[c for c in clashes if c][:2]}")
     else:
-        record("the real data draws with no overprinted label on either board", True,
-               "(real data not present; skipped)")
+        record("the real data draws every board with no overprinted label", True,
+               "(real data or node not present; skipped)")
 except Exception as e:
-    record("the real data draws with no overprinted label on either board", False, repr(e))
+    record("the real data draws every board with no overprinted label", False, repr(e))
 
 
 sys.exit(1 if fails else 0)

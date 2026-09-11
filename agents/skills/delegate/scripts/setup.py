@@ -208,19 +208,26 @@ def ask_routing(routing_doc):
     routing_doc["gate"] = ask_fraction("gate", routing_doc["gate"])
 
 
-def load_effort_rows(path):
-    if not path:
+def load_effort_rows(paths):
+    """Every row from one file or several, in order. The pre-screen judges each
+    source on its own rows, so files from different sources combine safely."""
+    if not paths:
         return None, ""
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except OSError as e:
-        return None, f"effort-rows: {e}"
-    except json.JSONDecodeError as e:
-        return None, f"effort-rows: invalid JSON: {e}"
-    if not isinstance(data, list):
-        return None, "effort-rows: expected a JSON list"
-    return data, ""
+    if isinstance(paths, str):
+        paths = [paths]
+    rows = []
+    for path in paths:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except OSError as e:
+            return None, f"effort-rows: {e}"
+        except json.JSONDecodeError as e:
+            return None, f"effort-rows: {path}: invalid JSON: {e}"
+        if not isinstance(data, list):
+            return None, f"effort-rows: {path}: expected a JSON list"
+        rows.extend(data)
+    return rows, ""
 
 
 def confirm_and_write(lanes_doc, routing_doc, lanes_path, routing_path):
@@ -251,7 +258,9 @@ def main(argv=None):
     bench_group.add_argument("--no-bench", action="store_true", help="skip benchmark display")
     parser.add_argument("--epoch-csv", default=None, help="local Epoch CSV for bench.py")
     parser.add_argument("--aa-json", default=None, help="local Artificial Analysis JSON for bench.py")
-    parser.add_argument("--effort-rows", default=None, help="effort.py check accepted.json for the pre-screen and benchmark page")
+    parser.add_argument("--effort-rows", action="append", default=None,
+                        help="effort.py accepted rows for the pre-screen and benchmark page; "
+                             "repeat to put several sources on one page")
     parser.add_argument("--no-discover", action="store_true", help="skip model discovery")
     parser.add_argument("--fixture-dir", default=None, help="fixture directory for harness discovery")
     args = parser.parse_args(argv)
