@@ -15,29 +15,28 @@ The delegate redesign is the only live thread. Spec
 `.scratch/delegate-redesign/issues/`, each carrying its own decisions and a
 "Landed" note; skill context `agents/skills/delegate/CLAUDE.md`.
 
-**Branch `bench-aa-effort-slugs` is unmerged**, 21 commits ahead of `main` and 2
-behind, suite green at 367 assertions across 12 files. It contains
-`delegate-lane-catalog`, which is 24 commits behind it; that branch is history now,
-not a second thread. Tickets 01-17 are implemented. `main` still has none of it, and
+**Branch `bench-aa-effort-slugs` is unmerged**, 26 commits ahead of `main` and 2
+behind, suite green at 371 assertions across 12 files. It contains
+`delegate-lane-catalog`, which is 29 commits behind it; that branch is history now,
+not a second thread. Tickets 01-17 are implemented, and the catalog carries every
+effort each codex model offers — 26 lanes, 19 of them generated and provisionally
+tiered. `main` still has none of it, and
 `~/.claude/skills/delegate` symlinks to the **main** checkout — so the installed
 skill has no `discover.py` and no pre-screen, and the four `/delegate-*` wrappers
 cannot be exercised until this merges. Merging conflicts on this file only.
 
 **Open, in priority order:**
 
-1. **The tier screen's own design.** Attribution is fixed (ticket 17), so the
-   screen is honest, but two things about it are Orin's to settle: what `[x]`/`[ ]`
-   means beside an on/off column, and whether a lane already taken at a higher tier
-   greys out; and, downstream of both, which columns win the width at 80, where the
-   fit still drops the score columns before `model` and `lane`. TUI work goes to a
-   Claude Opus agent under `/frontend-design:frontend-design`.
-2. **Add the 14 missing codex lanes** — sol x5, terra x5, luna x4. Only astra has a
-   full effort sweep in the catalog, so no other model can be compared across
-   efforts. Safe now that a figure reaches one lane only.
-3. **Ticket 14** — two real gaps: a cancelled-at-the-gate run returns `partial`
+1. **Orin's own wizard run.** Nothing in the workflow is known to be wrong now:
+   attribution is per lane (ticket 17), every codex effort is a lane, and each page
+   makes one decision per line. It has never been driven by a human against the real
+   catalog, and the tiers on the 19 new lanes are provisional by construction —
+   `meter_weight`, `timeout` and, below the copied effort, `tier` are not
+   measurements. Each new lane says so in its `note`.
+2. **Ticket 14** — two real gaps: a cancelled-at-the-gate run returns `partial`
    rather than `blocked` naming the gate, and the cancelled-tool-call regression
    test through `map_result` does not exist. The agy box is satisfied by the ADS pin.
-4. **Chunk dispatch does not fit one agy window.** `effort.py` splits a large packet
+3. **Chunk dispatch does not fit one agy window.** `effort.py` splits a large packet
    correctly, but dispatches the chunks in sequence: both live Artificial Analysis
    runs on 2026-09-10 failed at chunk 6 of 7 when the agy **5-hour** meter hit 0%
    (the weekly had just refilled to 95% — the 5h window is the binding constraint,
@@ -47,7 +46,8 @@ cannot be exercised until this merges. Merging conflicts on this file only.
 
 **Waiting on Orin** (nothing else blocks on these):
 
-- Run the wizard once to close tickets 06, 07, 07b and 15's last box:
+- Run the wizard once to close tickets 06, 07, 07b and 15's last box, and to
+  confirm or correct the provisional tiers on the 19 generated lanes:
   `python3 <this worktree>/agents/skills/delegate/scripts/setup.py --effort-rows <effort.py check accepted.json>`
 - Type each of the four `/delegate-*` wrappers once with a plain-language
   constraint (ticket 11) — needs the merge first.
@@ -96,6 +96,10 @@ run high; the report prints that caveat per model.
 - `trust` is gone from the design entirely. Ranking sorts
   `(tier asc, pace desc, lane name asc)`; the name term is an arbitrary deterministic
   tie-break, so a steal only ever crosses tiers (tickets 01 and 02).
+- One decision per line on each page, with the same `[x]`/`[ ]` marker on every
+  page: the carry page selects a model at an effort, the tier pages assign a tier,
+  and no page asks a question another page already asked (Orin, 2026-09-10). TUI
+  work goes to a Claude Opus agent under `/frontend-design:frontend-design`.
 - `stow/delegate/.config/delegate/lanes.json` is the authoritative catalog; the live
   `~/.config/delegate/lanes.json` follows it, never the other way (Orin,
   2026-09-10).
