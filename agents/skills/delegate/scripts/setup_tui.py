@@ -8,9 +8,9 @@ from catalog import CLASSES, EFFORTS, HARNESSES, resolve_published_model
 # These render as single lines in an 80-column terminal, where anything past
 # column 79 is clipped. Keep each one under that; a legend cut mid-sentence
 # explains nothing.
-TIER_ONELINER = "Tier: capability 1-4, a ceiling — needing 3 means tier 3 or 4, never lower."
+TIER_ONELINER = "Tier: capability 1-4; a class takes lanes from its floor up to its ceiling."
 PACE_LEGEND = "pace = unspent quota vs time left in the week. Above 1.0 it will expire unused."
-CLASSTIER_LEGEND = "classTier: a class needing N uses a lane of tier N or higher, never lower."
+CLASSES_LEGEND = "classes: each class has a floor and ceiling tier (1-4)."
 # One gesture flips the box, and it is the same gesture on the carry screen and
 # on the tier screens, so each footer names it the same way. The box means
 # something different on each screen — the column header says which — but the
@@ -382,19 +382,24 @@ class Wizard:
                 self._enter_prescreen()
             return
         if self.screen == "routing":
-            count = len(CLASSES) + 2
+            count = len(CLASSES) * 2 + 2
             if key == "up":
                 self.cursor = (self.cursor - 1) % count
             elif key == "down":
                 self.cursor = (self.cursor + 1) % count
             elif key in ("plus", "minus"):
                 delta = 1 if key == "plus" else -1
-                if self.cursor < len(CLASSES):
-                    name = CLASSES[self.cursor]
-                    old = self.routing_doc["classTier"][name]
-                    self.routing_doc["classTier"][name] = min(4, max(1, old + delta))
+                if self.cursor < len(CLASSES) * 2:
+                    cls_idx = self.cursor // 2
+                    is_ceiling = (self.cursor % 2 == 1)
+                    name = CLASSES[cls_idx]
+                    cls_info = self.routing_doc["classes"][name]
+                    if is_ceiling:
+                        cls_info["ceiling"] = min(4, max(cls_info["floor"], cls_info["ceiling"] + delta))
+                    else:
+                        cls_info["floor"] = min(cls_info["ceiling"], max(1, cls_info["floor"] + delta))
                 else:
-                    name = "margin" if self.cursor == len(CLASSES) else "gate"
+                    name = "margin" if self.cursor == len(CLASSES) * 2 else "gate"
                     old = self.routing_doc[name]
                     self.routing_doc[name] = round(min(1.0, max(0.0, old + delta * 0.05)), 2)
             elif key == "enter":
@@ -412,7 +417,7 @@ class Wizard:
             # window: at 80x24 eleven of twenty items showed, and the nine out
             # of sight included both file paths and every routing value. A
             # confirm screen you cannot read to the end is not one.
-            count = len(self.lanes_doc["lanes"]) + len(CLASSES) + 4
+            count = len(self.lanes_doc["lanes"]) + len(CLASSES) * 2 + 4
             if key == "up":
                 self.cursor = (self.cursor - 1) % count
                 return
@@ -649,9 +654,9 @@ class Wizard:
                 self._fit(f"Benchmark page: {page}"),
                 *self._discovery_notices(),
                 "",
-                "Tier is capability, 1 to 4, and it is a ceiling: a class needing tier 3",
-                "can use a tier 3 or 4 lane and nothing lower. It is not computed; it is",
-                "your judgement. Lanes alike on tier are equivalent; pace separates them.",
+                "Tier is capability, 1 to 4. Each class takes lanes from its floor tier",
+                "up to its ceiling tier, as set in routing.json. It is not computed; it",
+                "is your judgement. Lanes alike on tier are equivalent; pace separates them.",
             ]
             footer = ("any key: continue  o: open benchmark page  q: quit"
                       if self.bench_page_path else "any key: continue  q: quit")
@@ -740,7 +745,11 @@ class Wizard:
                 legend=self._tier_legend(),
             )
         if self.screen == "routing":
-            values = [(f"classTier.{name}", self.routing_doc["classTier"][name]) for name in CLASSES]
+            values = []
+            for name in CLASSES:
+                cls_info = self.routing_doc["classes"][name]
+                values.append((f"classes.{name}.floor", cls_info["floor"]))
+                values.append((f"classes.{name}.ceiling", cls_info["ceiling"]))
             values.extend([("margin", self.routing_doc["margin"]), ("gate", self.routing_doc["gate"])])
             rows = [{"cells": [name, str(value)], "marked": False, "dimmed": False,
                      "cursor": i == self.cursor, "tag": ""}
@@ -765,10 +774,13 @@ class Wizard:
                 off = not self._enabled[name]
                 # the column says `off`; a tag saying it again read `off  off`
                 rows.append({"cells": [name, "off" if off else "",
-                                       f"tier {self._assigned[name]}"],
+                                        f"tier {self._assigned[name]}"],
                              "marked": False, "dimmed": off, "tag": ""})
             for name in CLASSES:
-                rows.append({"cells": [f"classTier.{name}", "", str(self.routing_doc["classTier"][name])],
+                cls_info = self.routing_doc["classes"][name]
+                rows.append({"cells": [f"classes.{name}.floor", "", str(cls_info["floor"])],
+                             "marked": False, "dimmed": False, "tag": ""})
+                rows.append({"cells": [f"classes.{name}.ceiling", "", str(cls_info["ceiling"])],
                              "marked": False, "dimmed": False, "tag": ""})
             for name in ("margin", "gate"):
                 rows.append({"cells": [name, "", str(self.routing_doc[name])], "marked": False,
@@ -785,7 +797,7 @@ class Wizard:
                 # a path is the one value here that will not fit a 24-place cell,
                 # and `/Users/dreiss/.config/de…` is not a path anyone can check
                 elastic="value",
-                legend=[CLASSTIER_LEGEND, *self._margin_legend(),
+                legend=[CLASSES_LEGEND, *self._margin_legend(),
                         *self._gate_legend(), CONFIRM_OFF_LEGEND],
             )
         return self._frame(self.screen, "Delegate setup")

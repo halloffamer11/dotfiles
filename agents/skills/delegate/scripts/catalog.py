@@ -417,7 +417,10 @@ def validate_routing(doc, source="routing.json", partial=False):
     if not isinstance(doc, dict):
         raise CatalogError(f"{source}: document: must be a JSON object")
 
-    allowed_top = {"version", "classTier", "margin", "gate", "note"}
+    if "classTier" in doc:
+        raise CatalogError(f"{source}: key 'classTier': 'classTier' has been replaced by 'classes'; use {{\"classes\": {{\"<class>\": {{\"floor\": 1, \"ceiling\": 2}}}}}}")
+
+    allowed_top = {"version", "classes", "margin", "gate", "note"}
     for k in doc:
         if k not in allowed_top:
             raise CatalogError(
@@ -425,7 +428,7 @@ def validate_routing(doc, source="routing.json", partial=False):
             )
 
     if not partial:
-        for req in ("version", "classTier", "margin", "gate"):
+        for req in ("version", "classes", "margin", "gate"):
             if req not in doc:
                 raise CatalogError(f"{source}: key '{req}': missing required top-level key")
 
@@ -434,20 +437,47 @@ def validate_routing(doc, source="routing.json", partial=False):
             f"{source}: key 'version': must equal '{ROUTING_VERSION}', got {doc['version']!r}"
         )
 
-    if "classTier" in doc:
-        ct = doc["classTier"]
-        if not isinstance(ct, dict):
-            raise CatalogError(f"{source}: key 'classTier': classTier must be an object")
+    if "classes" in doc:
+        cls_map = doc["classes"]
+        if not isinstance(cls_map, dict):
+            raise CatalogError(f"{source}: key 'classes': classes must be an object")
         if not partial:
             for c in CLASSES:
-                if c not in ct:
-                    raise CatalogError(f"{source}: classTier: missing required class '{c}'")
-        for cls_name, cls_tier in ct.items():
+                if c not in cls_map:
+                    raise CatalogError(f"{source}: classes: missing required class '{c}'")
+        for cls_name, cls_range in cls_map.items():
             if cls_name not in CLASSES:
-                raise CatalogError(f"{source}: classTier: unknown class '{cls_name}'")
-            if type(cls_tier) is not int or cls_tier < 1 or cls_tier > 4:
+                raise CatalogError(f"{source}: classes: unknown class '{cls_name}'")
+            if not isinstance(cls_range, dict):
                 raise CatalogError(
-                    f"{source}: classTier: class '{cls_name}': tier must be an integer from 1 to 4, got {cls_tier!r}"
+                    f"{source}: classes: class '{cls_name}': must be an object with 'floor' and 'ceiling'"
+                )
+            for fld in cls_range:
+                if fld not in ("floor", "ceiling"):
+                    raise CatalogError(
+                        f"{source}: classes: class '{cls_name}': unknown field '{fld}'"
+                    )
+            if not partial:
+                for req in ("floor", "ceiling"):
+                    if req not in cls_range:
+                        raise CatalogError(
+                            f"{source}: classes: class '{cls_name}': missing required field '{req}'"
+                        )
+            f = cls_range.get("floor")
+            c = cls_range.get("ceiling")
+            if f is not None:
+                if type(f) is not int or f < 1 or f > 4:
+                    raise CatalogError(
+                        f"{source}: classes: class '{cls_name}': floor must be an integer from 1 to 4, got {f!r}"
+                    )
+            if c is not None:
+                if type(c) is not int or c < 1 or c > 4:
+                    raise CatalogError(
+                        f"{source}: classes: class '{cls_name}': ceiling must be an integer from 1 to 4, got {c!r}"
+                    )
+            if f is not None and c is not None and f > c:
+                raise CatalogError(
+                    f"{source}: classes: class '{cls_name}': floor ({f}) cannot exceed ceiling ({c}); 1 <= floor <= ceiling <= 4"
                 )
 
     if "margin" in doc:
@@ -472,7 +502,7 @@ def validate_routing(doc, source="routing.json", partial=False):
 
 def merge_routing(global_doc, project_doc=None, global_source="routing.json", project_source=None):
     """Merges global routing and optional project routing.
-    Each top-level key in project_doc replaces global value, except classTier which merges per class.
+    Each top-level key in project_doc replaces global value, except classes which merges per class and per key.
     Returns (routing, sources)."""
     g_src = global_source
     p_src = project_source
@@ -481,19 +511,31 @@ def merge_routing(global_doc, project_doc=None, global_source="routing.json", pr
     sources = {}
     for k in global_doc:
         sources[k] = g_src
-    if "classTier" in global_doc and isinstance(global_doc["classTier"], dict):
-        for c in global_doc["classTier"]:
-            sources[f"classTier.{c}"] = g_src
+    if "classes" in global_doc and isinstance(global_doc["classes"], dict):
+        sources["classes"] = g_src
+        for c, c_val in global_doc["classes"].items():
+            sources[f"classes.{c}"] = g_src
+            if isinstance(c_val, dict):
+                for sub_k in c_val:
+                    sources[f"classes.{c}.{sub_k}"] = g_src
 
     if project_doc:
         for k, v in project_doc.items():
-            if k == "classTier" and isinstance(v, dict):
-                if "classTier" not in routing or not isinstance(routing["classTier"], dict):
-                    routing["classTier"] = {}
-                for c, tier in v.items():
-                    routing["classTier"][c] = tier
-                    sources[f"classTier.{c}"] = p_src
-                sources["classTier"] = p_src
+            if k == "classes" and isinstance(v, dict):
+                if "classes" not in routing or not isinstance(routing["classes"], dict):
+                    routing["classes"] = {}
+                sources["classes"] = p_src
+                for c, c_val in v.items():
+                    if isinstance(c_val, dict):
+                        if c not in routing["classes"] or not isinstance(routing["classes"][c], dict):
+                            routing["classes"][c] = {}
+                        sources[f"classes.{c}"] = p_src
+                        for sub_k, sub_v in c_val.items():
+                            routing["classes"][c][sub_k] = sub_v
+                            sources[f"classes.{c}.{sub_k}"] = p_src
+                    else:
+                        routing["classes"][c] = copy.deepcopy(c_val)
+                        sources[f"classes.{c}"] = p_src
             else:
                 routing[k] = copy.deepcopy(v)
                 sources[k] = p_src
@@ -614,11 +656,20 @@ def show_catalog(cwd=None, config_dir=None, as_json=False):
         if k in routing:
             src = sources.get(k, "")
             print(f"{k}: {routing[k]}  {src}")
-    if "classTier" in routing and isinstance(routing["classTier"], dict):
+    if "classes" in routing and isinstance(routing["classes"], dict):
         for cls in CLASSES:
-            if cls in routing["classTier"]:
-                src = sources.get(f"classTier.{cls}", sources.get("classTier", ""))
-                print(f"classTier.{cls}: {routing['classTier'][cls]}  {src}")
+            if cls in routing["classes"]:
+                c_val = routing["classes"][cls]
+                if isinstance(c_val, dict):
+                    f_val = c_val.get("floor")
+                    c_val_ceil = c_val.get("ceiling")
+                    f_src = sources.get(f"classes.{cls}.floor", sources.get(f"classes.{cls}", sources.get("classes", "")))
+                    c_src = sources.get(f"classes.{cls}.ceiling", sources.get(f"classes.{cls}", sources.get("classes", "")))
+                    if f_src == c_src:
+                        print(f"classes.{cls}: floor={f_val} ceiling={c_val_ceil}  {f_src}")
+                    else:
+                        print(f"classes.{cls}.floor: {f_val}  {f_src}")
+                        print(f"classes.{cls}.ceiling: {c_val_ceil}  {c_src}")
 
 
 def main(argv=None):

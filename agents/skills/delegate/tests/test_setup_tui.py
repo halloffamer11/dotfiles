@@ -171,14 +171,14 @@ try:
     for _ in range(3):
         w.handle("down")
     w.handle("plus")
-    for _ in range(2):
+    for _ in range(7):
         w.handle("down")
     w.handle("plus")
     w.handle("enter")
     w.handle("y")
     lanes, routing = w.result()
     expected = copy.deepcopy(ROUTING)
-    expected["classTier"]["review"] = 3
+    expected["classes"]["mechanical"]["ceiling"] = 3
     expected["margin"] = 0.25
     record("6 routing edits are isolated", lanes == LANES and routing == expected, repr(routing))
 except Exception as e:
@@ -364,9 +364,9 @@ try:
            and any("10% remaining" in line for line in legend))
     w.handle("enter")
     confirm_legend = w.view().get("legend") or []
-    record("14 confirm legend explains classTier, margin and gate",
+    record("14 confirm legend explains classes, margin and gate",
            w.screen == "confirm"
-           and any("classTier:" in line for line in confirm_legend)
+           and any("classes:" in line for line in confirm_legend)
            and any(line.startswith("margin 0.2 ") for line in confirm_legend)
            and any(line.startswith("gate 0.1 ") for line in confirm_legend)
            and any("10% remaining" in line for line in confirm_legend)

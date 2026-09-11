@@ -93,12 +93,17 @@ with tempfile.TemporaryDirectory() as td:
     pick1_ok = (rows1[0]["lane"] == "grok46-high@grok" and rows1[0]["pick"] is True and rows1[0]["reason"] == "pick")
     eligible_names = [r["lane"] for r in rows1 if r["eligible"]]
     vetoed_names = [r["lane"] for r in rows1 if not r["eligible"]]
-    eligible1_ok = set(eligible_names) == {"terra-high@codex", "sol-high@codex", "grok46-high@grok", "fable-xhigh@claude"}
-    vetoed1_ok = set(vetoed_names) == {"flash-high@agy", "luna-low@codex"}
+    eligible1_ok = set(eligible_names) == {"terra-high@codex", "sol-high@codex", "grok46-high@grok"}
+    vetoed1_ok = set(vetoed_names) == {"flash-high@agy", "luna-low@codex", "fable-xhigh@claude"}
     order1_ok = [r["lane"] for r in rows1] == [rows1[0]["lane"]] + [r["lane"] for r in rows1[1:] if r["eligible"]] + vetoed_names
+    fable1 = next(r for r in rows1 if r["lane"] == "fable-xhigh@claude")
+    luna1 = next(r for r in rows1 if r["lane"] == "luna-low@codex")
+    flash1 = next(r for r in rows1 if r["lane"] == "flash-high@agy")
     reasons1_ok = (
-        all(r["reason"] == "eligible" for r in rows1[1:4]) and
-        all(r["reason"] == "vetoed: ceiling (tier 1 < need 2)" for r in rows1[4:])
+        all(r["reason"] == "eligible" for r in rows1[1:3]) and
+        fable1["reason"] == "vetoed:ceiling, fable-xhigh@claude (tier 4) > impl ceiling (tier 3)" and
+        luna1["reason"] == "vetoed:floor, luna-low@codex (tier 1) < impl floor (tier 2)" and
+        flash1["reason"] == "vetoed:floor, flash-high@agy (tier 1) < impl floor (tier 2)"
     )
     record("case 1 rank() healthy meters", pick1_ok and eligible1_ok and vetoed1_ok and order1_ok and reasons1_ok)
 
@@ -111,9 +116,10 @@ with tempfile.TemporaryDirectory() as td:
     cli1_ok = (
         res1.returncode == 0 and
         lines1[0].startswith("# impl") and
+        "floor=2 ceiling=3" in lines1[0] and
         "1. grok46-high@grok" in lines1[1] and lines1[1].endswith("pick") and
-        "vetoed: ceiling (tier 1 < need 2)" in lines1[5] and
-        "vetoed: ceiling (tier 1 < need 2)" in lines1[6]
+        "vetoed:ceiling, fable-xhigh@claude (tier 4) > impl ceiling (tier 3)" in res1.stdout and
+        "vetoed:floor, luna-low@codex (tier 1) < impl floor (tier 2)" in res1.stdout
     )
     record("case 1 CLI healthy meters", cli1_ok)
 
@@ -158,6 +164,13 @@ with tempfile.TemporaryDirectory() as td:
     # -------------------------------------------------------------
     # 3. Steal by a higher tier
     # claude-fable pace 1.00 against codex 0.75 and grok 0.80
+    cat3 = copy.deepcopy(cat)
+    cat3["routing"]["classes"]["impl"]["ceiling"] = 4
+    cfg3_dir = os.path.join(td, "cfg3")
+    os.makedirs(cfg3_dir, exist_ok=True)
+    shutil.copy(os.path.join(cfg_dir, "lanes.json"), cfg3_dir)
+    catalog.write_json(os.path.join(cfg3_dir, "routing.json"), cat3["routing"])
+
     m3 = [
         meter("codex", weekly=0.55, five_h=0.55, pace=0.75, status="ok"),
         meter("grok", weekly=1.00, pace=0.80, status="ok"),
@@ -166,7 +179,7 @@ with tempfile.TemporaryDirectory() as td:
     ]
     doc3 = write_meters_doc(meters_path, m3)
 
-    rows3 = rank.rank("impl", cat, doc3, ALL_HARNESSES)
+    rows3 = rank.rank("impl", cat3, doc3, ALL_HARNESSES)
     pick3_ok = (
         rows3[0]["lane"] == "fable-xhigh@claude" and
         rows3[0]["pick"] is True and
@@ -175,7 +188,7 @@ with tempfile.TemporaryDirectory() as td:
     record("case 3 rank() steal by higher tier", pick3_ok)
 
     res3 = subprocess.run(
-        [sys.executable, RANK_PY, "impl", "--config-dir", cfg_dir, "--meters", meters_path, "--harnesses", ALL_HARNESSES_ARG],
+        [sys.executable, RANK_PY, "impl", "--config-dir", cfg3_dir, "--meters", meters_path, "--harnesses", ALL_HARNESSES_ARG],
         capture_output=True,
         text=True,
     )
@@ -202,13 +215,13 @@ with tempfile.TemporaryDirectory() as td:
     sol4 = next(r for r in rows4 if r["lane"] == "sol-high@codex")
     gate4_ok = (
         rows4[0]["lane"] == "grok46-high@grok" and
-        terra4["reason"] == "vetoed: gate (r 5% < 10%)" and
-        sol4["reason"] == "vetoed: gate (r 5% < 10%)"
+        terra4["reason"] == "vetoed:gate, terra-high@codex: codex meter 5% left < gate 10%" and
+        sol4["reason"] == "vetoed:gate, sol-high@codex: codex meter 5% left < gate 10%"
     )
-    # Also verify scout (where luna has tier 1 >= 1, so luna gets vetoed: gate)
-    rows4_scout = rank.rank("scout", cat, doc4, ALL_HARNESSES)
-    luna4_scout = next(r for r in rows4_scout if r["lane"] == "luna-low@codex")
-    luna_gate_ok = luna4_scout["reason"] == "vetoed: gate (r 5% < 10%)"
+    # Also verify mechanical (where luna has tier 1 >= 1, so luna gets vetoed: gate)
+    rows4_mech = rank.rank("mechanical", cat, doc4, ALL_HARNESSES)
+    luna4_mech = next(r for r in rows4_mech if r["lane"] == "luna-low@codex")
+    luna_gate_ok = luna4_mech["reason"] == "vetoed:gate, luna-low@codex: codex meter 5% left < gate 10%"
     record("case 4 rank() gate r 0.05", gate4_ok and luna_gate_ok)
 
     res4 = subprocess.run(
@@ -219,7 +232,7 @@ with tempfile.TemporaryDirectory() as td:
     cli4_ok = (
         res4.returncode == 0 and
         "1. grok46-high@grok" in res4.stdout and
-        "vetoed: gate (r 5% < 10%)" in res4.stdout
+        "vetoed:gate, terra-high@codex: codex meter 5% left < gate 10%" in res4.stdout
     )
     record("case 4 CLI gate r 0.05", cli4_ok)
 
@@ -237,8 +250,8 @@ with tempfile.TemporaryDirectory() as td:
     terra5 = next(r for r in rows5 if r["lane"] == "terra-high@codex")
     sol5 = next(r for r in rows5 if r["lane"] == "sol-high@codex")
     gate5_ok = (
-        terra5["reason"] == "vetoed: gate (r 0% < 10%)" and
-        sol5["reason"] == "vetoed: gate (r 0% < 10%)"
+        terra5["reason"] == "vetoed:gate, terra-high@codex: codex meter 0% left < gate 10%" and
+        sol5["reason"] == "vetoed:gate, sol-high@codex: codex meter 0% left < gate 10%"
     )
     record("case 5 rank() gate uses r not weekly", gate5_ok)
 
@@ -247,7 +260,7 @@ with tempfile.TemporaryDirectory() as td:
         capture_output=True,
         text=True,
     )
-    cli5_ok = (res5.returncode == 0 and "vetoed: gate (r 0% < 10%)" in res5.stdout)
+    cli5_ok = (res5.returncode == 0 and "vetoed:gate, terra-high@codex: codex meter 0% left < gate 10%" in res5.stdout)
     record("case 5 CLI gate uses r not weekly", cli5_ok)
 
     # -------------------------------------------------------------
@@ -268,7 +281,7 @@ with tempfile.TemporaryDirectory() as td:
         rows6[0]["lane"] == "grok46-high@grok" and
         terra6["eligible"] is True and terra6["reason"] == "unknown meter, sorted last" and
         sol6["eligible"] is True and sol6["reason"] == "unknown meter, sorted last" and
-        lanes_order6 == ["grok46-high@grok", "fable-xhigh@claude", "terra-high@codex", "sol-high@codex"]
+        lanes_order6 == ["grok46-high@grok", "terra-high@codex", "sol-high@codex"]
     )
     # With every meter unknown:
     m6_all_unknown = [
@@ -305,7 +318,7 @@ with tempfile.TemporaryDirectory() as td:
     present7 = {"claude", "codex", "agy"}
     rows7 = rank.rank("impl", cat, doc7, present7)
     grok7 = next(r for r in rows7 if r["lane"] == "grok46-high@grok")
-    cli7_rank_ok = (grok7["eligible"] is False and grok7["reason"] == "vetoed: cli absent (grok)")
+    cli7_rank_ok = (grok7["eligible"] is False and grok7["reason"] == "vetoed:cli, grok46-high@grok: grok not on PATH")
     record("case 7 rank() CLI absent", cli7_rank_ok)
 
     res7 = subprocess.run(
@@ -313,11 +326,11 @@ with tempfile.TemporaryDirectory() as td:
         capture_output=True,
         text=True,
     )
-    cli7_ok = (res7.returncode == 0 and "vetoed: cli absent (grok)" in res7.stdout)
+    cli7_ok = (res7.returncode == 0 and "vetoed:cli, grok46-high@grok: grok not on PATH" in res7.stdout)
     record("case 7 CLI absent", cli7_ok)
 
     # -------------------------------------------------------------
-    # 8. Everything vetoed: hard-impl (need 3), codex r 0.05, no claude
+    # 8. Everything vetoed: hard-impl (3-3), codex r 0.05, no claude
     m8 = [
         meter("codex", weekly=0.05, five_h=0.05, pace=0.75, status="unavailable"),
         meter("grok", weekly=1.00, pace=0.90, status="ok"),
@@ -347,7 +360,7 @@ with tempfile.TemporaryDirectory() as td:
     record("case 8 CLI everything vetoed", cli8_ok)
 
     # -------------------------------------------------------------
-    # 9. scout (need 1): tier 1 holds flash-high@agy and luna-low@codex
+    # 9. mechanical (1-2): tier 1 holds flash-high@agy and luna-low@codex
     # Part A: equal paces -> the tie falls to lane name, so flash wins
     m9a = [
         meter("codex", weekly=1.00, five_h=1.00, pace=1.00, status="ok"),
@@ -356,8 +369,8 @@ with tempfile.TemporaryDirectory() as td:
         meter("claude-fable", weekly=1.00, five_h=1.00, pace=1.00, status="ok"),
     ]
     doc9a = write_meters_doc(meters_path, m9a)
-    rows9a = rank.rank("scout", cat, doc9a, ALL_HARNESSES)
-    scout9a_ok = (rows9a[0]["lane"] == "flash-high@agy" and rows9a[0]["pick"] is True)
+    rows9a = rank.rank("mechanical", cat, doc9a, ALL_HARNESSES)
+    mech9a_ok = (rows9a[0]["lane"] == "flash-high@agy" and rows9a[0]["pick"] is True)
 
     # Part B: with agy pace 3.27 flash is pick either way
     m9b = [
@@ -367,8 +380,8 @@ with tempfile.TemporaryDirectory() as td:
         meter("claude-fable", weekly=0.70, five_h=0.70, pace=0.85, status="ok"),
     ]
     doc9b = write_meters_doc(meters_path, m9b)
-    rows9b = rank.rank("scout", cat, doc9b, ALL_HARNESSES)
-    scout9b_ok = (rows9b[0]["lane"] == "flash-high@agy" and rows9b[0]["pick"] is True)
+    rows9b = rank.rank("mechanical", cat, doc9b, ALL_HARNESSES)
+    mech9b_ok = (rows9b[0]["lane"] == "flash-high@agy" and rows9b[0]["pick"] is True)
 
     # Part C: with luna pace 3.60 and flash 3.27, luna leads its tier on pace
     m9c = [
@@ -378,16 +391,16 @@ with tempfile.TemporaryDirectory() as td:
         meter("claude-fable", weekly=0.70, five_h=0.70, pace=0.85, status="ok"),
     ]
     doc9c = write_meters_doc(meters_path, m9c)
-    rows9c = rank.rank("scout", cat, doc9c, ALL_HARNESSES)
-    scout9c_ok = (
+    rows9c = rank.rank("mechanical", cat, doc9c, ALL_HARNESSES)
+    mech9c_ok = (
         rows9c[0]["lane"] == "luna-low@codex" and
         rows9c[0]["pick"] is True and
         rows9c[0]["reason"] == "pick"
     )
-    record("case 9 rank() scout tie-break and pace order", scout9a_ok and scout9b_ok and scout9c_ok)
+    record("case 9 rank() mechanical tie-break and pace order", mech9a_ok and mech9b_ok and mech9c_ok)
 
     res9 = subprocess.run(
-        [sys.executable, RANK_PY, "scout", "--config-dir", cfg_dir, "--meters", meters_path, "--harnesses", ALL_HARNESSES_ARG],
+        [sys.executable, RANK_PY, "mechanical", "--config-dir", cfg_dir, "--meters", meters_path, "--harnesses", ALL_HARNESSES_ARG],
         capture_output=True,
         text=True,
     )
@@ -397,7 +410,7 @@ with tempfile.TemporaryDirectory() as td:
         "1. luna-low@codex" in lines9[1] and
         lines9[1].endswith("pick")
     )
-    record("case 9 CLI scout pace order", cli9_ok)
+    record("case 9 CLI mechanical pace order", cli9_ok)
 
     # -------------------------------------------------------------
     # 10. Project override: fake git root with .delegate/routing.json
@@ -406,15 +419,15 @@ with tempfile.TemporaryDirectory() as td:
     open(os.path.join(fake_git, ".git"), "w").close()
     p_dir = os.path.join(fake_git, ".delegate")
     p_file = os.path.join(p_dir, "routing.json")
-    catalog.write_json(p_file, {"classTier": {"review": 3}})
+    catalog.write_json(p_file, {"classes": {"impl": {"floor": 3}}})
 
     cat10 = catalog.load_catalog(cwd=fake_git, config_dir=cfg_dir)
-    rows10 = rank.rank("review", cat10, doc1, ALL_HARNESSES)
-    review10_ok = (rows10[0]["lane"] == "sol-high@codex" and rows10[0]["pick"] is True)
-    record("case 10 rank() project override", review10_ok)
+    rows10 = rank.rank("impl", cat10, doc1, ALL_HARNESSES)
+    impl10_ok = (rows10[0]["lane"] == "sol-high@codex" and rows10[0]["pick"] is True)
+    record("case 10 rank() project override", impl10_ok)
 
     res10 = subprocess.run(
-        [sys.executable, RANK_PY, "review", "--cwd", fake_git, "--config-dir", cfg_dir, "--meters", meters_path, "--harnesses", ALL_HARNESSES_ARG],
+        [sys.executable, RANK_PY, "impl", "--cwd", fake_git, "--config-dir", cfg_dir, "--meters", meters_path, "--harnesses", ALL_HARNESSES_ARG],
         capture_output=True,
         text=True,
     )
@@ -451,7 +464,7 @@ with tempfile.TemporaryDirectory() as td:
         "lane", "harness", "model", "effort", "tier", "meter",
         "pace", "r", "remaining_weekly", "meter_status", "eligible", "pick", "reason"
     }
-    top_keys_ok = all(k in data12 for k in ("class", "need", "margin", "gate", "pick", "rows"))
+    top_keys_ok = all(k in data12 for k in ("class", "floor", "ceiling", "margin", "gate", "pick", "rows"))
     pick_matches = (data12["pick"] == data12["rows"][0]["lane"] and data12["rows"][0]["pick"] is True)
     all_keys_ok = all(set(r.keys()) == required_row_keys for r in data12["rows"])
     record("case 12 CLI --json output schema", res12.returncode == 0 and top_keys_ok and pick_matches and all_keys_ok)
@@ -460,7 +473,7 @@ with tempfile.TemporaryDirectory() as td:
     # 13. Disabled lane: enabled: false on the lane that would otherwise be the pick
     cat13 = copy.deepcopy(cat)
     cat13["lanes"]["grok46-high@grok"]["enabled"] = False
-    # Also disable luna-low@codex (tier 1 < need 2) to verify disabled check is first in veto chain
+    # Also disable luna-low@codex (tier 1 < floor 2) to verify disabled check is first in veto chain
     cat13["lanes"]["luna-low@codex"]["enabled"] = False
 
     rows13 = rank.rank("impl", cat13, doc1, ALL_HARNESSES)
@@ -472,23 +485,20 @@ with tempfile.TemporaryDirectory() as td:
         rows13[0]["reason"] == "pick"
     )
 
-    # Disabled lane is still present in rows, marked ineligible with reason 'vetoed: disabled'
     grok13 = next((r for r in rows13 if r["lane"] == "grok46-high@grok"), None)
     grok13_ok = (
         grok13 is not None and
         grok13["eligible"] is False and
         grok13["pick"] is False and
-        grok13["reason"] == "vetoed: disabled"
+        grok13["reason"] == "vetoed:disabled, grok46-high@grok"
     )
 
-    # Disabled check precedes ceiling veto: luna-low@codex would fail tier ceiling (1 < 2),
-    # but gets "vetoed: disabled" because disabled is first in the veto chain
     luna13 = next((r for r in rows13 if r["lane"] == "luna-low@codex"), None)
     luna13_ok = (
         luna13 is not None and
         luna13["eligible"] is False and
         luna13["pick"] is False and
-        luna13["reason"] == "vetoed: disabled"
+        luna13["reason"] == "vetoed:disabled, luna-low@codex"
     )
 
     record("case 13 rank() disabled lane moves pick", pick13_ok and grok13_ok and luna13_ok)
@@ -512,9 +522,71 @@ with tempfile.TemporaryDirectory() as td:
         res13.returncode == 0 and
         "1. terra-high@codex" in lines13[1] and
         lines13[1].endswith("pick") and
-        any("grok46-high@grok" in line and "vetoed: disabled" in line for line in lines13) and
-        any("luna-low@codex" in line and "vetoed: disabled" in line for line in lines13)
+        any("grok46-high@grok" in line and "vetoed:disabled, grok46-high@grok" in line for line in lines13) and
+        any("luna-low@codex" in line and "vetoed:disabled, luna-low@codex" in line for line in lines13)
     )
     record("case 13 CLI disabled lane moves pick", cli13_ok)
+
+    # -------------------------------------------------------------
+    # 14. Lane below floor exact reason
+    rows14 = rank.rank("impl", cat, doc1, ALL_HARNESSES)
+    luna14 = next(r for r in rows14 if r["lane"] == "luna-low@codex")
+    record("case 14 vetoed:floor exact reason",
+           luna14["reason"] == "vetoed:floor, luna-low@codex (tier 1) < impl floor (tier 2)")
+
+    # -------------------------------------------------------------
+    # 15. Lane above ceiling exact reason
+    fable15 = next(r for r in rows14 if r["lane"] == "fable-xhigh@claude")
+    record("case 15 vetoed:ceiling exact reason",
+           fable15["reason"] == "vetoed:ceiling, fable-xhigh@claude (tier 4) > impl ceiling (tier 3)")
+
+    # -------------------------------------------------------------
+    # 16. Replay of 2026-09-11
+    # Fixture: fable-xhigh@claude at tier 4 and pace 0.85, grok46-high@grok at tier 3 and pace 0.59,
+    # codex lanes below the gate, scout at 3-3. The pick is grok, and Fable is vetoed:ceiling.
+    cat16 = copy.deepcopy(cat)
+    cat16["lanes"]["grok46-high@grok"]["tier"] = 3
+    cat16["routing"]["classes"]["scout"] = {"floor": 3, "ceiling": 3}
+    m16 = [
+        meter("codex", weekly=0.05, five_h=0.05, pace=0.75, status="unavailable"),
+        meter("grok", weekly=1.00, pace=0.59, status="ok"),
+        meter("claude-fable", weekly=0.70, five_h=0.70, pace=0.85, status="ok"),
+        meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
+    ]
+    doc16 = write_meters_doc(meters_path, m16)
+    rows16 = rank.rank("scout", cat16, doc16, ALL_HARNESSES)
+    fable16 = next(r for r in rows16 if r["lane"] == "fable-xhigh@claude")
+    replay16_ok = (
+        rows16[0]["lane"] == "grok46-high@grok" and
+        rows16[0]["pick"] is True and
+        fable16["reason"] == "vetoed:ceiling, fable-xhigh@claude (tier 4) > scout ceiling (tier 3)"
+    )
+    record("case 16 replay of 2026-09-11", replay16_ok)
+
+    # -------------------------------------------------------------
+    # 17. tier= inside range narrows eligible; outside range raises ValueError
+    rows17_base = rank.rank("impl", cat, doc1, ALL_HARNESSES)
+    eligible17_base = [r["lane"] for r in rows17_base if r["eligible"]]
+    rows17_tier3 = rank.rank("impl", cat, doc1, ALL_HARNESSES, tier=3)
+    eligible17_tier3 = [r["lane"] for r in rows17_tier3 if r["eligible"]]
+    grok17 = next(r for r in rows17_tier3 if r["lane"] == "grok46-high@grok")
+    tier_narrows_ok = (
+        len(eligible17_base) == 3 and
+        eligible17_tier3 == ["sol-high@codex"] and
+        grok17["reason"] == "vetoed:floor, grok46-high@grok (tier 2) < impl floor (tier 3)"
+    )
+    raised_below = False
+    try:
+        rank.rank("impl", cat, doc1, ALL_HARNESSES, tier=1)
+    except ValueError:
+        raised_below = True
+
+    raised_above = False
+    try:
+        rank.rank("impl", cat, doc1, ALL_HARNESSES, tier=4)
+    except ValueError:
+        raised_above = True
+
+    record("case 17 tier= narrows eligible and raises outside range", tier_narrows_ok and raised_below and raised_above)
 
 sys.exit(1 if fails else 0)

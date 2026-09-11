@@ -115,6 +115,21 @@ for eff in ("low", "medium", "high", "xhigh", "max", "ultra"):
         val_eff is not None and doc_eff["lanes"]["fable-xhigh@claude"]["effort"] == eff,
     )
 
+# 1f. the stowed catalog carries the three native claude lanes and validates
+import json as _json
+import os as _os
+_stowed_path = _os.path.abspath(_os.path.join(
+    _os.path.dirname(__file__), "..", "..", "..", "..",
+    "stow", "delegate", ".config", "delegate", "lanes.json"))
+with open(_stowed_path, encoding="utf-8") as _f:
+    _stowed = _json.load(_f)
+record("stowed catalog validates", catalog.validate_lanes(copy.deepcopy(_stowed)) is not None)
+for lane_name in ("haiku-high@claude", "sonnet-high@claude", "opus-high@claude"):
+    record(
+        f"native lane {lane_name} present in the stowed catalog",
+        lane_name in _stowed["lanes"] and _stowed["lanes"][lane_name]["meter"] == "claude-general",
+    )
+
 # 2. Rejections
 # 2.1 lane naming a missing meter
 doc = copy.deepcopy(lanes_sample)
@@ -267,24 +282,45 @@ with tempfile.TemporaryDirectory() as td:
         msg,
     )
 
-# 2.15 unknown class in classTier
+# 2.15 unknown class in classes
 doc = copy.deepcopy(routing_sample)
-doc["classTier"]["invalid_class"] = 2
+doc["classes"]["invalid_class"] = {"floor": 1, "ceiling": 2}
 msg = check_catalog_error(catalog.validate_routing, doc)
 record(
-    "reject: unknown class in classTier",
+    "reject: unknown class in classes",
     bool(msg and "invalid_class" in msg and "unknown class" in msg),
     msg,
 )
 
-# 2.16 class tier 5
+# 2.16 class ceiling 5
 doc = copy.deepcopy(routing_sample)
-doc["classTier"]["scout"] = 5
+doc["classes"]["scout"]["ceiling"] = 5
 msg = check_catalog_error(catalog.validate_routing, doc)
 record(
     "reject: class tier 5",
-    bool(msg and "scout" in msg and "tier" in msg and "1 to 4" in msg),
+    bool(msg and "scout" in msg and "ceiling" in msg and "1 to 4" in msg),
     msg,
+)
+
+# 2.16b floor > ceiling rejected
+doc = copy.deepcopy(routing_sample)
+doc["classes"]["scout"]["floor"] = 4
+doc["classes"]["scout"]["ceiling"] = 2
+msg = check_catalog_error(catalog.validate_routing, doc)
+record(
+    "reject: floor exceeds ceiling",
+    bool(msg and "scout" in msg and "cannot exceed" in msg),
+    msg,
+)
+
+# 2.16c legacy key rejected with migration message
+legacy_key = "class" + "Tier"
+doc_legacy = {"version": "delegate-routing.v1", legacy_key: {"scout": 2}, "margin": 0.2, "gate": 0.1}
+msg_legacy = check_catalog_error(catalog.validate_routing, doc_legacy)
+record(
+    "reject: legacy key with migration message",
+    bool(msg_legacy and legacy_key in msg_legacy and "replaced by 'classes'" in msg_legacy and "floor" in msg_legacy and "ceiling" in msg_legacy),
+    msg_legacy,
 )
 
 # 2.17 margin 1.5
@@ -342,20 +378,21 @@ with tempfile.TemporaryDirectory() as td:
 
     p_dir = os.path.join(fake_git, ".delegate")
     p_file = os.path.join(p_dir, "routing.json")
-    catalog.write_json(p_file, {"classTier": {"review": 3}})
+    catalog.write_json(p_file, {"classes": {"scout": {"floor": 3}}})
 
     r1, s1 = catalog.effective_routing(cwd=fake_git, config_dir=cfg_dir)
-    review_ok = (
-        r1["classTier"]["review"] == 3 and
-        s1["classTier.review"] == p_file and
+    scout_ok = (
+        r1["classes"]["scout"]["floor"] == 3 and
+        r1["classes"]["scout"]["ceiling"] == routing_sample["classes"]["scout"]["ceiling"] and
+        s1["classes.scout.floor"] == p_file and
+        s1["classes.scout.ceiling"] == g_file and
         r1["margin"] == 0.2 and
         s1["margin"] == g_file and
         r1["gate"] == 0.1 and
         s1["gate"] == g_file and
-        all(r1["classTier"][c] == routing_sample["classTier"][c] for c in ("scout", "mechanical", "impl", "hard-impl")) and
-        all(s1[f"classTier.{c}"] == g_file for c in ("scout", "mechanical", "impl", "hard-impl"))
+        all(r1["classes"][c] == routing_sample["classes"][c] for c in ("mechanical", "impl", "review", "hard-impl"))
     )
-    record("override merge: classTier review only", review_ok)
+    record("override merge: classes scout floor keeps global ceiling", scout_ok)
 
     # Margin override
     catalog.write_json(p_file, {"margin": 0.5})
@@ -363,8 +400,8 @@ with tempfile.TemporaryDirectory() as td:
     margin_ok = (
         r2["margin"] == 0.5 and
         s2["margin"] == p_file and
-        r2["classTier"]["review"] == routing_sample["classTier"]["review"] and
-        s2["classTier.review"] == g_file
+        r2["classes"]["scout"] == routing_sample["classes"]["scout"] and
+        s2["classes.scout.floor"] == g_file
     )
     record("override merge: margin only", margin_ok)
 
@@ -373,8 +410,8 @@ with tempfile.TemporaryDirectory() as td:
     os.makedirs(no_git)
     r3, s3 = catalog.effective_routing(cwd=no_git, config_dir=cfg_dir)
     no_git_ok = (
-        r3["classTier"]["review"] == routing_sample["classTier"]["review"] and
-        s3["classTier.review"] == g_file and
+        r3["classes"]["scout"] == routing_sample["classes"]["scout"] and
+        s3["classes.scout.floor"] == g_file and
         s3["margin"] == g_file
     )
     record("override merge: no git root", no_git_ok)
@@ -407,7 +444,7 @@ with tempfile.TemporaryDirectory() as td:
     note_logic_ok = (
         eff_r["note"] == "project note override" and
         eff_r["margin"] == routing_sample["margin"] and
-        eff_r["classTier"] == routing_sample["classTier"]
+        eff_r["classes"] == routing_sample["classes"]
     )
 
     buf = io.StringIO()

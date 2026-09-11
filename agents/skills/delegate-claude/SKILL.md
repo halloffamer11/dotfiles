@@ -13,7 +13,7 @@ Resolve the lane using the existing ranker:
 
     python3 ~/.claude/skills/delegate/scripts/rank.py <class> --harnesses claude --json
 
-This returns `{"class", "need", "margin", "gate", "pick", "rows": [...]}` with `lane`, `model`, `effort`, `tier`, `pace`, `eligible`, and `reason` on each row.
+This returns `{"class", "floor", "ceiling", "margin", "gate", "pick", "rows": [...]}` with `lane`, `model`, `effort`, `tier`, `pace`, `eligible`, and `reason` on each row.
 
 1. Filter the rows by applying the user's plain-language constraints:
    - **Exclusions**: drop any model or lane the user asked to avoid or exclude.
@@ -28,6 +28,6 @@ This returns `{"class", "need", "margin", "gate", "pick", "rows": [...]}` with `
 
 Pass the same `<class>` you ranked with: the prompt's tool-call leash is chosen from it, and a dispatch with no class is leashed by default.
 
-A missing `claude` binary fails before dispatch with a plain message. The relay runs `claude -p` nested under this session. Run in the background when the lane is slow; read `<run>/return.json` when notified.
+A missing `claude` binary fails before dispatch with a plain message. Then, on the `delegate: native` line, the session spawns the named agent with the Agent tool in the background, with the prompt `Read <prompt path> and follow it.`
 
 Arguments typed after the skill name: `$ARGUMENTS`.

@@ -35,7 +35,7 @@ CLI:
   python3 delegate.py dispatch (--lane <name> | --model <slug>) [--class <c>] --brief <path> --cwd <dir>
           [--write <worktree>] [--effort <e>] [--harness <h>] [--config-dir DIR]
           [--ads-dir DIR] [--runs-dir DIR] [--no-probe] [--no-leash]
-  python3 delegate.py run <class> --brief <path> --cwd <dir> [--write <worktree>] [--effort <e>]
+  python3 delegate.py run <class> --brief <path> --cwd <dir> [--write <worktree>] [--tier <n>]
           [--dry-run] [--config-dir DIR] [--meters FILE] [--harnesses a,b,c]
           [--ads-dir DIR] [--runs-dir DIR] [--no-probe] [--no-leash]
 """
@@ -55,6 +55,10 @@ sys.path.insert(0, HERE)
 from catalog import load_catalog, CatalogError, HARNESSES, EFFORTS, CLASSES
 import events
 import rank
+
+# The harness whose lanes run natively, as subagents of the session; a future
+# Codex orchestrator changes it (ticket 22, out of scope).
+ORCHESTRATOR = "claude"
 
 
 def parse_timeout_s(timeout_str):
@@ -726,6 +730,12 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
         leash=effective_leash,
     )
 
+    if harness == ORCHESTRATOR:
+        model_effort = lane.split("@")[0]
+        abs_prompt = os.path.abspath(prompt_path)
+        print(f"delegate: native lane={lane} agent=lane-{model_effort} prompt={abs_prompt}")
+        sys.exit(0)
+
     return_path = os.path.join(run_dir, "return.json")
 
     # Step 4: Ledger start
@@ -802,7 +812,7 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
     )
 
 
-def _print_rank_output(cls, cat, rows):
+def _print_rank_output(cls, cat, rows, tier=None):
     has_pick = bool(rows and rows[0].get("pick"))
     if not has_pick:
         print(f"STOP: no lane eligible for {cls}")
@@ -810,21 +820,23 @@ def _print_rank_output(cls, cat, rows):
             print(line)
         return False
     routing = cat["routing"]
-    need = routing["classTier"][cls]
+    cls_config = routing.get("classes", {}).get(cls, {})
+    floor = tier if tier is not None else cls_config.get("floor")
+    ceiling = cls_config.get("ceiling")
     margin = routing["margin"]
     gate = routing["gate"]
     project_file = cat.get("files", {}).get("project")
     override_str = project_file if project_file else "none"
     gate_pct = f"{int(round(gate * 100))}%"
-    print(f"# {cls}  need=tier {need}  margin={margin}  gate={gate_pct}  (routing: global; project override: {override_str})")
+    print(f"# {cls}  floor={floor} ceiling={ceiling}  margin={margin}  gate={gate_pct}  (routing: global; project override: {override_str})")
     for line in rank.format_rows(rows):
         print(line)
     return True
 
 
-def run(class_, brief, cwd, write=None, effort=None, dry_run=False, config_dir=None, meters=None, harnesses=None, ads_dir=None, runs_dir=None, no_probe=False, no_leash=False):
+def run(class_, brief, cwd, write=None, tier=None, dry_run=False, config_dir=None, meters=None, harnesses=None, ads_dir=None, runs_dir=None, no_probe=False, no_leash=False):
     if class_ not in CLASSES:
-        sys.stderr.write(f"delegate: invalid class '{class_}'; must be one of {", ".join(CLASSES)}\n")
+        sys.stderr.write(f"delegate: invalid class '{class_}'; must be one of {', '.join(CLASSES)}\n")
         sys.exit(2)
 
     try:
@@ -832,6 +844,16 @@ def run(class_, brief, cwd, write=None, effort=None, dry_run=False, config_dir=N
     except CatalogError as e:
         sys.stderr.write(f"delegate: {e}\n")
         sys.exit(2)
+
+    cls_config = cat.get("routing", {}).get("classes", {}).get(class_, {})
+    floor = cls_config.get("floor")
+    ceiling = cls_config.get("ceiling")
+    if tier is not None:
+        if floor is not None and ceiling is not None and (tier < floor or tier > ceiling):
+            sys.stderr.write(
+                f"delegate: tier {tier} outside [{floor}, {ceiling}] for class '{class_}'\n"
+            )
+            sys.exit(2)
 
     if meters:
         try:
@@ -847,8 +869,8 @@ def run(class_, brief, cwd, write=None, effort=None, dry_run=False, config_dir=N
     else:
         present = {h for h in HARNESSES if shutil.which(h)}
 
-    rows = rank.rank(class_, cat, meters_doc, present)
-    has_pick = _print_rank_output(class_, cat, rows)
+    rows = rank.rank(class_, cat, meters_doc, present, tier=tier)
+    has_pick = _print_rank_output(class_, cat, rows, tier=tier)
     if not has_pick:
         sys.exit(1)
 
@@ -857,14 +879,16 @@ def run(class_, brief, cwd, write=None, effort=None, dry_run=False, config_dir=N
         sys.exit(0)
 
     pick_lane = rows[0]["lane"]
-    print(f"delegate: dispatching {pick_lane}")
+    lane_harness = cat["lanes"][pick_lane]["harness"]
+    if lane_harness != ORCHESTRATOR:
+        print(f"delegate: dispatching {pick_lane}")
     dispatch(
         lane=pick_lane,
         class_=class_,
         brief=brief,
         cwd=cwd,
         write=write,
-        effort=effort,
+        effort=None,
         config_dir=config_dir,
         ads_dir=ads_dir,
         runs_dir=runs_dir,
@@ -900,7 +924,7 @@ def main(argv=None):
     p_run.add_argument("--brief", required=True, help="absolute path to brief file")
     p_run.add_argument("--cwd", required=True, help="working directory")
     p_run.add_argument("--write", default=None, help="writable worktree directory")
-    p_run.add_argument("--effort", default=None, help="reasoning effort override")
+    p_run.add_argument("--tier", type=int, default=None, help="override floor tier for this job")
     p_run.add_argument("--dry-run", action="store_true", help="print ranking only; do not dispatch")
     p_run.add_argument("--config-dir", default=None, help="directory containing lanes.json and routing.json")
     p_run.add_argument("--meters", default=None, help="path to usage document JSON file")
@@ -933,7 +957,7 @@ def main(argv=None):
             brief=args.brief,
             cwd=args.cwd,
             write=args.write,
-            effort=args.effort,
+            tier=args.tier,
             dry_run=args.dry_run,
             config_dir=args.config_dir,
             meters=args.meters,
