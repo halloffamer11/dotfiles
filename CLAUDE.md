@@ -13,17 +13,22 @@ Machine configuration and agent tooling managed as one Git repository.
 The delegate redesign is the only live thread. Spec
 `docs/superpowers/specs/2026-09-08-delegate-redesign.md`; tickets in
 `.scratch/delegate-redesign/issues/`, each carrying its own decisions and a
-"Landed" note; skill context `agents/skills/delegate/CLAUDE.md`.
+"Landed" note; skill context `agents/skills/delegate/CLAUDE.md`. Ticket 14 is the
+only one still open; the boxes left unticked elsewhere are Orin's own
+confirmations, and each ticket's Status line says which.
 
 **Branch `bench-aa-effort-slugs` is unmerged**, 26 commits ahead of `main` and 2
-behind, suite green at 371 assertions across 12 files. It contains
-`delegate-lane-catalog`, which is 29 commits behind it; that branch is history now,
-not a second thread. Tickets 01-17 are implemented, and the catalog carries every
-effort each codex model offers — 26 lanes, 19 of them generated and provisionally
-tiered. `main` still has none of it, and
-`~/.claude/skills/delegate` symlinks to the **main** checkout — so the installed
-skill has no `discover.py` and no pre-screen, and the four `/delegate-*` wrappers
-cannot be exercised until this merges. Merging conflicts on this file only.
+behind, suite green at 371 assertions across 12 files (two of the twelve report one
+summary line rather than one line per assertion, so other counts of the same suite
+run higher). It contains `delegate-lane-catalog`, which is 29 commits behind it;
+that branch is history now, not a second thread. Tickets 01-17 are implemented, and
+the catalog carries every effort each codex model offers — 26 lanes, 19 of them
+generated and provisionally tiered.
+
+`~/.claude/skills/delegate` symlinks to `~/dotfiles`, the **main** checkout, so the
+installed skill is main's: no `discover.py`, no `bench_page.py`, no pre-screen, no
+per-effort attribution, and the four `/delegate-*` wrappers cannot be exercised
+until this merges. Merging conflicts on this file only.
 
 **Open, in priority order:**
 
@@ -47,8 +52,11 @@ cannot be exercised until this merges. Merging conflicts on this file only.
 **Waiting on Orin** (nothing else blocks on these):
 
 - Run the wizard once to close tickets 06, 07, 07b and 15's last box, and to
-  confirm or correct the provisional tiers on the 19 generated lanes:
-  `python3 <this worktree>/agents/skills/delegate/scripts/setup.py --effort-rows <effort.py check accepted.json>`
+  confirm or correct the provisional tiers on the 19 generated lanes. From the
+  worktree root:
+  `python3 agents/skills/delegate/scripts/setup.py --config-dir stow/delegate/.config/delegate --effort-rows .scratch/delegate-redesign/_data/tbench-accepted.json`
+  The carry page should propose `astra-xhigh@codex` off as dominated by high and the
+  three `ultra` lanes off as never carried.
 - Type each of the four `/delegate-*` wrappers once with a plain-language
   constraint (ticket 11) — needs the merge first.
 - Two one-liners in his own files, outside this repo (ticket 09):
@@ -57,9 +65,10 @@ cannot be exercised until this merges. Merging conflicts on this file only.
   not exist; and `export DELEGATE_BALANCE=1` is still line 1 of `~/.zshrc.local`.
 - Reconcile the live catalog with the stowed one, now that the stowed file is the
   authority (see Settled). The live `~/.config/delegate/lanes.json` is a regular
-  file, not a stow symlink, and still differs: `sol-high@codex` tier 3 against the
-  stowed tier 4, and no `published_as: ["Fable 5.1"]` on the fable lane. Replacing
-  it is a mutating command in Orin's own home, so it is his to run.
+  file, not a stow symlink, and as of 2026-09-10 it holds 10 lanes against the
+  stowed 26; it also lacks `published_as: ["Fable 5.1"]` on the fable lane and keeps
+  tier 4 on `astra-low@codex` and `astra-medium@codex`, which the stowed file drops
+  to 1. Replacing it is a mutating command in Orin's own home, so it is his to run.
 - Decide whether the `~/.claude/CLAUDE.md` Delegation section collapses to one line
   as ticket 09 asks, which would drop the `why-claude` and "a result is a claim"
   rules.

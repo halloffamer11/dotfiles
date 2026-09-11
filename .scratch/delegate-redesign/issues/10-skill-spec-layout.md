@@ -27,7 +27,7 @@ Spec §9.6 asks that every file the hook or docs name exists. Ticket 09 marked i
 
 **Blocked by:** 07b (the TUI wizard worker writes `setup_tui.py` into the current layout; a move commit that races it only makes a conflict).
 
-**Status:** open, raised by Orin 2026-09-09 after a spec review of the five delegate skills.
+**Status:** landed 2026-09-10 (`473df66` ticked boxes whose work had landed in `867cbd1`). All boxes ticked; nothing open.
 
 - [x] The nine scripts plus `setup_tui.py` live in `scripts/` and every test still passes from the new location
 - [x] `tui-research.md` and `tui-mockup.md` live in `references/`; the `.txt` extension is gone

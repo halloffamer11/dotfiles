@@ -30,7 +30,7 @@ one-line explanations onto the confirm screen. Acceptance below is extended.
 
 **Blocked by:** nothing. 07b landed.
 
-**Status:** open, raised by Orin 2026-09-09 from the first live run of the wizard.
+**Status:** landed 2026-09-10 (`54de330`, `1d6b7f8`, `b530b89`). All boxes ticked. The wizard has been through two design passes since — one per screen on 2026-09-10, and then Orin's "one decision per line, one marker on every page" rule (`23f7061`), which is recorded in the project CLAUDE.md as settled.
 
 - [x] A start screen states the task, names both files, and says nothing is written before confirm
 - [x] Tier is defined on the start screen and recalled in the tier screens' footer

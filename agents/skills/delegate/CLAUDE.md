@@ -8,10 +8,12 @@ External worker routing lives in this directory. Read `SKILL.md` first, then use
 - `scripts/ads.sh`: installs and checks the relay layer, **halloffamer11/delegate-skills** (our fork of amElnagdy) at commit `f14dc1eeb27ae8c6282830566950f832ce366d02`, in `~/.local/share/delegate/ads`. `ads.sh install` is reproducible from that constant. The fork exists to carry the grok read-only fix (ticket 14).
 - `scripts/usage.py`: cached subscription-meter probes. `scripts/events.py`: the monitor ledger encoder (schema unchanged).
 - `scripts/report.py`: limits, runs, and the lead's run ledger. `scripts/bench.py`: the human-only benchmark ranking under `~/.cache/delegate/bench/`; no routing code reads it. `collect()` returns two views of the same figures: `models` (one figure per benchmark, for comparing against models nobody runs) and `lanes` (only the figures measured at that lane's own effort, with `mean`/`n` over those). `effort_attributes(measured, lane_effort)` is the whole attribution rule and the wizard and the page both read it from there.
-- `scripts/setup.py`, `scripts/setup_tui.py`: interactive catalog wizard (TUI on a TTY, prompt-driven under `--plain` or pipes).
+- `scripts/setup.py`, `scripts/setup_tui.py`: interactive catalog wizard (TUI on a TTY, prompt-driven under `--plain` or pipes). Each page makes one decision per line with the same `[x]`/`[ ]` box: the carry page selects a model at an effort, the four tier pages assign a tier. `scripts/bench_page.py`: the HTML board the wizard's `o` key opens, which reads its attribution and its domination rule from `bench.py` and `setup_tui.py` rather than deciding either again.
+- `scripts/discover.py`: what each present harness offers — models, their lane or `none`, and `--efforts <model>` for ready-to-paste lane stanzas per effort. It is the only thing that may say an effort exists.
+- `scripts/effort.py`: `pack`/`extract`/`check` over a benchmark page. `check` is the trust boundary: it rejects any number that is not on the page, and no worker may originate a number or an identifier.
 - `assets/preamble.md`: brief preamble prepended to worker prompts.
 - `assets/schemas/return.json`: the child return contract, requested in every prompt and parsed out of the relay's final message.
-- `references/`: `tui-research.md`, `tui-mockup.md`.
+- `references/`: `tui-research.md` and `tui-mockup.md` (the unbuilt monitor), `kiro.md` (a harness with no lane and a stub in `delegate.py`).
 - `tests/`: one test file per script, stdlib only, no network; `tests/fake-ads/relay.mjs` stands in for the relays.
 - Sibling skills `../delegate-claude`, `../delegate-codex`, `../delegate-agy`, `../delegate-grok`: typed-only wrappers, about twenty lines each.
 

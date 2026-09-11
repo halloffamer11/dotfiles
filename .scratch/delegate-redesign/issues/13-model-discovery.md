@@ -17,7 +17,7 @@ The wizard's start screen (ticket 12) shows the same "no lane" list as a notice,
 
 **Blocked by:** nothing.
 
-**Status:** open, raised by Orin 2026-09-09: "we need a deterministic script to discover new models. this should be simple."
+**Status:** landed 2026-09-10 (`7123899`, `1ab5cb2`). All boxes ticked. `discover.py --efforts <model>` generated the 19 effort lanes the catalog now carries (`bc0f773`), and it is what established that grok and agy expose no effort dial at all.
 
 - [x] `scripts/discover.py` lists every model each present harness offers, with its lane or `none`
 - [x] It names lanes whose model no longer appears in the harness

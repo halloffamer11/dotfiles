@@ -73,7 +73,7 @@ sensitive.
 
 **Blocked by:** 13 (discovery), 12 (the wizard screens this adds a toggle to).
 
-**Status:** open, raised by Orin 2026-09-09: "we should have each level. so luna-low, luna-med, luna-high would all be lanes. add an option to disable or turn off certain lanes."
+**Status:** implemented 2026-09-10 (`8d1dbb2`, `5994965`, `1ab5cb2`, `bc0f773`). Every effort each codex model offers is now a lane — 26 in the catalog — and the pre-screen proposes the dominated ones off. The one unticked box is Orin's: enumerating the efforts he wants in one wizard run. The chunk-dispatch measurements in the last section are still the open engineering problem and are listed in the project CLAUDE.md.
 
 - [x] `enabled` is a validated boolean on every lane, defaulting to true when absent so existing catalogs keep working
 - [x] `rank.py` reports a disabled lane as ineligible with reason `disabled`, and never picks one

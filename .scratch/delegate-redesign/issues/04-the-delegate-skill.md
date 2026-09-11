@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 Ranking over the catalog; 03 One run through an ADS relay.
 
-**Status:** landed 2026-09-09 in the working tree (uncommitted)
+**Status:** landed 2026-09-09, committed on `bench-aa-effort-slugs`. All boxes ticked.
 
 - [x] `/delegate scout <brief>` prints the ranking and starts a run in the background; the session is notified on exit and reads the return file
 - [x] `--dry-run` prints the ranking and starts nothing
