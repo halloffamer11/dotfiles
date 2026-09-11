@@ -21,10 +21,10 @@ The delegate redesign is the only live thread. Spec
 only one still open; the boxes left unticked elsewhere are Orin's own
 confirmations, and each ticket's Status line says which.
 
-**Branch `bench-aa-effort-slugs` is unmerged**, 26 commits ahead of `main` and 2
+**Branch `bench-aa-effort-slugs` is unmerged**, 30 commits ahead of `main` and 2
 behind, suite green at 371 assertions across 12 files (two of the twelve report one
 summary line rather than one line per assertion, so other counts of the same suite
-run higher). It contains `delegate-lane-catalog`, which is 29 commits behind it;
+run higher). It contains `delegate-lane-catalog`, which is 33 commits behind it;
 that branch is history now, not a second thread. Tickets 01-17 are implemented, and
 the catalog carries every effort each codex model offers — 26 lanes, 19 of them
 generated and provisionally tiered.
