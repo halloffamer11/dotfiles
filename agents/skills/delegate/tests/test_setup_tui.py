@@ -312,12 +312,28 @@ try:
     record("12 tier footer carries the tier one-liner",
            w.screen == "tier"
            and "ceiling" in footer
-           and "x: on/off" in footer
+           # One decision per line, so one gesture, named once. The tier screen
+           # used to advertise `x: on/off` beside `space: mark`, which was the
+           # carry screen's decision offered a second time.
+           and "space/x: flip" in w.view()["footer"]
+           and "on/off" not in footer
            and "o: bench" in footer)
+
     before_cursor = w.cursor
     w.handle("d")
     record("12b d is unbound on tier",
            w.screen == "tier" and w.cursor == before_cursor and w.tier == 4)
+
+    w2 = wizard()
+    w2.handle("enter")
+    w2.handle("enter")
+    carry_footer = w2.view()["footer"]
+    record("12c one gesture flips the box, and both screens name that one",
+           w2.screen == "prescreen"
+           and "space/x: flip" in carry_footer
+           and carry_footer.count("flip") == 1
+           and w.view()["footer"].count("flip") == 1,
+           repr(carry_footer) + repr(w.view()["footer"]))
 except Exception as e:
     record("12 tier footer carries the tier one-liner", False, repr(e))
 
@@ -389,40 +405,98 @@ def to_confirm(w):
         w.handle("enter")
 
 
+def not_carried(w, *lanes):
+    """Leave `lanes` uncarried on the carry screen, then go on to tier 4.
+
+    Carry is decided here and nowhere else, so a test that wants an off lane on
+    a tier screen has to come through this screen to get one.
+    """
+    w.handle("enter")
+    w.handle("enter")
+    assert w.screen == "prescreen", w.screen
+    for lane in lanes:
+        move_to(w, lane)
+        w.handle("x")
+        assert not w._enabled[lane], lane
+    w.handle("enter")
+    assert w.screen == "tier" and w.tier == 4, (w.screen, w.tier)
+
+
 try:
+    # The tier screen makes one decision: does this lane take the tier on
+    # screen. `x` used to switch the lane off here as well, which asked the
+    # carry screen's question a second time and gave this line's box two
+    # meanings. Both keys now do the one thing, and neither touches carry.
     w = wizard()
     start(w)
     cursor_name = next(r["cells"][1] for r in w.view()["rows"] if r["cursor"])
     enabled_before = dict(w._enabled)
-    marks_before = {tier: set(names) for tier, names in w._marks.items()}
     assigned_before = dict(w._assigned)
     others = {r["cells"][1]: (r["marked"], r["cells"][0], r["tag"])
               for r in w.view()["rows"] if r["cells"][1] != cursor_name}
+    marked_before = row_for(w.view(), cursor_name)["marked"]
     w.handle("x")
+    after_x = row_for(w.view(), cursor_name)
+    others_after = {r["cells"][1]: (r["marked"], r["cells"][0], r["tag"])
+                    for r in w.view()["rows"] if r["cells"][1] != cursor_name}
+    w.handle("space")
+    after_space = row_for(w.view(), cursor_name)
+    record("16 space and x are one mark gesture, and neither switches a lane off",
+           w.screen == "tier" and w.tier == 4
+           and w._assigned == assigned_before
+           and after_x["marked"] is not marked_before
+           and after_x["cells"][0] == ("[x]" if after_x["marked"] else "[ ]")
+           # space undoes what x did, so the two are the same control
+           and after_space["marked"] is marked_before
+           and w._enabled == enabled_before
+           and after_x["tag"] == "" and after_space["tag"] == ""
+           and others_after == others,
+           repr((marked_before, after_x["cells"][0], after_space["cells"][0])))
+except Exception as e:
+    record("16 space and x are one mark gesture, and neither switches a lane off",
+           False, repr(e))
+
+
+try:
+    # The same two keys on the carry screen flip the same box, and only the
+    # cursor row's.
+    w = wizard()
+    w.handle("enter")
+    w.handle("enter")
+    cursor_name = next(r["cells"][1] for r in w.view()["rows"] if r["cursor"])
+    enabled_before = dict(w._enabled)
+    others = {r["cells"][1]: (r["marked"], r["cells"][0], r["tag"])
+              for r in w.view()["rows"] if r["cells"][1] != cursor_name}
+    w.handle("space")
     v = w.view()
     flipped = row_for(v, cursor_name)
     others_after = {r["cells"][1]: (r["marked"], r["cells"][0], r["tag"])
                     for r in v["rows"] if r["cells"][1] != cursor_name}
-    record("16 x flips only the cursor row",
-           w.screen == "tier" and w.tier == 4
-           and w._assigned == assigned_before and w._marks == marks_before
-           and w._enabled[cursor_name] is not enabled_before[cursor_name]
-           and all(w._enabled[name] is enabled_before[name]
-                   for name in enabled_before if name != cursor_name)
+    w.handle("x")
+    back = row_for(w.view(), cursor_name)
+    record("16b on the carry screen both keys flip only the cursor row",
+           w.screen == "prescreen"
+           and enabled_before[cursor_name] is True
+           # space flipped it, and only it
+           and carry_of(flipped) == "off" and flipped["dimmed"]
            and others_after == others
-           and flipped["dimmed"] and flipped["tag"] == "off")
+           # x undid what space did, so the two are the same control here too
+           and carry_of(back) == "on"
+           and w._enabled == enabled_before,
+           repr((flipped["cells"][0], back["cells"][0])))
 except Exception as e:
-    record("16 x flips only the cursor row", False, repr(e))
+    record("16b on the carry screen both keys flip only the cursor row",
+           False, repr(e))
 
 
 try:
+    # `off` reaches the tier screen as state carried in from the carry screen.
+    # It is legible there — dimmed, tagged — and it is not a control there.
     w = wizard()
-    start(w)
+    not_carried(w, "flash-high@agy")
     move_to(w, "sol-high@codex")
     w.handle("space")
     w.handle("enter")
-    move_to(w, "flash-high@agy")
-    w.handle("x")
     v = w.view()
     names = [r["cells"][1] for r in v["rows"]]
     flash = row_for(v, "flash-high@agy")
@@ -437,9 +511,7 @@ except Exception as e:
 
 try:
     w = wizard()
-    start(w)
-    move_to(w, "flash-high@agy")
-    w.handle("x")
+    not_carried(w, "flash-high@agy")
     while w.tier != 1:
         w.handle("enter")
     move_to(w, "flash-high@agy")
@@ -462,9 +534,7 @@ except Exception as e:
 
 try:
     w = wizard()
-    start(w)
-    move_to(w, "flash-high@agy")
-    w.handle("x")
+    not_carried(w, "flash-high@agy")
     to_confirm(w)
     confirm = w.view()
     off_rows = [r for r in confirm["rows"] if r["cells"][0] == "flash-high@agy"]
@@ -946,7 +1016,8 @@ except Exception as e:
 # Every fault below was invisible to a test that read only the frame dict. The
 # pre-screen at 80 places dropped its reason column outright, a tier tag reached
 # the eye as `ti`, and eight of eleven lanes could scroll away in silence.
-from setup_tui import ROW_FLOOR, _clip, _fit_table, layout_lines  # noqa: E402
+from setup_tui import (ROW_FLOOR, TIER_ASSIGNED_LEGEND, TIER_OFF_LEGEND,  # noqa: E402
+                       TIER_ONELINER, _clip, _fit_table, layout_lines)
 
 
 def screen(view, width=80, height=24):
@@ -1001,12 +1072,10 @@ try:
     # line, so it arrived as `ti`. The tier is in the box now and `off` is the
     # only tag; the renderer keeps room for it at any width.
     w = wizard(lanes=astra_lanes())
-    start(w)
+    not_carried(w, "terra-high@codex")
     move_to(w, "sol-high@codex")
     w.handle("space")
     w.handle("enter")
-    move_to(w, "terra-high@codex")
-    w.handle("x")
     tagged = []
     for width in (80, 100, 140):
         grid = screen(w.view(), width, 30)
@@ -1105,6 +1174,58 @@ try:
            visible == benchmarks[:len(visible)] and visible, repr(names))
 except Exception as e:
     record("36 the benchmark columns shown are a prefix of the ones asked for", False, repr(e))
+
+
+try:
+    # The tier screen exists to read a tier off the scores. `model` and `effort`
+    # are both spelled out in the lane name, so at 80 places they were 27 places
+    # of restatement drawn ahead of the scores, and the scores fell off the end.
+    w = wizard()
+    start(w)
+    view = w.view()
+    chosen, _widths = _fit_table(view, 80)
+    names = [view["columns"][i] for i in chosen]
+    benchmarks = [n for n in view["columns"]
+                  if n in (w.bench or {}).get("epoch_benchmarks", [])]
+    visible = [n for n in names if n in benchmarks]
+    grid = screen(view, 80, 24)
+    record("37 at 80 places the tier screen shows scores, not the lane name twice",
+           visible and visible == benchmarks[:len(visible)]
+           and "Epoch mean rank" in names
+           and "model" not in names and "effort" not in names
+           and "90.0" in grid[3] and "1.0 (n=5)" in grid[3],
+           repr(names) + "\n" + repr(grid[2:4]))
+except Exception as e:
+    record("37 at 80 places the tier screen shows scores, not the lane name twice",
+           False, repr(e))
+
+
+try:
+    # `[n]` and `off` are state arriving from an earlier screen, not controls.
+    # Each legend line is earned by such a row being on screen: a standing line
+    # explaining a case that is not there costs the rows their room.
+    w = wizard()
+    start(w)
+    clean = w.view()["legend"]
+    w2 = wizard()
+    not_carried(w2, "flash-high@agy")
+    off_only = w2.view()["legend"]
+    move_to(w2, "sol-high@codex")
+    w2.handle("space")
+    w2.handle("enter")
+    both = w2.view()["legend"]
+    record("38 a tier legend line appears only when its state is on screen",
+           # nothing off and nothing assigned: the tier definition alone
+           clean == [TIER_ONELINER]
+           and off_only == [TIER_OFF_LEGEND, TIER_ONELINER]
+           and both == [TIER_ASSIGNED_LEGEND, TIER_OFF_LEGEND, TIER_ONELINER]
+           # the reference line renders last, directly above the footer
+           and all(lines[-1] == TIER_ONELINER for lines in (clean, off_only, both))
+           and all(len(line) <= 79 for line in both),
+           repr((clean, off_only, both)))
+except Exception as e:
+    record("38 a tier legend line appears only when its state is on screen",
+           False, repr(e))
 
 
 sys.exit(1 if fails else 0)

@@ -11,9 +11,17 @@ from catalog import CLASSES, EFFORTS, HARNESSES, resolve_published_model
 TIER_ONELINER = "Tier: capability 1-4, a ceiling — needing 3 means tier 3 or 4, never lower."
 PACE_LEGEND = "pace = unspent quota vs time left in the week. Above 1.0 it will expire unused."
 CLASSTIER_LEGEND = "classTier: a class needing N uses a lane of tier N or higher, never lower."
-TIER_FOOTER = "↑/↓/j/k: move  space: mark  x: on/off  enter: next  b: back  o: bench  q: quit"
-TIER_OFF_LEGEND = "dim [n]: already assigned to tier n.  off: switched off, still takes a tier."
-PRESCREEN_FOOTER = "↑/↓ or j/k: move  x: flip  enter: continue  b: back  q: quit"
+# One gesture flips the box, and it is the same gesture on the carry screen and
+# on the tier screens, so each footer names it the same way. The box means
+# something different on each screen — the column header says which — but the
+# key that moves it never changes.
+FLIP_KEYS = "space/x: flip"
+TIER_FOOTER = f"↑/↓/j/k: move  {FLIP_KEYS}  enter: next  b: back  o: bench  q: quit"
+# Both of these describe a line the human cannot decide anything about, so each
+# one is earned by such a line being on screen; neither is standing furniture.
+TIER_ASSIGNED_LEGEND = "dim [n]: already taken at tier n, so that line has no decision left."
+TIER_OFF_LEGEND = "off: not carried — you said so on the carry screen. It still takes a tier."
+PRESCREEN_FOOTER = f"↑/↓ or j/k: move  {FLIP_KEYS}  enter: continue  b: back  q: quit"
 NO_DATA_MESSAGE = "No per-effort data was supplied, so nothing else could be judged."
 CONFIRM_OFF_LEGEND = "off: written with enabled: false.  On lanes omit the key."
 
@@ -323,7 +331,7 @@ class Wizard:
                 self.cursor = (self.cursor - 1) % len(names)
             elif key == "down" and names:
                 self.cursor = (self.cursor + 1) % len(names)
-            elif key == "x" and names:
+            elif key in ("x", "space") and names:
                 self._toggle_enabled(names[min(self.cursor, len(names) - 1)])
             elif key == "enter":
                 self._enter_tier(4)
@@ -338,15 +346,17 @@ class Wizard:
                 self.cursor = (self.cursor - 1) % len(active)
             elif key == "down" and active:
                 self.cursor = (self.cursor + 1) % len(active)
-            elif key == "space":
+            elif key in ("space", "x"):
+                # The only decision this screen makes. Carrying a lane is the
+                # carry screen's decision, and `b` from tier 4 goes back to it;
+                # making it here as well asked the human the same question twice
+                # and gave the box on this line two meanings.
                 name = self._active_name()
                 if name:
                     if name in self._marks[self.tier]:
                         self._marks[self.tier].remove(name)
                     else:
                         self._marks[self.tier].add(name)
-            elif key == "x":
-                self._toggle_enabled(self._active_name())
             elif key == "enter":
                 active, _ = self._tier_names()
                 if self.tier == 1 and any(name not in self._marks[1] for name in active):
@@ -507,6 +517,26 @@ class Wizard:
             lines.append(ULTRA_LEGEND)
         if any(r.endswith("in the catalog") for r in reasons):
             lines.append(RECORDED_LEGEND)
+        return lines
+
+    def _tier_legend(self):
+        """Explain the lines on this screen that carry state instead of a choice.
+
+        `[n]` and `off` are both facts arriving from an earlier screen, not
+        controls, and a reader has to be able to tell them from the `[x]` this
+        screen does answer. Each line is earned by such a row being on screen,
+        the way the pre-screen legend is: standing furniture explaining a case
+        that is not there costs the rows their room on a short window.
+        """
+        lines = []
+        if self._assigned:
+            lines.append(TIER_ASSIGNED_LEGEND)
+        if any(not self._enabled[name] for name in self.lanes_doc["lanes"]):
+            lines.append(TIER_OFF_LEGEND)
+        # The tier definition is reference, so it goes last: last renders
+        # directly above the footer, where it reads as a second footer line, and
+        # it is the first line a short window gives up.
+        lines.append(TIER_ONELINER)
         return lines
 
     def _tier_map_lines(self):
@@ -683,11 +713,15 @@ class Wizard:
                 # tag after the table: a tag is rendered past the last column and
                 # then clipped, so `tier 3` reached the eye as `ti`. `[3]` is the
                 # same fact in the width the box already has, and it leaves `off`
-                # as the only tag, which fits.
+                # as the only tag, which fits. A digit is not a third state of
+                # the tick: dimmed, and with the legend line it earns, it says
+                # the line is spoken for and this screen asks nothing of it.
                 if is_assigned:
                     box = f"[{self._assigned[name]}]"
                 else:
                     box = "[x]" if marked else "[ ]"
+                # `off` is state carried in from the carry screen, not a control
+                # on this one: dimmed, tagged, and answered nowhere but there.
                 tag = "off" if is_off else ""
                 rows.append({
                     "cells": [box, name, lane["model"], lane["effort"],
@@ -702,9 +736,8 @@ class Wizard:
                 footer=TIER_FOOTER,
                 # The tier definition belongs where the decision is made, but it
                 # and the key hints together overflow an 80-column footer, and a
-                # truncated footer loses the keys. Last legend line renders
-                # directly above the footer, so it reads as a second footer line.
-                legend=[TIER_OFF_LEGEND, TIER_ONELINER],
+                # truncated footer loses the keys.
+                legend=self._tier_legend(),
             )
         if self.screen == "routing":
             values = [(f"classTier.{name}", self.routing_doc["classTier"][name]) for name in CLASSES]
@@ -792,6 +825,12 @@ def _fit_table(view, width):
     column that explains a decision is the last thing a narrow window should
     lose — dropping it is how the pre-screen came to propose a lane off at 80
     places and give no reason at all.
+
+    `model` and `effort` are fitted last, after the data. Both are already
+    spelled out in the lane name — `astra-xhigh@codex` is the astra model at
+    xhigh — so at 80 places they were 27 places of restatement drawn ahead of
+    the benchmark scores, and the scores, which are the only reason the tier
+    screen exists, were the columns that fell off the end.
     """
     columns = view["columns"]
     if not columns:
@@ -799,22 +838,27 @@ def _fit_table(view, width):
     elastic = view.get("elastic")
     elastic_index = columns.index(elastic) if elastic in columns else None
     priority_names = ("mark", "carry", "lane", "Epoch mean rank")
+    deferred_names = ("model", "effort")
     priority = [columns.index(name) for name in priority_names if name in columns]
-    rest = [i for i in range(len(columns)) if i not in priority and i != elastic_index]
+    deferred = [columns.index(name) for name in deferred_names
+                if name in columns and columns.index(name) not in priority
+                and columns.index(name) != elastic_index]
+    rest = [i for i in range(len(columns))
+            if i not in priority and i not in deferred and i != elastic_index]
     chosen = []
     widths = {}
     used = 0
     room = max(1, width - 1)
-    for i in priority + rest:
+    for i in priority + rest + deferred:
         cell_width = min(_natural_width(view, i), 24)
         if chosen and used + 2 + cell_width > room:
             # A column skipped over while a narrower one behind it is drawn
             # reads as data nobody gathered: at 100 places FrontierCode dropped
             # out and APEX-Agents took its place. What is shown is a prefix of
             # what was asked for, so the rest is missing width, not missing data.
-            if i in rest:
-                break
-            continue
+            if i in priority:
+                continue
+            break
         chosen.append(i)
         widths[i] = cell_width
         used += (2 if len(chosen) > 1 else 0) + cell_width
