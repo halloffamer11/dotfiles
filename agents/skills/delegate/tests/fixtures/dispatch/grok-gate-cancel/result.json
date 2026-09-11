@@ -1,0 +1,26 @@
+{
+  "schema": "delegate-relay.result.v1",
+  "lane": null,
+  "laneSource": null,
+  "tool": "grok",
+  "autonomy": "read-only",
+  "model": "grok-4.6",
+  "effort": "high",
+  "resumeLast": false,
+  "grokVersion": "grok 1.0.25 (f7e67d6988e2) [stable]",
+  "status": "completed",
+  "exitCode": 0,
+  "signal": null,
+  "sessionId": "01a087c8-34ac-7d70-8c56-d8c6d5a30f77",
+  "finalMessage": "I'll research public benchmark sources against the lane shape (harness, model, effort) and the current Epoch AI CSV, starting from the repo and LiveBench.",
+  "usage": {
+    "input_tokens": 16595,
+    "cache_read_input_tokens": 5888,
+    "cache_creation_input_tokens": 0,
+    "output_tokens": 794,
+    "reasoning_tokens": 665,
+    "total_tokens": 23277
+  },
+  "touchedFiles": [],
+  "readOnlyViolation": false
+}

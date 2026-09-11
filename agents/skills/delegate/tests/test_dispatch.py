@@ -16,6 +16,12 @@ SAMPLES_DIR = os.path.abspath(os.path.join(HERE, "..", "assets", "samples"))
 DELEGATE_PY = os.path.join(DELEGATE_DIR, "delegate.py")
 FAKE_RELAY_SRC = os.path.join(HERE, "fake-ads", "relay.mjs")
 ADS_SH = os.path.join(DELEGATE_DIR, "ads.sh")
+# Relay output copied from real runs, trimmed of paths and signatures. Each
+# directory is a run directory as the relay leaves it, before map_result.
+RUN_FIXTURES_DIR = os.path.join(HERE, "fixtures", "dispatch")
+
+sys.path.insert(0, DELEGATE_DIR)
+import delegate  # noqa: E402
 
 
 def pinned_ads_commit():
@@ -783,6 +789,65 @@ def main():
                 disp27.get("leash") is False
             )
         record("27. --no-leash scout prompt lacks leash, dispatch.json leash=False", ok27, f"rc={res27.returncode}")
+
+        # -------------------------------------------------------------
+        # 28. A tool cancelled at the permission gate is blocked, not partial
+        #     (ticket 14). Fixture: grok46-high@grok, 2026-09-09, read-only
+        #     under --permission-mode plan. The relay said completed and the
+        #     final message was one sentence of intent, so this used to come
+        #     back partial with "no return block in final message".
+        # -------------------------------------------------------------
+        def stage_run(fixture, name, keep_event=None, final_message=None):
+            run_dir = os.path.join(tmpdir, "map_result", name)
+            shutil.copytree(os.path.join(RUN_FIXTURES_DIR, fixture), run_dir)
+            with open(os.path.join(run_dir, "dispatch.json"), "w", encoding="utf-8") as f:
+                json.dump({"lane": "grok46-high@grok"}, f)
+            if keep_event is not None:
+                events_path = os.path.join(run_dir, "events.jsonl")
+                with open(events_path, encoding="utf-8") as f:
+                    kept = [l for l in f if keep_event(json.loads(l))]
+                with open(events_path, "w", encoding="utf-8") as f:
+                    f.writelines(kept)
+            if final_message is not None:
+                result_path = os.path.join(run_dir, "result.json")
+                with open(result_path, encoding="utf-8") as f:
+                    res_doc = json.load(f)
+                res_doc["finalMessage"] = final_message
+                with open(result_path, "w", encoding="utf-8") as f:
+                    json.dump(res_doc, f)
+            return run_dir
+
+        gate_reason = "permission gate cancelled the run at run_terminal_command"
+
+        dir28a = stage_run("grok-gate-cancel", "28a")
+        out28a = delegate.map_result(dir28a, "40m", 0, None)
+        ret28a = json.load(open(os.path.join(dir28a, "return.json")))
+        disp28a = json.load(open(os.path.join(dir28a, "dispatch.json")))
+        ok28a = (
+            out28a["status"] == "blocked" and
+            out28a["reason"] == gate_reason and
+            ret28a.get("status") == "blocked" and
+            ret28a.get("deliverable") == f"blocked: {gate_reason}" and
+            disp28a.get("reason") == gate_reason
+        )
+        record("28a. gate-cancelled tool call -> blocked naming the gate", ok28a, f"out={out28a}")
+
+        # The end event alone is not the gate: stopReason=cancelled with no
+        # cancelled tool call keeps the old reading.
+        dir28b = stage_run("grok-gate-cancel", "28b",
+                           keep_event=lambda ev: not (ev.get("type") == "tool_call_update" and ev.get("status") == "failed"))
+        out28b = delegate.map_result(dir28b, "40m", 0, None)
+        ok28b = (
+            out28b["status"] == "partial" and
+            out28b["open_questions"] == ["no return block in final message"]
+        )
+        record("28b. stopReason=cancelled without a cancelled tool stays partial", ok28b, f"out={out28b}")
+
+        # The gate is the better reason than an empty final message.
+        dir28c = stage_run("grok-gate-cancel", "28c", final_message="")
+        out28c = delegate.map_result(dir28c, "40m", 0, None)
+        ok28c = (out28c["status"] == "blocked" and out28c["reason"] == gate_reason)
+        record("28c. gate cancel with an empty final message names the gate", ok28c, f"out={out28c}")
 
     if fails > 0:
         print(f"FAIL: {fails} tests failed", file=sys.stderr)

@@ -22,6 +22,8 @@ Run directory layout:
 Status mapping:
   completed:
     - with return block (status in done, partial, blocked) -> block status
+    - without block, a tool cancelled at the permission gate
+      (events.jsonl)                                       -> blocked (reason: permission gate cancelled the run at <tool>)
     - without block and non-empty finalMessage             -> partial (open_question added)
     - with empty finalMessage                              -> blocked (reason: empty final message)
   timeout                                                  -> blocked (reason: timeout after <timeout>)
@@ -447,6 +449,43 @@ def run_relay(ads_dir, harness, model, effort, timeout_str, prompt_path, child_c
     return relay_exit, secs
 
 
+def gate_cancelled_tool(run_dir):
+    """The tool a permission gate cancelled, if that is how the run ended.
+
+    grok's event stream records a gate refusal as a failed tool_call_update whose
+    text says the execution was cancelled, then an end event with
+    stopReason=cancelled. Both must hold: a cancel with no cancelled tool is some
+    other stop. Returns the tool name ("" if the call was never announced), or
+    None when the run did not end at the gate. Other harnesses' event shapes do
+    not match and return None.
+    """
+    events_path = os.path.join(run_dir, "events.jsonl")
+    if not os.path.isfile(events_path):
+        return None
+    tool_names = {}
+    cancelled_tool = None
+    stop_reason = None
+    with open(events_path, "r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            try:
+                ev = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(ev, dict):
+                continue
+            kind = ev.get("type")
+            if kind == "tool_call":
+                tool_names[ev.get("toolCallId")] = ev.get("toolName") or ev.get("title") or ""
+            elif kind == "tool_call_update" and ev.get("status") == "failed":
+                if "cancel" in json.dumps(ev.get("content")).lower():
+                    cancelled_tool = tool_names.get(ev.get("toolCallId"), "")
+            elif kind == "end":
+                stop_reason = ev.get("stopReason")
+    if stop_reason == "cancelled" and cancelled_tool is not None:
+        return cancelled_tool
+    return None
+
+
 def map_result(run_dir, lane_timeout, relay_exit, write_dir):
     result_path = os.path.join(run_dir, "result.json")
     stderr_path = os.path.join(run_dir, "relay.stderr")
@@ -488,6 +527,7 @@ def map_result(run_dir, lane_timeout, relay_exit, write_dir):
 
         if relay_status == "completed":
             block = find_return_block(final_message)
+            gated_tool = gate_cancelled_tool(run_dir) if block is None else None
             if block is not None:
                 status = block.get("status")
                 deliv = block.get("deliverable", "")
@@ -520,6 +560,15 @@ def map_result(run_dir, lane_timeout, relay_exit, write_dir):
 
                 if status == "blocked":
                     reason = deliverable
+            elif gated_tool is not None:
+                # The relay says completed, but the worker's first gated tool
+                # was refused and the turn ended; its final message is intent,
+                # not work. Reading it as partial hides the cause (ticket 14).
+                status = "blocked"
+                reason = "permission gate cancelled the run"
+                if gated_tool:
+                    reason += f" at {gated_tool}"
+                deliverable = f"blocked: {reason}"
             elif final_message.strip():
                 status = "partial"
                 deliverable = "\n".join(final_message.splitlines()[:60])
