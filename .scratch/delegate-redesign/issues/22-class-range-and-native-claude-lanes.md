@@ -117,9 +117,18 @@ definitions, the three lanes in the stowed and sample `lanes.json`, the
 Both slices were implemented by `flash-high@agy` and checked by the lead. The lead
 fixed a grep-gaming string concatenation in `catalog.py`, stale "need" and "a
 ceiling" wording in four wrappers and the setup TUI, and the sample-catalog
-breakage in five suites. Not yet committed.
+breakage in five suites. **Landed on `main` as `71e285c`.**
 
 ## Out of scope (recorded here, not ticketed)
+
+- **`catalog.write_json` replaces a symlink with a plain file.** It resolves `~` and
+  relative paths (`abspath`), not links, then calls `os.replace`. Once
+  `~/.config/delegate` is stowed, run the wizard only with
+  `--config-dir stow/delegate/.config/delegate`. The fix is to resolve the path with
+  `realpath` before writing.
+- **`catalog.py check --partial` cannot validate a project override.** It needs a
+  `version` to tell a lanes file from a routing file, and overrides carry none. This
+  predates this ticket; the real loading path accepts overrides.
 
 - **Fan-out-aware ranking.** A fan-out ranks each job against the same meter
   reading, so N concurrent jobs can empty a 5-hour window that the gate saw as
@@ -132,11 +141,23 @@ breakage in five suites. Not yet committed.
 
 ## Orin's steps after merge
 
-- Migrate `~/.config/delegate/routing.json` and
-  `~/Documents/daedalus/sienna_purch/.delegate/routing.json` to `classes`.
-- Run `make skills` so the `lane-*.md` agent files link into `~/.claude/agents`.
-- Delete the Delegation section of `~/.claude/CLAUDE.md`.
-- Reconcile the live `lanes.json` with the stowed one (already listed in the repo
-  `CLAUDE.md`).
+- [x] Migrate `~/.config/delegate/routing.json` and
+      `~/Documents/daedalus/sienna_purch/.delegate/routing.json` to `classes`.
+- [x] Run `make skills` so the `lane-*.md` agent files link into `~/.claude/agents`.
+- [x] Delete the Delegation section of `~/.claude/CLAUDE.md`.
+- [ ] Run the wizard against the repo catalog, then link the live folder to it. Until
+      then the live `lanes.json` has 10 lanes and no native Claude lane can be
+      picked; the ceiling blocks Fable either way. From `~/dotfiles`:
 
-**Status:** open, 2026-09-11.
+          python3 agents/skills/delegate/scripts/setup.py --config-dir stow/delegate/.config/delegate --effort-rows .scratch/delegate-redesign/_data/tbench-accepted.json
+          python3 agents/skills/delegate/scripts/catalog.py check stow/delegate/.config/delegate/lanes.json
+          mkdir ~/.config/delegate/_pre-stow-2026-09-11
+          mv ~/.config/delegate/lanes.json ~/.config/delegate/routing.json ~/.config/delegate/_pre-stow-2026-09-11/
+          stow -n -v -d stow -t ~ -R delegate
+          stow -v -d stow -t ~ -R delegate
+
+      Do not pass `--adopt`: it would move the 10-lane live file over the repo's.
+      Do not copy `aa-key` into `stow/`: stow would link it, and the repo is public.
+
+**Status:** landed 2026-09-11 (`71e285c`); one step left for Orin: the wizard run
+and the stow link.
