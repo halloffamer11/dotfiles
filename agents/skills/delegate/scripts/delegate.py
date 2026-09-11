@@ -561,9 +561,10 @@ def map_result(run_dir, lane_timeout, relay_exit, write_dir):
                 if status == "blocked":
                     reason = deliverable
             elif gated_tool is not None:
-                # The relay says completed, but the worker's first gated tool
-                # was refused and the turn ended; its final message is intent,
-                # not work. Reading it as partial hides the cause (ticket 14).
+                # The relay says completed, but a gated tool was refused and
+                # the turn ended there, so the worker did not finish. Reading
+                # it as partial hides the cause (ticket 14). As on timeout, the
+                # final message stays in final.txt.
                 status = "blocked"
                 reason = "permission gate cancelled the run"
                 if gated_tool:

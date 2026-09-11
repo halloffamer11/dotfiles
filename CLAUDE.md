@@ -17,14 +17,14 @@ Machine configuration and agent tooling managed as one Git repository.
 The delegate redesign is the only live thread. Spec
 `docs/superpowers/specs/2026-09-08-delegate-redesign.md`; tickets in
 `.scratch/delegate-redesign/issues/`, each carrying its own decisions and a
-"Landed" note; skill context `agents/skills/delegate/CLAUDE.md`. Ticket 14 is the
-only one still open; the boxes left unticked elsewhere are Orin's own
-confirmations, and each ticket's Status line says which.
+"Landed" note; skill context `agents/skills/delegate/CLAUDE.md`. No ticket is open
+(14 closed 2026-09-10); the boxes left unticked are Orin's own confirmations, and
+each ticket's Status line says which.
 
-**Branch `bench-aa-effort-slugs` is unmerged**, 30 commits ahead of `main` and 2
-behind, suite green at 371 assertions across 12 files (two of the twelve report one
+**Branch `bench-aa-effort-slugs` is unmerged**, 33 commits ahead of `main` and 2
+behind, suite green at 374 assertions across 12 files (two of the twelve report one
 summary line rather than one line per assertion, so other counts of the same suite
-run higher). It contains `delegate-lane-catalog`, which is 33 commits behind it;
+run higher). It contains `delegate-lane-catalog`, which is 36 commits behind it;
 that branch is history now, not a second thread. Tickets 01-17 are implemented, and
 the catalog carries every effort each codex model offers — 26 lanes, 19 of them
 generated and provisionally tiered.
@@ -42,10 +42,7 @@ until this merges. Merging conflicts on this file only.
    catalog, and the tiers on the 19 new lanes are provisional by construction —
    `meter_weight`, `timeout` and, below the copied effort, `tier` are not
    measurements. Each new lane says so in its `note`.
-2. **Ticket 14** — two real gaps: a cancelled-at-the-gate run returns `partial`
-   rather than `blocked` naming the gate, and the cancelled-tool-call regression
-   test through `map_result` does not exist. The agy box is satisfied by the ADS pin.
-3. **Chunk dispatch does not fit one agy window.** `effort.py` splits a large packet
+2. **Chunk dispatch does not fit one agy window.** `effort.py` splits a large packet
    correctly, but dispatches the chunks in sequence: both live Artificial Analysis
    runs on 2026-09-10 failed at chunk 6 of 7 when the agy **5-hour** meter hit 0%
    (the weekly had just refilled to 95% — the 5h window is the binding constraint,

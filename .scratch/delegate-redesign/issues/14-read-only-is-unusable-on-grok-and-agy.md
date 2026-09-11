@@ -44,15 +44,15 @@ already fixed on disk, because this ticket and the skill's context file both sti
 broken. A half-fixed defect that documentation still reports as fully broken is worse than either
 state alone.
 
-**Status:** open, raised by Orin 2026-09-09: "debug why they failed. this is a defect in the delegate skill itself."
+**Status:** closed 2026-09-10 (see "Landed" at the end). Raised by Orin 2026-09-09: "debug why they failed. this is a defect in the delegate skill itself."
 
-- [ ] A cancelled-at-the-gate run returns `blocked` with a reason naming the permission gate, not `partial`
-- [ ] A read-only dispatch to a lane with no working read-only mode is refused before the relay starts, with the reason
+- [x] A cancelled-at-the-gate run returns `blocked` with a reason naming the permission gate, not `partial` — reason `permission gate cancelled the run at <tool>`, commit `59fccab`
+- [x] A read-only dispatch to a lane with no working read-only mode is refused before the relay starts, with the reason — **closed without code, Orin 2026-09-10**: the pin fixed grok and agy, so no lane is known to lack a working read-only mode, and a refusal list would have no entries. The `blocked` gate reading (box 1) is what makes the next failure of this shape legible. claude's relay still passes `--permission-mode plan` headless (last section), with its tools cut to `Read,Glob,Grep` by `--tools`: `Read` ran with no permission denial in both real read-only claude runs (2026-09-09), `Glob` and `Grep` have not been exercised, and it has no shell or web tool by design
 - [x] The relay's meaning of `--read-only` per harness is written down in the skill's own context file, since it differs and the difference is load-bearing (commit 31154e5), and corrected for the fork pin on branch `effort-data-tooling`
 - [x] grok read-only executes tools: fork pin `f14dc1e`, sandbox-enforced rather than plan mode (commit 81011aa)
-- [ ] agy read-only executes tools, or `--read-only` on agy is refused before dispatch
+- [x] agy read-only executes tools, or `--read-only` on agy is refused before dispatch — executes tools: fork pin `1ff8bd6` maps it to `--sandbox --dangerously-skip-permissions` (see "Pinned 2026-09-10"; re-checked 2026-09-10: `ADS_COMMIT` and the installed clone's HEAD are both `1ff8bd6`, and the installed agy relay has no `--mode plan`)
 - [x] An upstream issue or PR against amElnagdy/delegate-skills asks for a middle permission setting, linked from this ticket
-- [ ] A regression test drives the cancelled-tool-call event shape through `map_result` from a fixture
+- [x] A regression test drives the cancelled-tool-call event shape through `map_result` from a fixture — `test_dispatch.py` 28a-28c, fixture `tests/fixtures/dispatch/grok-gate-cancel/`, commit `59fccab`
 
 ## Grok is fixed at the source, 2026-09-09
 
@@ -143,3 +143,33 @@ fixed; those two lines now describe behaviour that no longer exists.
 **Unverified, same shape, different harnesses:** `claude-delegate/scripts/relay.mjs:588` and
 `commandcode-delegate/scripts/relay.mjs:706` still push `--permission-mode plan`. Whether they suffer
 the same headless auto-deny has not been tested. `claude-delegate` is a lane we dispatch to.
+
+## Landed, 2026-09-10
+
+Commit `59fccab`, and the docs commit after it, on `bench-aa-effort-slugs`.
+
+- **Gate reading.** `delegate.py gate_cancelled_tool(run_dir)` reads `events.jsonl` and needs two
+  signals: a failed `tool_call_update` whose content says cancelled, then an `end` event with
+  `stopReason: "cancelled"`. `map_result` asks it only when the relay says `completed` and the
+  final message has no return block, ahead of the `partial` and "empty final message" readings.
+  The result is `blocked`, reason `permission gate cancelled the run at <tool>`. As on timeout, the
+  final message stays in `final.txt`, not in the deliverable.
+- **Test.** `test_dispatch.py` 28a-28c drive `map_result` in-process from
+  `tests/fixtures/dispatch/grok-gate-cancel/`: the 2026-09-09 run's `tool_call`,
+  `tool_call_update` and `end` lines verbatim, and its `result.json` without paths or the unrelated
+  `touchedFiles`. 28b removes the cancelled tool call and stays `partial`, so the end event alone
+  does not trip the rule; 28c empties the final message and still names the gate.
+- **Checked against every real run** in `~/.cache/delegate/runs/` on 2026-09-10. The rule
+  reclassifies exactly the three grok runs that ended `stopReason=cancelled` (`200714Z`,
+  `235849Z`, `235854Z`; all recorded `partial`, all at `run_terminal_command`), and none of the 19
+  grok runs that ended `end_turn`. Codex (24 runs) and claude (2) write no `end` event, and agy
+  (51) writes no `events.jsonl`, so in practice this is grok's shape. The code does not filter by
+  harness, on purpose: a gate cancel in this shape means the same on any harness.
+- **Box 2** closed without code, Orin's call; the box says why.
+- **Field proof of the grok pin.** Both reviews of this change ran read-only on
+  `grok46-high@grok` and returned `done` (231 s and 290 s).
+- **Tripwire gotcha.** Both reviews came back with "read-only tripwire fired". The cause was this
+  session's own edit to this ticket, made in the same worktree while they ran; the diff was checked
+  line by line and held only those edits. The tripwire compares the tree before and after the run,
+  so it cannot tell the lead's edits from the worker's. Do not edit a worktree that a read-only
+  dispatch is reading, or expect the tripwire to fire.
