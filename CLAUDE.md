@@ -18,9 +18,9 @@ Machine configuration and agent tooling managed as one Git repository.
 The delegate redesign is the only live thread. Spec
 `docs/superpowers/specs/2026-09-08-delegate-redesign.md`; tickets in
 `.scratch/delegate-redesign/issues/`, each carrying its own decisions and a
-"Landed" note; skill context `agents/skills/delegate/CLAUDE.md`. Tickets 01-17 and
-22 are landed, and the boxes left unticked there are Orin's own confirmations, which
-each ticket's Status line names.
+"Landed" note; skill context `agents/skills/delegate/CLAUDE.md`. Tickets 01-17, 22
+and 23 are landed, and the boxes left unticked there are Orin's own confirmations,
+which each ticket's Status line names.
 
 **Ticket 22 landed on `main` as `71e285c`** (2026-09-11), on top of `ea5430b`: each
 class has a floor and a ceiling (`routing.json` `classes`), no class reaches tier 4,
@@ -52,6 +52,14 @@ first wizard run, plus its own rewrite of this section. It must merge `main` bef
 
 **Waiting on Orin** (nothing else blocks on these):
 
+- Ticket 23, delegate meter rows under the status line, is implemented on
+  `worktree/quiet-forest-811d`, three commits past `main` with no conflict:
+  `git -C ~/dotfiles merge --ff-only worktree/quiet-forest-811d`. The stowed
+  `statusline.sh` calls the installed skill, which is `main`'s, so the rows appear
+  only after that. Then one
+  `python3 ~/.claude/skills/delegate/scripts/usage.py --refresh` gives the cache
+  the `remaining_weekly_model` field the fable row reads. Ticket 23 holds the row
+  format and the decisions.
 - Run the wizard against the repo catalog, then link the live folder to it. From
   `~/dotfiles`:
   `python3 agents/skills/delegate/scripts/setup.py --config-dir stow/delegate/.config/delegate --effort-rows .scratch/delegate-redesign/_data/tbench-accepted.json`

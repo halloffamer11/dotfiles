@@ -13,21 +13,24 @@ ceiling routing this reads.
 
 **Category:** enhancement
 
-**Status:** ready-for-agent — raised by Orin 2026-09-11 ("some sort of TUI
-thing in Claude that will give me some indication of how many agents are
-running on which harness and then some of the harness usage levels ...
-ideally it's something collapsible"). Prototyped the same day; Orin chose
-variant H. Branch `prototype/delegate-statusline` holds the prototype.
+**Status:** implemented 2026-09-11 on branch `worktree/quiet-forest-811d`; the
+last box is Orin's and needs `main` to carry the branch first (the installed
+skill is `main`'s), then one `usage.py --refresh` so the cache gains
+`remaining_weekly_model`. Raised by Orin 2026-09-11 ("some sort of TUI thing
+in Claude that will give me some indication of how many agents are running on
+which harness and then some of the harness usage levels ... ideally it's
+something collapsible"). Prototyped the same day; Orin chose variant H. Branch
+`prototype/delegate-statusline` holds the prototype.
 
-- [ ] `python3 scripts/report.py statusline` prints one row per catalog meter in the form below, and prints nothing (exit 0) when the usage cache is missing or unreadable, so the status line never breaks
-- [ ] Every gauge is **remaining**, fuel-gauge style: 100% is a full window
-- [ ] A meter with no 5h window (grok) shows `—` in the 5h cell; a model meter that shares its harness's 5h window (fable) leaves the 5h cell blank
-- [ ] The badge column shows the tier of every lane `rank.py` currently picks on that meter, one circled digit per tier, deduplicated; rows with a badge sort first by lowest tier, the rest keep catalog order
-- [ ] A meter at or below `gate` carries a red `✗` after its weekly cell
-- [ ] The trailing column shows one circled digit per running agent on that meter, in the agent's lane tier; a run is a `dispatch.start` with no `dispatch.finish` whose `ts + timeout_s` is still in the future
-- [ ] `usage.py` writes `remaining_weekly_model` on a model meter (claude-fable): the model's own weekly figure, while `remaining_weekly` stays `min(all-models, model)` for ranking. The fable row shows `remaining_weekly_model`
-- [ ] `stow/claude/.claude/statusline.sh` appends the rows after its second line and drops its own `🕔` segment, which duplicated the claude 5h cell; bash 3.2 and BSD userland still work; a missing `python3` or `report.py` adds no rows and no error
-- [ ] `tests/test_report.py` covers the rows from fixture usage, ledger and the sample catalog through `--config-dir`, `DELEGATE_CACHE` and `DELEGATE_LEDGER`; `tests/test_usage_reset.py` (or `test_events.py`) covers the new field. Full suite green
+- [x] `python3 scripts/report.py statusline` prints one row per catalog meter in the form below, and prints nothing (exit 0) when the usage cache is missing or unreadable, so the status line never breaks
+- [x] Every gauge is **remaining**, fuel-gauge style: 100% is a full window
+- [x] A meter with no 5h window (grok) shows `—` in the 5h cell; a model meter that shares its harness's 5h window (fable) leaves the 5h cell blank
+- [x] The badge column shows the tier of every lane `rank.py` currently picks on that meter, one circled digit per tier, deduplicated; rows with a badge sort first by lowest tier, the rest keep catalog order
+- [x] A meter at or below `gate` carries a red `✗` after its weekly cell
+- [x] The trailing column shows one circled digit per running agent on that meter, in the agent's lane tier; a run is a `dispatch.start` with no `dispatch.finish` whose `ts + timeout_s` is still in the future
+- [x] `usage.py` writes `remaining_weekly_model` on a model meter (claude-fable): the model's own weekly figure, while `remaining_weekly` stays `min(all-models, model)` for ranking. The fable row shows `remaining_weekly_model`
+- [x] `stow/claude/.claude/statusline.sh` appends the rows after its second line and drops its own `🕔` segment, which duplicated the claude 5h cell; bash 3.2 and BSD userland still work; a missing `python3` or `report.py` adds no rows and no error
+- [x] `tests/test_report.py` covers the rows from fixture usage, ledger and the sample catalog through `--config-dir`, `DELEGATE_CACHE` and `DELEGATE_LEDGER`; `tests/test_usage_reset.py` (or `test_events.py`) covers the new field. Full suite green
 - [ ] Orin sees the rows in a live session (his)
 
 ## The row
@@ -90,3 +93,26 @@ lead logs it with `report.py log`.
 — four round-3 variants over live data; `tier_winners()` there still reads the
 pre-22 `classTier` key. Round 1–2 variants (A–E) were dropped for showing
 percent used with load colours.
+
+## Landed, 2026-09-11
+
+Commit `071a390` on `worktree/quiet-forest-811d`: `report.py statusline`,
+`remaining_weekly_model` in `usage.py`, the two test files, and
+`stow/claude/.claude/statusline.sh`. Ticket text: `7b6a8e6`.
+
+Built by `flash-high@agy` (run `20260911T190256Z-flash-high@agy-bfce862a`,
+550 s, status `done`). Lead review found one defect: the worker made
+`statusline.sh` prefer a `report.py` found under the current project's
+`agents/skills/delegate/scripts/`, which would run code from whatever repo is
+open on every refresh. Removed; the installed skill is the only source.
+
+Verified by the lead, not the worker's claim: the six test files pass in
+place (test_report 79, test_usage_reset 1, test_events 1, test_rank 28,
+test_catalog 76, test_dispatch 38; 0 fail); `report.py statusline` renders the
+live cache in 0.05 s; the stowed script, run with a fake `$HOME` whose skill
+symlink points at this worktree and whose caches link to the real ones,
+prints the two original lines without `🕔` and then the five rows in both
+styles; with no skill installed it prints two lines and no error.
+
+Row order among unbadged meters is the catalog's `meters` order, so fable
+sits above claude in the live file. Reorder `lanes.json` to change it.
