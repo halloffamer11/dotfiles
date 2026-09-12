@@ -56,7 +56,7 @@ Orin added a `playwright` server following the setup rules to claude, grok and a
 |---|---|---|---|---|
 | agy | 1.2.2 | disposable | PASS | httpbin echoed `"custname": "4bba57ad8d70"`, the run's nonce, in Playwright's own snapshot |
 | grok | 1.0.30 | disposable | FAIL, cause found | the read-only sandbox kills every stdio MCP server; see ticket 04 |
-| codex | 0.154.0 | disposable | PASS outside the dispatch path | a delegate-owned `CODEX_HOME`; `browser_navigate` completed, snapshots at 19:16:50 and 19:17:00 show "Example Domain"; see ticket 03 |
+| codex | 0.154.0 | disposable | PASS | through the normal dispatch path at 19:49, run `20260912T194854Z-luna-low@codex-e1d1e69b`; httpbin echoed the nonce `423ca1ca7395` in Playwright's own snapshot; see ticket 03 |
 | claude | native | disposable | not retested | the server is configured, but a session must restart before a native worker sees it; see ticket 02 |
 
 The two follow-up rules from the baseline held up. agy's and codex's passes were each checked against Playwright's page snapshots, not the worker's marker. grok's worker again gave a reason it could not know — "Playwright MCP handshake failed" appears in its events only as streaming deltas of its own text — although this time the underlying failure was real, as grok's debug log showed.
