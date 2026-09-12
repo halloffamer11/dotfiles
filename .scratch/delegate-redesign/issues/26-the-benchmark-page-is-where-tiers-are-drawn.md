@@ -51,6 +51,26 @@ in `bench_page.py`, `assets/bench_page.js`, `setup_tui.py` and their tests.
   proposes a lane off; the frontier is a display aid (tickets 18, 24).
 - Board descriptions stay as quoted in `assets/boards.json` (ticket 25).
 - Tests check the rule on fixtures, never Orin's tiers.
+- Haiku gets no AA row mapping: Orin judges it decidedly worse than luna for now
+  (2026-09-12), so `haiku-high@claude` stays a lane with no rows.
+
+## Round 2
+
+From Orin's look at round 1 (2026-09-12). Item 3 above was his mistake, in his
+words: the tier lines should be horizontal, "showing where things cut off".
+
+10. **Tier lines are horizontal**, on the score axis, and replace the vertical
+    cost lines. Sliding a line tiers at once: every carried lane whose dot is
+    above that line and below the next line up takes that band's tier in the
+    side panel. Orin then adjusts from there. A tier set by hand, on a dot or in
+    the panel, stays set until he clears it; a line drag does not overwrite it.
+11. **The panel and the plot highlight each other, for every lane.** Hovering or
+    selecting a lane in the side panel (for example `opus-xhigh@claude`)
+    highlights its dot with its label, including lanes whose dot has no label
+    today; selecting a dot highlights its panel row.
+12. **The plot fills its column's height** (round 1 left empty space under it).
+13. **Group order without Epoch.** On the wizard's tier pages a model group with
+    no Epoch figure is ordered by its best AA mean rank, not placed last.
 
 ## Boxes
 
@@ -63,6 +83,10 @@ in `bench_page.py`, `assets/bench_page.js`, `setup_tui.py` and their tests.
 - [x] 7 focus a tier
 - [x] 8 tier view
 - [x] 9 reload survives, copy as lines
+- [ ] 10 horizontal tier lines; a drag tiers its band; hand-set tiers survive
+- [ ] 11 panel and plot highlight each other for every lane
+- [ ] 12 plot fills its column
+- [ ] 13 group order without Epoch uses AA mean rank
 - [ ] Orin draws his tiers on the page and sets them in the wizard
 
 ## Landed, 2026-09-12
