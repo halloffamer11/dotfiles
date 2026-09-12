@@ -21,7 +21,7 @@ Facts and setup rules: `../research/2026-09-10-browser-routes.md`.
 - [x] Orin ran `make delegate-codex-home` on the Mac, 2026-09-12. The home holds `config.toml` and an `auth.json` symlink; `codex mcp list` shows one server and `codex login status` prints "Logged in using ChatGPT" from it.
 - [ ] The same on omarchy.
 - [x] Proof through the delegate dispatch path, not a raw CLI: the codex row of `browser_probes.py` passes the disposable probe in a read-only run, checked against Playwright's page snapshots. See below.
-- [ ] The same in a write run (`--write`).
+- [x] The same in a write run (`--write`), 2026-09-12. Run `20260912T202301Z-luna-low@codex-0cb235bb`, 36 s, `write=/tmp/codexwrite.H5l1Eb`: marker nonce `112cf928f5ba`, three snapshots at 20:23:22, 20:23:27 and 20:23:39 with httpbin echoing `"custname": "112cf928f5ba"`, and 12 `playwright` tool calls. `touched_files` is `['?? disposable.md']`, the brief placed in the write directory, so the worker edited nothing. `browser_probes.py` has no write mode; this was a direct `delegate.py dispatch --write`.
 
 ## Proof through the dispatch path, 2026-09-12 (Mac)
 
