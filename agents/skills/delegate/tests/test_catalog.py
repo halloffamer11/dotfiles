@@ -105,6 +105,39 @@ record(
     val_false is not None and doc_false["lanes"]["fable-xhigh@claude"].get("enabled", True) is False,
 )
 
+# 1d2. order field (ticket 28): optional; a whole number from 1 is valid, and
+#      anything else is refused with a message naming the lane and the rule
+doc_order = copy.deepcopy(lanes_sample)
+doc_order["lanes"]["fable-xhigh@claude"]["order"] = 1
+doc_order["lanes"]["sol-high@codex"]["order"] = 12
+record("order absent is valid", catalog.validate_lanes(copy.deepcopy(lanes_sample)) is not None
+       and not any("order" in lane for lane in lanes_sample["lanes"].values()))
+record("order 1 and 12 are valid", catalog.validate_lanes(doc_order) is not None)
+for bad in (0, -1, 1.5, 2.0, "1", True, None, [1]):
+    doc_bad = copy.deepcopy(lanes_sample)
+    doc_bad["lanes"]["sol-high@codex"]["order"] = bad
+    err = check_catalog_error(catalog.validate_lanes, doc_bad)
+    record(
+        f"order {bad!r} is refused naming the lane and the rule",
+        err is not None and "lane 'sol-high@codex'" in err
+        and "order is the lane's place inside its tier and must be a whole number from 1 up" in err
+        and repr(bad) in err,
+        repr(err),
+    )
+with tempfile.TemporaryDirectory() as _td_order:
+    _bad_path = os.path.join(_td_order, "lanes.json")
+    _doc = copy.deepcopy(lanes_sample)
+    _doc["lanes"]["sol-high@codex"]["order"] = 0
+    catalog.write_json(_bad_path, _doc)
+    _res = subprocess.run([sys.executable, CATALOG_PY, "check", _bad_path], capture_output=True, text=True)
+    _ok_path = os.path.join(_td_order, "ok", "lanes.json")
+    catalog.write_json(_ok_path, doc_order)
+    _res_ok = subprocess.run([sys.executable, CATALOG_PY, "check", _ok_path], capture_output=True, text=True)
+    record("check refuses a bad order in plain language and accepts a good one",
+           _res.returncode == 1 and "order" in _res.stderr and "sol-high@codex" in _res.stderr
+           and _res_ok.returncode == 0 and _res_ok.stdout.startswith("ok"),
+           _res.stderr + _res_ok.stdout)
+
 # 1e. lane at each of the six efforts validates. codex is the harness that
 #     offers all six; the fixture used a claude lane until ticket 19, and claude
 #     offers no ultra.

@@ -298,7 +298,7 @@ def validate_lanes(doc, source="lanes.json"):
 
     allowed_lane_fields = {
         "harness", "model", "effort", "meter", "meter_weight", "timeout",
-        "price", "tier", "basis", "note", "enabled", "published_as"
+        "price", "tier", "basis", "note", "enabled", "published_as", "order"
     }
     required_lane_fields = (
         "harness", "model", "effort", "meter", "meter_weight", "timeout",
@@ -399,6 +399,16 @@ def validate_lanes(doc, source="lanes.json"):
             raise CatalogError(
                 f"{source}: lane '{lane_name}': tier must be a whole number from 1 to 4, got {tier!r}"
             )
+
+        if "order" in lane:
+            # the lane's place inside its tier, from 1, which the wizard's review
+            # page writes and rank.py sorts by after tier (ticket 28)
+            order = lane["order"]
+            if type(order) is not int or order < 1:
+                raise CatalogError(
+                    f"{source}: lane '{lane_name}': order is the lane's place inside its tier "
+                    f"and must be a whole number from 1 up, got {order!r}"
+                )
 
         if not isinstance(lane["basis"], str):
             raise CatalogError(f"{source}: lane '{lane_name}': basis must be a string")

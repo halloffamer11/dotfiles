@@ -105,6 +105,42 @@ def all_tier_one(doc):
     return out
 
 
+def strip_order(doc):
+    """A written catalog without the `order` the review page adds (ticket 28)."""
+    out = copy.deepcopy(doc)
+    for lane in out["lanes"].values():
+        lane.pop("order", None)
+    return out
+
+
+def orders_are_places(doc):
+    """Every carried lane has `order`, and each tier's orders are 1..n; no lane
+    that is off has one."""
+    by_tier = {}
+    for lane in doc["lanes"].values():
+        if lane.get("enabled", True):
+            by_tier.setdefault(lane["tier"], []).append(lane.get("order"))
+        elif "order" in lane:
+            return False
+    return all(sorted(o for o in orders if o is not None) == list(range(1, len(orders) + 1))
+               and None not in orders for orders in by_tier.values())
+
+
+def review_layout(view):
+    """The review page as [(tier, [lane, ...])], 4 to 1, read off its section rows."""
+    out = []
+    for row in view["rows"]:
+        if row.get("section"):
+            out.append((int(row["section"].split()[1]), []))
+        else:
+            out[-1][1].append(row["cells"][1])
+    return out
+
+
+def review_names(view):
+    return [name for _tier, names in review_layout(view) for name in names]
+
+
 try:
     collected = data()
     record("collect returns documented keys",
@@ -164,13 +200,16 @@ try:
     start(w)
     mark_as(w, incoming_tiers(LANES))
     finish(w)
-    record("2 marking the incoming tiers writes the catalog back unchanged",
-           w.result() == (LANES, ROUTING), repr(w.result()))
+    # the review page adds each carried lane's place inside its tier (ticket 28)
+    record("2 marking the incoming tiers writes the catalog back unchanged but for order",
+           strip_order(w.result()[0]) == LANES and w.result()[1] == ROUTING
+           and orders_are_places(w.result()[0]), repr(w.result()))
     w = wizard()
     start(w)
     finish(w)
     record("2b enter straight through puts every lane on tier 1",
-           w.result() == (all_tier_one(LANES), ROUTING), repr(w.result()))
+           strip_order(w.result()[0]) == all_tier_one(LANES) and w.result()[1] == ROUTING
+           and orders_are_places(w.result()[0]), repr(w.result()))
 except Exception as e:
     record("2 marking the incoming tiers writes the catalog back unchanged", False, repr(e))
 
@@ -243,7 +282,7 @@ try:
     expected = copy.deepcopy(ROUTING)
     expected["classes"]["mechanical"]["ceiling"] = 3
     expected["margin"] = 0.25
-    record("6 routing edits are isolated", lanes == all_tier_one(LANES) and routing == expected, repr(routing))
+    record("6 routing edits are isolated", strip_order(lanes) == all_tier_one(LANES) and routing == expected, repr(routing))
 except Exception as e:
     record("6 routing edits are isolated", False, repr(e))
 
@@ -628,7 +667,8 @@ except Exception as e:
 
 
 try:
-    # the review page: every carried lane with its tier, one decision per line
+    # the review page: every carried lane in a section for its tier, 4 to 1,
+    # numbered in its order (ticket 28; it was one box per tier before)
     w = wizard()
     not_carried(w, "flash-high@agy")
     move_to(w, "sol-high@codex")
@@ -640,42 +680,45 @@ try:
     w.handle("enter")          # tier 2 takes nothing
     w.handle("enter")          # tier 1 takes the rest
     v = w.view()
-    names = [r["cells"][4] for r in v["rows"]]
+    layout = review_layout(v)
+    names = review_names(v)
     carried = [n for n in LANES["lanes"] if n != "flash-high@agy"]
-    boxes = {r["cells"][4]: r["cells"][:4] for r in v["rows"]}
-    shape = (w.screen == "review" and v["columns"][:5] == ["T4", "T3", "T2", "T1", "lane"]
+    lane_rows = [r for r in v["rows"] if not r.get("section")]
+    shape = (w.screen == "review" and v["columns"][:2] == ["#", "lane"]
+             and [tier for tier, _ in layout] == [4, 3, 2, 1]
+             and layout[0][1] == ["sol-high@codex"] and layout[1][1] == ["terra-high@codex"]
+             and layout[2][1] == []
+             and [r["section"] for r in v["rows"] if r.get("section")][2] == "Tier 2 (no lanes)"
              and sorted(names) == sorted(carried)
-             and names[:2] == ["sol-high@codex", "terra-high@codex"]
-             and boxes["sol-high@codex"] == ["[x]", "[ ]", "[ ]", "[ ]"]
-             and boxes["luna-low@codex"] == ["[ ]", "[ ]", "[ ]", "[x]"]
-             and all(cells.count("[x]") == 1 for cells in boxes.values())
-             and "[review]" in v["steps"] and "1-4: set tier" in v["footer"])
+             and [r["cells"][0].strip() for r in lane_rows] == ["1", "1"] + [str(i) for i in range(1, len(carried) - 1)]
+             and "[review]" in v["steps"] and "J/K: move lane" in v["footer"] and "1-4: tier" in v["footer"])
     w.handle("down")           # j: to terra
-    w.handle("2")
+    w.handle("2")              # terra to the end of tier 2, and the cursor with it
     w.handle("up")             # k: back to sol
     w.handle("3")
-    order_kept = [r["cells"][4] for r in w.view()["rows"]] == names
-    after = {r["cells"][4]: r["cells"][:4] for r in w.view()["rows"]}
+    order_kept = review_names(w.view()) == names
+    after = review_layout(w.view())
     w.handle("9")              # not a tier
     w.handle("enter")
     at_routing = w.screen == "routing"
     w.handle("b")
-    back = w.screen == "review" and {r["cells"][4]: r["cells"][:4] for r in w.view()["rows"]} == after
+    back = w.screen == "review" and review_layout(w.view()) == after
     w.handle("enter")
     w.handle("enter")
     w.handle("y")
     lanes, _ = w.result()
-    record("39 after tier 1 a review page lists every carried lane with its tier; j/k move, 1-4 set it, "
-           "enter goes to routing and b from routing returns to it",
+    record("39 after tier 1 a review page lists every carried lane under its tier, numbered; j/k move, "
+           "1-4 move a lane to that tier, enter goes to routing and b from routing returns to it",
            shape and order_kept
-           and after["sol-high@codex"] == ["[ ]", "[x]", "[ ]", "[ ]"]
-           and after["terra-high@codex"] == ["[ ]", "[ ]", "[x]", "[ ]"]
+           and dict(after)[3] == ["sol-high@codex"] and dict(after)[2] == ["terra-high@codex"]
            and at_routing and back
-           and lanes["lanes"]["sol-high@codex"]["tier"] == 3
-           and lanes["lanes"]["terra-high@codex"]["tier"] == 2
+           and lanes["lanes"]["sol-high@codex"]["tier"] == 3 and lanes["lanes"]["sol-high@codex"]["order"] == 1
+           and lanes["lanes"]["terra-high@codex"]["tier"] == 2 and lanes["lanes"]["terra-high@codex"]["order"] == 1
            and lanes["lanes"]["flash-high@agy"]["tier"] == LANES["lanes"]["flash-high@agy"]["tier"]
+           and "order" not in lanes["lanes"]["flash-high@agy"]
+           and orders_are_places(lanes)
            and any("flash-high@agy" in line for line in v["legend"]),
-           repr((names, boxes, after)))
+           repr((layout, after)))
     w2 = wizard()
     start(w2)
     for _ in range(4):
@@ -1099,8 +1142,9 @@ try:
     mark_as(w, incoming_tiers(LANES))
     finish(w)
     lanes, routing = w.result()
+    # the one addition is each carried lane's place inside its tier (ticket 28)
     record("26 round-trip with nothing switched off is byte-identical",
-           lanes == LANES and routing == ROUTING
+           strip_order(lanes) == LANES and routing == ROUTING and orders_are_places(lanes)
            and all("enabled" not in lane for lane in lanes["lanes"].values()))
 except Exception as e:
     record("26 round-trip with nothing switched off is byte-identical", False, repr(e))
@@ -1628,7 +1672,9 @@ try:
            and "sol-ultra@codex" not in t4
            and all(eff == sorted(eff, key=setup_tui.effort_rank) for _g, eff in t4_groups),
            repr((carry, t4)))
-    # the review page: a group sits where its best-tiered lane sits
+    # the review page is by tier and in Orin's order, so the model grouping
+    # does not apply there (ticket 28): with no lines and no catalog order a
+    # tier starts in benchmark order
     move_to(w, "sol-high@codex")
     w.handle("space")
     w.handle("enter")            # sol-high takes tier 4
@@ -1637,14 +1683,13 @@ try:
     w.handle("enter")            # fable-low takes tier 3
     w.handle("enter")
     w.handle("enter")            # the rest take tier 1
-    review = [r["cells"][4] for r in w.view()["rows"]]
-    review_groups = groups_of(review, doc)
-    record("44b the review page groups by model where the group's best tier sits, efforts most to least",
+    review = dict(review_layout(w.view()))
+    tier1 = review[1]
+    record("44b the review page lists tiers 4 to 1, each starting in benchmark order without model grouping",
            w.screen == "review"
-           and review[:2] == ["sol-high@codex", "sol-low@codex"]
-           and review[2:7] == ["fable-max@claude", "fable-xhigh@claude", "fable-high@claude",
-                               "fable-medium@claude", "fable-low@claude"]
-           and len({g for g, _ in review_groups}) == len(review_groups),
+           and review[4] == ["sol-high@codex"] and review[3] == ["fable-low@claude"] and review[2] == []
+           and "sol-low@codex" in tier1
+           and tier1 == sorted(tier1, key=lambda n: setup_tui.bench_order_key(w.bench, n, doc)),
            repr(review))
 except Exception as e:
     record("44 the carry page and the tier pages group by model, efforts most to least", False, repr(e))
@@ -1717,7 +1762,10 @@ try:
             "nobody@codex off\n"
             "fable-max@claude 1\n")
     parsed = setup_tui.parse_tier_lines(text, doc)
-    summary = setup_tui.tier_lines_summary(parsed, doc)
+    carried = ["sol-high@codex", "luna-low@codex", "terra-high@codex", "grok46-high@grok", "flash-low@agy"]
+    dropped = setup_tui.unnamed_carried(parsed, carried)
+    summary = setup_tui.tier_lines_summary(parsed, dropped)
+    nothing = setup_tui.parse_tier_lines("nobody@codex 2\nnot a line\n", doc)
     record("47 one parser reads tier lines: blank lines skipped, the last line for a lane wins, unknown "
            "lanes, bad tiers and ultra lanes ignored, and one summary line says each",
            parsed["decided"] == {"sol-high@codex": 4, "terra-high@codex": "off", "fable-max@claude": 1}
@@ -1726,12 +1774,19 @@ try:
            and parsed["unknown"] == ["nobody@codex"]
            and parsed["bad"] == [6, 7, 8, 9]
            and parsed["refused"] == ["sol-ultra@codex"]
-           and summary == (f"Lines: 2 took a tier; 1 went off; {len(doc['lanes']) - 3} not named; "
+           # a carried lane no line names goes off, and the summary counts it (ticket 28)
+           and dropped == ["luna-low@codex", "grok46-high@grok", "flash-low@agy"]
+           and summary == ("Lines: 2 took a tier; 1 went off; 3 not named, so off; "
                            "named twice, last line kept: terra-high@codex; unknown, ignored: nobody@codex; "
                            "ultra, never carried, ignored: sol-ultra@codex; "
                            "not <lane> <1-4|off>, ignored: line 6, 7, 8, 9.")
-           and setup_tui.parse_tier_lines("", doc)["decided"] == {},
-           repr((parsed, summary)))
+           and setup_tui.parse_tier_lines("", doc)["decided"] == {}
+           # lines that name no lane decide nothing, so nothing goes off
+           and setup_tui.unnamed_carried(nothing, carried) == []
+           and setup_tui.tier_lines_summary(nothing, []) == (
+               "Lines: no line names a lane in this catalog, so nothing changed; "
+               "unknown, ignored: nobody@codex; not <lane> <1-4|off>, ignored: line 2."),
+           repr((parsed, dropped, summary)))
 except Exception as e:
     record("47 one parser reads tier lines", False, repr(e))
 
@@ -1754,37 +1809,37 @@ try:
         return "fable-xhigh@claude 4\nsol-high@codex off\nterra-high@codex 3\nnobody@x 2\n"
 
     w = at_review(clipboard)
-    move_to_review = [r["cells"][4] for r in w.view()["rows"]]
-    # the cursor on luna-low, which no line names
-    w.cursor = move_to_review.index("luna-low@codex")
-    for key in ("up", "down", "1", "o", "x", "space"):
+    # the cursor on terra-high, which a line names and moves to tier 3
+    w.cursor = review_names(w.view()).index("terra-high@codex")
+    for key in ("up", "down", "o", "x", "space"):
         w.handle(key)
     before = len(calls)
     w.handle("v")
     view = w.view(200)
-    rows = {r["cells"][4]: r["cells"][:4] for r in view["rows"]}
-    cursor = next(r["cells"][4] for r in view["rows"] if r["cursor"])
+    layout = dict(review_layout(view))
+    cursor = next(r["cells"][1] for r in view["rows"] if r["cursor"])
     grid = overlay(layout_lines(view, 200, 50), 200, 50)
     finish(w)
     lanes, _routing = w.result()
     record("48 v on the review page applies the clipboard's lines: a tier line carries and tiers, off sets "
-           "not carried, a lane with no line keeps its tier, and one line says so",
+           "not carried, a carried lane with no line goes off, and one line says so",
            before == 0 and len(calls) == 1
-           and rows["fable-xhigh@claude"] == ["[x]", "[ ]", "[ ]", "[ ]"]
-           and rows["terra-high@codex"] == ["[ ]", "[x]", "[ ]", "[ ]"]
-           and rows["luna-low@codex"] == ["[ ]", "[ ]", "[ ]", "[x]"]
-           and "sol-high@codex" not in rows
-           and cursor == "luna-low@codex"
-           and view["message"] == "Lines: 2 took a tier; 1 went off; 3 not named; unknown, ignored: nobody@x."
+           and layout == {4: ["fable-xhigh@claude"], 3: ["terra-high@codex"], 2: [], 1: []}
+           and cursor == "terra-high@codex"
+           and view["message"] == "Lines: 2 took a tier; 1 went off; 3 not named, so off; unknown, ignored: nobody@x."
            and view["message"] in grid
-           and any(line.startswith("Not carried, keeps its catalog tier: sol-high@codex") for line in grid)
+           and any(line.startswith("Not carried, keeps its catalog tier (") and "sol-high@codex" in line
+                   and "luna-low@codex" in line for line in grid)
            and "v: paste" in view["footer"]
            and lanes["lanes"]["fable-xhigh@claude"]["tier"] == 4 and "enabled" not in lanes["lanes"]["fable-xhigh@claude"]
-           and lanes["lanes"]["terra-high@codex"]["tier"] == 3
+           and lanes["lanes"]["fable-xhigh@claude"]["order"] == 1
+           and lanes["lanes"]["terra-high@codex"]["tier"] == 3 and lanes["lanes"]["terra-high@codex"]["order"] == 1
            and lanes["lanes"]["sol-high@codex"]["enabled"] is False
            and lanes["lanes"]["sol-high@codex"]["tier"] == LANES["lanes"]["sol-high@codex"]["tier"]
-           and lanes["lanes"]["luna-low@codex"]["tier"] == 1,
-           repr((calls, rows, cursor, view["message"])))
+           and lanes["lanes"]["luna-low@codex"]["enabled"] is False
+           and lanes["lanes"]["luna-low@codex"]["tier"] == LANES["lanes"]["luna-low@codex"]["tier"]
+           and orders_are_places(lanes),
+           repr((calls, layout, cursor, view["message"])))
 except Exception as e:
     record("48 v on the review page applies the clipboard's lines", False, repr(e))
 
@@ -1839,13 +1894,144 @@ try:
     start(w)
     t4 = [r["cells"][1] for r in w.view()["rows"]]
     legend = w.view()["legend"]
-    record("50 lines applied at start hide what they decided from the tier pages and say so on the start page",
-           start_message == summary == "Lines: 1 took a tier; 1 went off; 4 not named."
-           and "fable-xhigh@claude" not in t4 and "sol-high@codex" not in t4
-           and set(t4) == {"terra-high@codex", "grok46-high@grok", "luna-low@codex", "flash-high@agy"}
-           and legend[0] == "Not listed: 1 taken at a higher tier, 1 not carried.",
+    # every lane the lines did not name went off (ticket 28), so no tier page lists a lane
+    while w.screen == "tier":
+        w.handle("enter")
+    record("50 lines applied at start decide every carried lane, hide them from the tier pages and say so on the start page",
+           start_message == summary == "Lines: 1 took a tier; 1 went off; 4 not named, so off."
+           and t4 == []
+           and legend[0] == "Not listed: 1 taken at a higher tier, 5 not carried."
+           and w.screen == "review" and review_layout(w.view())[0] == (4, ["fable-xhigh@claude"]),
            repr((start_message, t4, legend)))
 except Exception as e:
     record("50 lines applied at start hide what they decided from the tier pages", False, repr(e))
+
+
+# --- ticket 28: an order inside each tier -------------------------------------------
+def through_lines(text, lanes=None):
+    """A wizard with `text` applied at start, walked to the review page."""
+    w = wizard(lanes=lanes)
+    w.apply_tier_lines(text)
+    start(w)
+    while w.screen == "tier":
+        w.handle("enter")
+    assert w.screen == "review", w.screen
+    return w
+
+
+try:
+    w = through_lines("terra-high@codex 2\nsol-high@codex 2\nluna-low@codex 1\ngrok46-high@grok 2\n")
+    record("51 the lines' order inside a tier is the review page's starting order",
+           review_layout(w.view()) == [(4, []), (3, []),
+                                       (2, ["terra-high@codex", "sol-high@codex", "grok46-high@grok"]),
+                                       (1, ["luna-low@codex"])]
+           and not w._enabled["fable-xhigh@claude"] and not w._enabled["flash-high@agy"],
+           repr(review_layout(w.view())))
+except Exception as e:
+    record("51 the lines' order inside a tier is the review page's starting order", False, repr(e))
+
+
+try:
+    w = through_lines("terra-high@codex 2\nsol-high@codex 2\nluna-low@codex 1\ngrok46-high@grok 2\n")
+    steps = []
+
+    def tier(n):
+        return dict(review_layout(w.view()))[n]
+
+    def at():
+        return next(r["cells"][1] for r in w.view()["rows"] if r["cursor"])
+
+    w.handle("lane-down")                 # J: terra below sol, the cursor with it
+    steps.append((tier(2), at()) == (["sol-high@codex", "terra-high@codex", "grok46-high@grok"], "terra-high@codex"))
+    w.handle("lane-down")
+    w.handle("lane-down")                 # at the bottom of tier 2: never into tier 1
+    steps.append((tier(2), tier(1), at()) == (["sol-high@codex", "grok46-high@grok", "terra-high@codex"],
+                                               ["luna-low@codex"], "terra-high@codex"))
+    for _ in range(3):
+        w.handle("lane-up")               # K, and once more at the top of the tier
+    steps.append(tier(2) == ["terra-high@codex", "sol-high@codex", "grok46-high@grok"])
+    w.handle("down")                      # j moves the cursor only
+    steps.append((at(), tier(2)[1]) == ("sol-high@codex", "sol-high@codex"))
+    w.handle("4")                         # 1-4: to that tier's end
+    steps.append((tier(4), tier(2), at()) == (["sol-high@codex"], ["terra-high@codex", "grok46-high@grok"],
+                                               "sol-high@codex"))
+    w.handle("2")
+    steps.append((tier(4), tier(2), at()) == ([], ["terra-high@codex", "grok46-high@grok", "sol-high@codex"],
+                                               "sol-high@codex"))
+    w.handle("2")                         # its own tier: to the end, where it already is
+    steps.append(tier(2)[-1] == "sol-high@codex")
+    before = review_layout(w.view())
+    w.handle("enter")
+    w.handle("b")                         # routing and back keep every move
+    steps.append(w.screen == "review" and review_layout(w.view()) == before)
+    w.handle("enter")
+    w.handle("enter")
+    w.handle("y")
+    lanes, _routing = w.result()
+    written = {name: (lane["tier"], lane.get("order"), lane.get("enabled", True))
+               for name, lane in lanes["lanes"].items()}
+    catalog.validate_lanes(lanes)
+    record("52 J/K move a lane inside its tier and never across, 1-4 move it to that tier's end, "
+           "and enter writes each carried lane's place as order",
+           steps == [True] * 8
+           and written["terra-high@codex"] == (2, 1, True)
+           and written["grok46-high@grok"] == (2, 2, True)
+           and written["sol-high@codex"] == (2, 3, True)
+           and written["luna-low@codex"] == (1, 1, True)
+           and written["fable-xhigh@claude"][1:] == (None, False)
+           and written["flash-high@agy"][1:] == (None, False),
+           repr((steps, written)))
+except Exception as e:
+    record("52 J/K move a lane inside its tier and never across", False, repr(e))
+
+
+try:
+    # with no lines, an order the catalog already gives a lane at its tier is the
+    # starting order; a lane without one follows in benchmark order
+    doc = all_tier_one(LANES)
+    doc["lanes"]["luna-low@codex"]["order"] = 1
+    doc["lanes"]["grok46-high@grok"]["order"] = 2
+    doc["lanes"]["sol-high@codex"]["order"] = 7   # a gap in the catalog closes up when written
+    w = wizard(lanes=doc)
+    start(w)
+    while w.screen == "tier":
+        w.handle("enter")
+    tier1 = dict(review_layout(w.view()))[1]
+    rest = tier1[3:]
+    finish(w)
+    lanes, _routing = w.result()
+    record("53 with no lines a catalog's order starts the review page, the rest in benchmark order",
+           tier1[:3] == ["luna-low@codex", "grok46-high@grok", "sol-high@codex"]
+           and rest == sorted(rest, key=lambda n: setup_tui.bench_order_key(w.bench, n, doc))
+           and lanes["lanes"]["sol-high@codex"]["order"] == 3 and orders_are_places(lanes),
+           repr(tier1))
+except Exception as e:
+    record("53 with no lines a catalog's order starts the review page", False, repr(e))
+
+
+try:
+    w = through_lines("terra-high@codex 2\nsol-high@codex 2\nluna-low@codex 1\ngrok46-high@grok 2\n")
+    w.handle("lane-down")
+    faults = []
+    for width, height in ((80, 24), (200, 50)):
+        view = w.view(width)
+        entries = layout_lines(view, width, height)
+        grid = overlay(entries, width, height)
+        sections = [text for _y, text, role in entries if role == "section"]
+        cursor = [text for _y, text, role in entries if role == "row-cursor"]
+        if sections != ["Tier 4 (no lanes)", "Tier 3 (no lanes)", "Tier 2 (3 lanes)", "Tier 1 (1 lane)"]:
+            faults.append((width, "sections", sections))
+        if not (len(cursor) == 1 and cursor[0].startswith(" 2  terra-high@codex")):
+            faults.append((width, "cursor", cursor))
+        if any(len(line) > width - 1 for line in grid):
+            faults.append((width, "too wide"))
+        if not any(line.startswith(" 1  sol-high@codex") for line in grid):
+            faults.append((width, "numbering"))
+        if setup_tui.REVIEW_MOVE_LEGEND not in grid or setup_tui.REVIEW_ORDER_LEGEND not in grid:
+            faults.append((width, "legend"))
+    record("54 the review page renders a section per tier, numbered, with the moved lane under the cursor",
+           not faults and grid[0].startswith("Order each tier"), repr(faults))
+except Exception as e:
+    record("54 the review page renders a section per tier", False, repr(e))
 
 sys.exit(1 if fails else 0)

@@ -51,6 +51,10 @@ _Avoid_: ADS as a name for the concept; say relay
 **Tier**:
 A capability level from 1 (lowest) to 4 (frontier) that Orin gives each lane in setup. It belongs to the lane, not the model.
 
+**Order**:
+A lane's place inside its tier, from 1, that Orin sets on the setup wizard's review page. Ranking sorts by tier, then order, then pace, then lane name; a lane without an order comes after every lane with one.
+_Avoid_: priority, rank (when you mean the order)
+
 **Class**:
 The kind of job: scout, mechanical, impl, review, or hard-impl.
 _Avoid_: task type, category
@@ -97,10 +101,10 @@ _Avoid_: velocity, speed, burn rate
 How fast a meter's remaining falls, measured across readings over time.
 
 **Margin**:
-How much higher a lane's pace must be to take a job from a lane at a lower tier.
+How much higher a lane's pace must be to take a job from the pick when it sorts after the pick: at a higher tier, or lower in the order of the same tier.
 
 **Pick**:
-The one lane ranking selects for a job.
+The one lane ranking selects for a job: the first lane by tier, order, pace and lane name, unless a lane after it has a pace higher by the margin.
 
 ## Delegate: one job
 

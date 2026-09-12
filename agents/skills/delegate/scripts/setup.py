@@ -248,7 +248,9 @@ def confirm_and_write(lanes_doc, routing_doc, lanes_path, routing_path):
     print(lanes_path)
     print(routing_path)
     for name, lane in lanes_doc["lanes"].items():
-        print(f"{name}: tier {lane['tier']}")
+        order = f", order {lane['order']}" if "order" in lane else ""
+        off = ", off" if lane.get("enabled") is False else ""
+        print(f"{name}: tier {lane['tier']}{order}{off}")
     answer = read_answer("write both files? [y/N] ").strip()
     if answer not in ("y", "yes"):
         print("nothing written")
@@ -276,7 +278,9 @@ def main(argv=None):
                              "the Artificial Analysis columns; repeat to put several sources on one page")
     parser.add_argument("--tiers-from", default=None, metavar="FILE",
                         help="apply `<lane> <1-4|off>` lines, as the benchmark page copies them, "
-                             "at start; the review page's v key reads the same lines from the clipboard")
+                             "at start; a carried lane no line names goes off, and the lines' order "
+                             "inside a tier is the starting order; the review page's v key reads the "
+                             "same lines from the clipboard")
     parser.add_argument("--no-discover", action="store_true", help="skip model discovery")
     parser.add_argument("--fixture-dir", default=None, help="fixture directory for harness discovery")
     args = parser.parse_args(argv)
@@ -308,8 +312,8 @@ def main(argv=None):
                 # the same parser and summary as the review page's `v`; the
                 # tiers become the prompts' defaults, and an off line is written off
                 parsed = setup_tui.parse_tier_lines(tier_lines, lanes_doc)
-                setup_tui.apply_tier_lines_to_doc(lanes_doc, parsed)
-                print(setup_tui.tier_lines_summary(parsed, lanes_doc))
+                dropped = setup_tui.apply_tier_lines_to_doc(lanes_doc, parsed)
+                print(setup_tui.tier_lines_summary(parsed, dropped))
             if args.effort_rows:
                 # The pre-screen is a selectable screen; there is no prompt-driven
                 # form of it yet. Saying so is the point: the instruction a human
@@ -320,6 +324,10 @@ def main(argv=None):
                       "terminal without --plain to use it.")
             show_bench(args, lanes_doc, routing_doc)
             ask_lanes(lanes_doc)
+            if tier_lines is not None:
+                # no review page here: the lines' order inside each tier is the
+                # order written (ticket 28)
+                setup_tui.write_order_from_lines(lanes_doc, parsed)
             ask_routing(routing_doc)
             confirm_and_write(lanes_doc, routing_doc, lanes_path, routing_path)
         else:

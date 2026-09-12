@@ -19,10 +19,12 @@ CLASSES_LEGEND = "classes: each class has a floor and ceiling tier (1-4)."
 # key that moves it never changes.
 FLIP_KEYS = "space/x: flip"
 TIER_FOOTER = f"↑/↓/j/k: move  {FLIP_KEYS}  enter: next  b: back  o: bench  q: quit"
-REVIEW_FOOTER = "↑/↓/j/k: move  1-4: set tier  v: paste  enter: next  b: back  o: bench  q: quit"
+# The review page orders lanes inside each tier (ticket 28). Its footer is 79
+# places, the most an 80-column line shows; the legend spells the keys out.
+REVIEW_FOOTER = "j/k: cursor  J/K: move lane  1-4: tier  v: paste  enter: next  b: back  q: quit"
+REVIEW_MOVE_LEGEND = "J/K or shift-↑/↓ moves a lane inside its tier; 1-4 moves it to that tier's end."
+REVIEW_ORDER_LEGEND = "Ranking tries 1 first; a lane lower down runs if its pace beats 1's by margin."
 ROUTING_FOOTER = "↑/↓ or j/k: move  +/-: adjust  enter: confirm  b: back  q: quit"
-# The review page's one box per tier, best first, the way the tier pages ran.
-REVIEW_COLUMNS = ("T4", "T3", "T2", "T1")
 PRESCREEN_FOOTER = f"↑/↓ or j/k: move  {FLIP_KEYS}  enter: continue  b: back  q: quit"
 NO_DATA_MESSAGE = "No per-effort data was supplied, so nothing else could be judged."
 CONFIRM_OFF_LEGEND = "off: written with enabled: false.  On lanes omit the key."
@@ -114,15 +116,29 @@ def parse_tier_lines(text, lanes_doc):
     return out
 
 
-def tier_lines_summary(parsed, lanes_doc):
+def unnamed_carried(parsed, carried):
+    """The carried lanes a set of lines does not name. They go off: "if it's not
+    in the tier list, it's not used" (Orin, 2026-09-12; ticket 28).
+
+    Lines that name no lane in the catalog decide nothing, so they switch nothing
+    off: a clipboard holding the wrong text must not empty the catalog."""
+    if not parsed["decided"]:
+        return []
+    return [name for name in carried if name not in parsed["decided"]]
+
+
+def tier_lines_summary(parsed, dropped=()):
     """The one line that says what a set of tier lines did: how many lanes took
-    a tier, how many went off, how many the lines did not name, then any lane
-    named twice, any name the catalog does not know, and any line not read."""
-    lanes = (lanes_doc or {}).get("lanes") or {}
+    a tier, how many went off by a line, how many carried lanes went off because
+    no line named them (`dropped`), then any lane named twice, any name the
+    catalog does not know, and any line not read."""
     decided = parsed["decided"]
     tiers = sum(1 for value in decided.values() if value != "off")
-    parts = [f"{tiers} took a tier", f"{len(decided) - tiers} went off",
-             f"{sum(1 for name in lanes if name not in decided)} not named"]
+    if decided:
+        parts = [f"{tiers} took a tier", f"{len(decided) - tiers} went off",
+                 f"{len(dropped)} not named, so off"]
+    else:
+        parts = ["no line names a lane in this catalog, so nothing changed"]
     if parsed["repeated"]:
         parts.append("named twice, last line kept: " + ", ".join(parsed["repeated"]))
     if parsed["unknown"]:
@@ -136,7 +152,12 @@ def tier_lines_summary(parsed, lanes_doc):
 
 def apply_tier_lines_to_doc(lanes_doc, parsed):
     """The prompt-driven interface's form of the same lines: a tier line sets
-    the lane's tier and carries it, an off line records it off."""
+    the lane's tier and carries it, an off line records it off, and a carried
+    lane no line names is recorded off (ticket 28). Returns those lanes."""
+    carried = [name for name, lane in lanes_doc["lanes"].items() if lane.get("enabled", True)]
+    dropped = unnamed_carried(parsed, carried)
+    for name in dropped:
+        lanes_doc["lanes"][name]["enabled"] = False
     for name, value in parsed["decided"].items():
         lane = lanes_doc["lanes"][name]
         if value == "off":
@@ -144,6 +165,26 @@ def apply_tier_lines_to_doc(lanes_doc, parsed):
         else:
             lane["tier"] = value
             lane.pop("enabled", None)
+    return dropped
+
+
+def write_order_from_lines(lanes_doc, parsed):
+    """`--plain` has no review page, so the lines' order inside each tier is the
+    order written: each carried lane a line named gets `order`, its place in its
+    tier from 1, counted on the tier it holds after the prompts. A lane not
+    carried loses any `order` it had. Lines that name no lane change nothing."""
+    if not parsed["decided"]:
+        return
+    placed = {}
+    for name in parsed["decided"]:
+        lane = lanes_doc["lanes"][name]
+        if not lane.get("enabled", True):
+            continue
+        placed[lane["tier"]] = placed.get(lane["tier"], 0) + 1
+        lane["order"] = placed[lane["tier"]]
+    for lane in lanes_doc["lanes"].values():
+        if not lane.get("enabled", True):
+            lane.pop("order", None)
 
 
 def fit_line(line, width=80):
@@ -534,6 +575,10 @@ class Wizard:
         # assigned them: it read as the carry decisions carrying through.
         self._marks = {tier: set() for tier in range(1, 5)}
         self._review_order = []
+        # Orin's order inside each tier, as the review page shows it (ticket 28),
+        # and each lane's place in the last lines applied, which starts it
+        self._tier_order = {tier: [] for tier in range(1, 5)}
+        self._line_order = {}
         self._width = 80
         _rows, self._unmatched = resolve_effort_rows(self.lanes_doc, effort_rows)
         proposals = propose_enabled(self.lanes_doc, effort_rows)
@@ -593,23 +638,77 @@ class Wizard:
         self.tier = None
         self.cursor = 0
         self.message = ""
-        # The order is fixed on arrival, best tier first: re-sorting as a digit
-        # moves a lane would carry the line out from under the cursor. A
-        # model's group sits where its best-tiered lane sits (ticket 26).
-        by_tier = sorted(
-            (name for name in self._carried() if name in self._assigned),
-            key=lambda name: (-self._assigned[name], *self._bench_order(name)))
-        self._review_order = group_lanes(by_tier, self.lanes_doc)
+        self._arrange_review()
+
+    def _start_key(self, name):
+        """Where a lane first sits in its tier: the order of the lines applied,
+        then an `order` the catalog already gives it at this tier, then
+        benchmark order. The model grouping of ticket 26 does not apply here:
+        the order is Orin's (ticket 28)."""
+        line = self._line_order.get(name)
+        original = self._original_lanes["lanes"][name]
+        kept = original.get("order") if original.get("tier") == self._assigned.get(name) else None
+        return (line is None, line or 0, kept is None, kept or 0, *self._bench_order(name))
+
+    def _arrange_review(self):
+        """Each tier's order, 4 to 1. A lane already ordered in its tier keeps
+        its place, so back and forth through routing loses no J/K move; a lane
+        new to the tier joins after them at its starting place."""
+        for tier in range(1, 5):
+            members = [name for name in self._carried() if self._assigned.get(name) == tier]
+            kept = [name for name in self._tier_order[tier] if name in members]
+            fresh = sorted((name for name in members if name not in kept), key=self._start_key)
+            self._tier_order[tier] = kept + fresh
+        self._flatten_review()
+
+    def _flatten_review(self):
+        self._review_order = [name for tier in (4, 3, 2, 1) for name in self._tier_order[tier]]
+
+    def _review_cursor_name(self):
+        names = self._review_order
+        return names[min(self.cursor, len(names) - 1)] if names else None
+
+    def _move_in_tier(self, step):
+        """J/K: swap the lane under the cursor with its neighbour inside its
+        tier; at the top or bottom of the tier nothing moves. The cursor stays
+        on the lane."""
+        name = self._review_cursor_name()
+        order = self._tier_order[self._assigned[name]]
+        here = order.index(name)
+        there = here + step
+        if 0 <= there < len(order):
+            order[here], order[there] = order[there], order[here]
+            self._flatten_review()
+            self.cursor = self._review_order.index(name)
+
+    def _move_to_tier(self, tier):
+        """1-4: the lane under the cursor goes to the end of that tier, its own
+        tier included, and the cursor goes with it."""
+        name = self._review_cursor_name()
+        self._tier_order[self._assigned[name]].remove(name)
+        self._assigned[name] = tier
+        self._tier_order[tier].append(name)
+        self._flatten_review()
+        self.cursor = self._review_order.index(name)
+
+    def _place(self, name):
+        """A carried lane's place inside its tier from 1, or None if unplaced."""
+        order = self._tier_order.get(self._assigned.get(name), [])
+        return order.index(name) + 1 if name in order else None
 
     def apply_tier_lines(self, text):
         """Apply `<lane> <1-4|off>` lines and say what they did, on one line.
 
         A tier line carries the lane and gives it that tier; an off line sets it
-        not carried; a lane with no line keeps what it has. On the review page
-        the order is taken again, since a lane may have joined or left it, and
-        the cursor stays on the lane it was on when that lane is still listed.
-        Returns the summary line."""
+        not carried; a carried lane with no line goes off (ticket 28). The
+        lines' order inside a tier is the review page's starting order. On the
+        review page the order is taken again, and the cursor stays on the lane
+        it was on when that lane is still listed. Returns the summary line."""
         parsed = parse_tier_lines(text, self.lanes_doc)
+        dropped = unnamed_carried(parsed, self._carried())
+        for name in dropped:
+            self._enabled[name] = False
+            self._assigned.pop(name, None)
         for name, value in parsed["decided"].items():
             if value == "off":
                 self._enabled[name] = False
@@ -617,7 +716,10 @@ class Wizard:
             else:
                 self._enabled[name] = True
                 self._assigned[name] = value
-        summary = tier_lines_summary(parsed, self.lanes_doc)
+        if parsed["decided"]:
+            self._line_order = {name: index for index, name in enumerate(parsed["decided"])}
+            self._tier_order = {tier: [] for tier in range(1, 5)}
+        summary = tier_lines_summary(parsed, dropped)
         if self.screen == "review":
             order = self._review_order
             here = order[min(self.cursor, len(order) - 1)] if order else None
@@ -749,8 +851,10 @@ class Wizard:
                 self.cursor = (self.cursor - 1) % len(names)
             elif key == "down" and names:
                 self.cursor = (self.cursor + 1) % len(names)
+            elif key in ("lane-up", "lane-down") and names:
+                self._move_in_tier(-1 if key == "lane-up" else 1)
             elif key in ("1", "2", "3", "4") and names:
-                self._assigned[names[min(self.cursor, len(names) - 1)]] = int(key)
+                self._move_to_tier(int(key))
             elif key == "v":
                 self._paste_tier_lines()
             elif key == "enter":
@@ -804,8 +908,16 @@ class Wizard:
                 return
             if key == "y":
                 result_lanes = copy.deepcopy(self._original_lanes)
+                self._arrange_review()
                 for name, lane in result_lanes["lanes"].items():
                     lane["tier"] = self._final_tier(name)
+                    # each carried lane's place inside its tier (ticket 28); a
+                    # lane not carried is in no order, so it keeps none
+                    place = self._place(name) if self._enabled[name] else None
+                    if place is None:
+                        lane.pop("order", None)
+                    else:
+                        lane["order"] = place
                     if not self._enabled[name]:
                         lane["enabled"] = False
                     else:
@@ -1116,28 +1228,33 @@ class Wizard:
             )
         if self.screen == "review":
             epoch_names, aa_names = self._bench_columns()
-            columns = [*REVIEW_COLUMNS, "lane", "model", "effort", *epoch_names, "Epoch mean rank"]
+            columns = ["#", "lane", "model", "effort", *epoch_names, "Epoch mean rank"]
             if aa_names:
                 columns.extend([*aa_names, "AA mean rank"])
+            here = self._review_cursor_name()
             rows = []
-            for index, name in enumerate(self._review_order):
-                lane = self.lanes_doc["lanes"][name]
-                tier = self._assigned[name]
-                # one decision on the line, which tier; the same box as every
-                # other page, one per tier, and exactly one of them ticked
-                boxes = ["[x]" if tier == t else "[ ]" for t in (4, 3, 2, 1)]
-                rows.append({
-                    "cells": [*boxes, name, lane["model"], lane["effort"],
-                              *self._bench_cells(name, epoch_names, aa_names)],
-                    "marked": True, "dimmed": False,
-                    "cursor": index == self.cursor, "tag": "",
-                })
+            # One section per tier, 4 to 1, each numbered in Orin's order
+            # (ticket 28). The section line states the tier, so a line needs no
+            # tier box; the number is the place ranking tries it in. An empty
+            # tier keeps its section, as the place 1-4 can move a lane to.
+            for tier in (4, 3, 2, 1):
+                order = self._tier_order[tier]
+                count = f"{len(order)} lane{'s' if len(order) != 1 else ''}" if order else "no lanes"
+                rows.append(section_row(f"Tier {tier} ({count})", len(columns)))
+                for place, name in enumerate(order, 1):
+                    lane = self.lanes_doc["lanes"][name]
+                    rows.append({
+                        "cells": [f"{place:>2}", name, lane["model"], lane["effort"],
+                                  *self._bench_cells(name, epoch_names, aa_names)],
+                        "marked": False, "dimmed": False,
+                        "cursor": name == here, "tag": "",
+                    })
             off = [name for name in self.lanes_doc["lanes"] if not self._enabled[name]]
-            legend = []
+            legend = [REVIEW_MOVE_LEGEND, REVIEW_ORDER_LEGEND]
             if off:
                 legend.append(self._drift_line("Not carried, keeps its catalog tier", off))
             return self._frame(
-                "review", "Review tiers",
+                "review", "Order each tier",
                 columns=columns, rows=rows,
                 footer=REVIEW_FOOTER,
                 legend=legend,
@@ -1197,6 +1314,14 @@ class Wizard:
 MIN_ELASTIC = 12
 
 
+def section_row(text, width):
+    """A heading line inside a table, such as the review page's `Tier 4 (2 lanes)`.
+    Its cells are blank so column fitting ignores it; `layout_lines` draws
+    `section` across the row. It is never the cursor."""
+    return {"cells": [""] * width, "section": text, "marked": False,
+            "dimmed": False, "cursor": False, "tag": ""}
+
+
 def _clip(text, width):
     """Fit a cell, and say so when it did not fit.
 
@@ -1240,7 +1365,7 @@ def _fit_table(view, width):
         return [], []
     elastic = view.get("elastic")
     elastic_index = columns.index(elastic) if elastic in columns else None
-    priority_names = ("mark", "carry", *REVIEW_COLUMNS, "lane", "Epoch mean rank")
+    priority_names = ("mark", "carry", "#", "lane", "Epoch mean rank")
     deferred_names = ("model", "effort")
     priority = [columns.index(name) for name in priority_names if name in columns]
     deferred = [columns.index(name) for name in deferred_names
@@ -1368,6 +1493,11 @@ def layout_lines(view, width, height):
         for row in rows[first:]:
             if y >= legend_y:
                 break
+            if row.get("section"):
+                lines.append((y, fit_line(row["section"], width), "section"))
+                y += 1
+                shown += 1
+                continue
             cells = []
             for i, w in zip(chosen, widths):
                 cell = row["cells"][i] if i < len(row["cells"]) else ""
@@ -1427,7 +1557,7 @@ def run_curses(wizard):
             "steps": curses.A_BOLD, "message": curses.A_BOLD,
             "body": 0, "legend": 0, "footer": 0, "row": 0,
             "row-dim": curses.A_DIM,
-            "panel": 0, "panel-head": curses.A_BOLD,
+            "panel": 0, "panel-head": curses.A_BOLD, "section": curses.A_BOLD,
             "row-cursor": curses.A_REVERSE | curses.A_BOLD,
             "row-cursor-dim": curses.A_DIM | curses.A_REVERSE | curses.A_BOLD,
         }
@@ -1467,7 +1597,10 @@ def run_curses(wizard):
                        ord("b"): "b", ord("q"): "q", ord("y"): "y", ord("n"): "n",
                        ord("+"): "plus", ord("="): "plus", ord("-"): "minus",
                        ord("o"): "o", ord("O"): "o", ord("v"): "v", ord("V"): "v",
-                       ord("x"): "x", ord("X"): "x"}
+                       ord("x"): "x", ord("X"): "x",
+                       # the review page moves the lane itself (ticket 28)
+                       ord("J"): "lane-down", ord("K"): "lane-up",
+                       curses.KEY_SF: "lane-down", curses.KEY_SR: "lane-up"}
             if ord("1") <= code <= ord("5"):
                 key = chr(code)
             else:

@@ -127,8 +127,11 @@ reference for where the dataset sits in the page.
   Orin ruled the subscription costs and vendor notes non-sensitive, so no split to a
   forge and no constraint on what the pre-screen may write (2026-09-10).
 - `trust` is gone from the design entirely. Ranking sorts
-  `(tier asc, pace desc, lane name asc)`; the name term is an arbitrary deterministic
-  tie-break, so a steal only ever crosses tiers (tickets 01 and 02).
+  `(tier asc, order asc, pace desc, lane name asc)`, where `order` is the lane's place
+  inside its tier from the wizard's review page and a lane without one sorts after
+  every lane with one; the name term is an arbitrary deterministic tie-break. A steal
+  by `margin` can happen inside a tier, which is the load balance; a catalog with no
+  `order` ranks as before (tickets 01, 02 and 28).
 - Each class has a floor and a ceiling; the floor is the default, and tier 4 is
   reached only by naming a lane until setup says otherwise. Tiers are what Orin sets:
   tests check the rule on fixtures, never his tiers (ticket 22).

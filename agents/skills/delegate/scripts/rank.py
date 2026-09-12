@@ -17,18 +17,26 @@ The selection rule:
      disabled, floor, ceiling, gate, cli).
   3. Sort eligible lanes by:
        tier ascending,
+       order ascending (the lane's `order`, its place inside its tier that
+         Orin sets in the setup wizard; a lane without `order` sorts after
+         every lane with one),
        pace descending,
        lane name ascending,
        lanes with unknown pace (None) sorted last.
-     Two lanes alike on tier and pace are equivalent, so the tie falls to lane
-     name: an arbitrary factor, chosen only to make the pick deterministic.
+     Two lanes alike on tier, order and pace are equivalent, so the tie falls
+     to lane name: an arbitrary factor, chosen only to make the pick
+     deterministic. A catalog with no `order` field ranks as it did before
+     ticket 28: every lane sorts as unordered, so tier and pace decide.
   4. Initial pick is eligible[0].
   5. Steal rule: evaluate remaining eligible lanes in sorted order. If a lane's
      pace exceeds the current pick's pace by at least routing.margin, it steals
      the pick:
        for L in eligible[1:]:
            if pace(L) >= pace(pick) + routing.margin: pick = L
-     Lanes with unknown pace never steal and are never stolen from.
+     Lanes with unknown pace never steal and are never stolen from. Because
+     `order` sorts ahead of pace, a steal can happen inside a tier: a lane
+     lower in Orin's order runs when its meter is well ahead of the pick's.
+     That is the load balance (ticket 28).
 
 Reason vocabulary (exactly one per lane):
   - pick: chosen lane when it is eligible[0] (or when all meters unknown)
@@ -141,6 +149,7 @@ def rank(cls, cat, meters, present, tier=None, effort=None):
             "model": model,
             "effort": lane_effort,
             "tier": lane_tier,
+            "order": lane_def.get("order"),
             "meter": meter_name,
             "pace": pace,
             "r": r,
@@ -160,7 +169,9 @@ def rank(cls, cat, meters, present, tier=None, effort=None):
         unknown = 1 if item["pace"] is None else 0
         t = item["tier"] if item["tier"] is not None else 99
         p = item["pace"] if item["pace"] is not None else 0.0
-        return (unknown, t, -p, item["lane"])
+        unordered = 1 if item["order"] is None else 0
+        o = item["order"] if item["order"] is not None else 0
+        return (unknown, t, unordered, o, -p, item["lane"])
 
     eligible_rows.sort(key=sort_key)
 
@@ -199,6 +210,9 @@ def format_rows(rows):
         return []
     max_lane_w = max(len(r["lane"]) for r in rows)
     max_model_w = max(len(r["model"]) for r in rows)
+    # the order column appears only when some lane has an order, so a catalog
+    # without one prints exactly as before ticket 28
+    show_order = any(r.get("order") is not None for r in rows)
     lines = []
     for idx, r in enumerate(rows, 1):
         pace_str = "   ?" if r["pace"] is None else f"{r['pace']:.2f}"
@@ -209,7 +223,8 @@ def format_rows(rows):
         line = (
             f"{idx}. {lane_padded} "
             f"tier={r['tier']} "
-            f"pace={pace_str} "
+            + (f"order={'-' if r.get('order') is None else r['order']} " if show_order else "")
+            + f"pace={pace_str} "
             f"r={r_str} "
             f"{status_str} "
             f"{model_padded}   "

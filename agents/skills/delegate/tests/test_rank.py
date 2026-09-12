@@ -461,7 +461,7 @@ with tempfile.TemporaryDirectory() as td:
     )
     data12 = json.loads(res12.stdout)
     required_row_keys = {
-        "lane", "harness", "model", "effort", "tier", "meter",
+        "lane", "harness", "model", "effort", "tier", "order", "meter",
         "pace", "r", "remaining_weekly", "meter_status", "eligible", "pick", "reason"
     }
     top_keys_ok = all(k in data12 for k in ("class", "floor", "ceiling", "margin", "gate", "pick", "rows"))
@@ -588,5 +588,111 @@ with tempfile.TemporaryDirectory() as td:
         raised_above = True
 
     record("case 17 tier= narrows eligible and raises outside range", tier_narrows_ok and raised_below and raised_above)
+
+    # -------------------------------------------------------------
+    # 18. A catalog with no `order` field ranks exactly as before ticket 28.
+    # The rule before ticket 28, restated here on its own: sort by
+    # (unknown pace last, tier, pace desc, lane name), then the steal loop.
+    def rank_before_order(cls, cat_doc, meters_doc, present):
+        rows = rank.rank(cls, cat_doc, meters_doc, present)
+        eligible = [r for r in rows if r["eligible"]]
+
+        def key(item):
+            unknown = 1 if item["pace"] is None else 0
+            t = item["tier"] if item["tier"] is not None else 99
+            p = item["pace"] if item["pace"] is not None else 0.0
+            return (unknown, t, -p, item["lane"])
+
+        ordered = sorted(eligible, key=key)
+        if not ordered:
+            return []
+        pick = ordered[0]
+        margin = cat_doc["routing"]["margin"]
+        for r in ordered[1:]:
+            if r["pace"] is not None and pick["pace"] is not None and r["pace"] >= pick["pace"] + margin:
+                pick = r
+        return [pick["lane"]] + [r["lane"] for r in ordered if r is not pick]
+
+    no_order18 = not any("order" in lane for c in (cat, cat3, cat16) for lane in c["lanes"].values())
+    mismatches18 = []
+    compared18 = 0
+    for c in (cat, cat3, cat16):
+        for d in (doc1, doc2, doc3, doc4, doc5, doc6, doc6_all, doc9a, doc9b, doc9c, doc16):
+            for cls in catalog.CLASSES:
+                rows = rank.rank(cls, c, d, ALL_HARNESSES)
+                got = [r["lane"] for r in rows if r["eligible"]]
+                want = rank_before_order(cls, c, d, ALL_HARNESSES)
+                compared18 += 1
+                if got != want or any(r["order"] is not None for r in rows):
+                    mismatches18.append((cls, got, want))
+    # the text output carries no order column when no lane has an order
+    write_meters_doc(meters_path, m1)
+    res18 = subprocess.run(
+        [sys.executable, RANK_PY, "impl", "--config-dir", cfg_dir, "--meters", meters_path, "--harnesses", ALL_HARNESSES_ARG],
+        capture_output=True,
+        text=True,
+    )
+    record("case 18 a catalog with no order ranks exactly as before, on every fixture and class",
+           no_order18 and compared18 == 165 and not mismatches18
+           and res18.returncode == 0 and "order=" not in res18.stdout,
+           repr(mismatches18[:3]))
+
+    # -------------------------------------------------------------
+    # 19. `order` orders a tier ahead of pace; a steal by margin can now happen inside a tier.
+    # impl (2-3): tier 2 holds grok46-high@grok and terra-high@codex, tier 3 sol-high@codex.
+    cat19 = copy.deepcopy(cat)
+    cat19["lanes"]["terra-high@codex"]["order"] = 1
+    cat19["lanes"]["grok46-high@grok"]["order"] = 2
+    # m1: grok pace 0.90, codex 0.75. Without order grok leads tier 2 on pace;
+    # with order terra leads, and 0.90 < 0.75 + 0.2, so no steal.
+    rows19a = rank.rank("impl", cat19, doc1, ALL_HARNESSES)
+    order19a_ok = (
+        [r["lane"] for r in rows19a if r["eligible"]] == ["terra-high@codex", "grok46-high@grok", "sol-high@codex"]
+        and rows19a[0]["pick"] is True and rows19a[0]["reason"] == "pick"
+        and rows19a[0]["order"] == 1
+    )
+    # m2: grok pace 1.06 >= 0.75 + 0.2, so grok, second in the order, steals inside tier 2
+    rows19b = rank.rank("impl", cat19, doc2, ALL_HARNESSES)
+    steal19b_ok = (
+        rows19b[0]["lane"] == "grok46-high@grok" and rows19b[0]["pick"] is True
+        and rows19b[0]["reason"] == "stolen by pace: 1.06 >= 0.75 + 0.2"
+        and rows19b[0]["tier"] == 2
+    )
+    # equal paces: a lane with an order sorts ahead of one without, and order never crosses tiers
+    cat19c = copy.deepcopy(cat)
+    cat19c["lanes"]["sol-high@codex"]["order"] = 1
+    cat19c["lanes"]["terra-high@codex"]["order"] = 5
+    rows19c = rank.rank("impl", cat19c, doc9a, ALL_HARNESSES)
+    order19c_ok = [r["lane"] for r in rows19c if r["eligible"]] == ["terra-high@codex", "grok46-high@grok", "sol-high@codex"]
+    record("case 19 rank() orders a tier by order, then pace; a steal by margin can happen inside a tier",
+           order19a_ok and steal19b_ok and order19c_ok,
+           repr(([r["lane"] for r in rows19a], rows19b[0]["reason"], [r["lane"] for r in rows19c])))
+
+    cfg19_dir = os.path.join(td, "cfg19")
+    os.makedirs(cfg19_dir, exist_ok=True)
+    lanes19_doc = catalog.load_json(os.path.join(cfg_dir, "lanes.json"))
+    lanes19_doc["lanes"]["terra-high@codex"]["order"] = 1
+    lanes19_doc["lanes"]["grok46-high@grok"]["order"] = 2
+    catalog.write_json(os.path.join(cfg19_dir, "lanes.json"), lanes19_doc)
+    shutil.copy(os.path.join(cfg_dir, "routing.json"), cfg19_dir)
+    write_meters_doc(meters_path, m1)
+    res19 = subprocess.run(
+        [sys.executable, RANK_PY, "impl", "--config-dir", cfg19_dir, "--meters", meters_path, "--harnesses", ALL_HARNESSES_ARG, "--json"],
+        capture_output=True,
+        text=True,
+    )
+    data19 = json.loads(res19.stdout)
+    res19t = subprocess.run(
+        [sys.executable, RANK_PY, "impl", "--config-dir", cfg19_dir, "--meters", meters_path, "--harnesses", ALL_HARNESSES_ARG],
+        capture_output=True,
+        text=True,
+    )
+    lines19 = res19t.stdout.strip().splitlines()
+    record("case 19 CLI order picks inside a tier and prints its order",
+           res19.returncode == 0 and data19["pick"] == "terra-high@codex"
+           and [r["order"] for r in data19["rows"] if r["eligible"]] == [1, 2, None]
+           and "1. terra-high@codex" in lines19[1] and "order=1 " in lines19[1]
+           and any("sol-high@codex" in line and "order=- " in line for line in lines19),
+           res19.stdout[:400] + res19t.stdout)
 
 sys.exit(1 if fails else 0)
