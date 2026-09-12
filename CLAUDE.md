@@ -34,8 +34,9 @@ State after 2026-09-12, each row proven against Playwright's own snapshots rathe
 than a worker's marker: **agy** passes; **codex** passes through a home of
 delegate's own (`~/.local/share/delegate/codex-home`, built by
 `make delegate-codex-home`), which holds one MCP server, so a worker never sees
-Gmail, `codex-cli`, `node_repl`, hooks or `~/.codex/AGENTS.md` — ticket 03's code
-is done and waits on that setup plus an end-to-end probe; **grok** has a browser
+Gmail, `codex-cli`, `node_repl`, hooks or `~/.codex/AGENTS.md` — ticket 03 is done on the
+Mac, proven through the normal dispatch path, and only the omarchy setup and a
+write-run probe remain; **grok** has a browser
 on write runs only, because its built-in `read-only` sandbox kills every stdio MCP
 server on macOS, and the proven fix is a custom sandbox profile, which needs a
 relay change (ticket 04); **claude** lanes are native since ticket 22, so ticket 02

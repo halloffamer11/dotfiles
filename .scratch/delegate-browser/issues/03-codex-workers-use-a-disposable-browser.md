@@ -18,8 +18,26 @@ Facts and setup rules: `../research/2026-09-10-browser-routes.md`.
 - [x] `approvals_reviewer = "auto_review"` is required and is the whole reason earlier attempts failed. `codex exec` runs at `approval_policy = "never"`, which auto-rejects every approval request, and an MCP tool call raises one. Without the key `browser_navigate` returns "MCP tool call requires approval, but approval policy is never"; with it the call completes. `default_tools_approval_mode = "auto"` does **not** work in codex 0.154.0, though the field exists in Codex's source.
 - [x] Bootstrap on a new machine: `make delegate-codex-home` writes the home from `agents/skills/delegate/assets/codex-home/config.toml` and symlinks `auth.json`. `make bootstrap` runs it. The template holds no secret; the auth symlink is outside the repo.
 - [x] Dispatch test 9a2 covers the new argv and the `CODEX_HOME` the relay receives. Test 9a still covers the fallback.
-- [ ] Orin runs `make delegate-codex-home` on the Mac and on omarchy.
-- [ ] Proof through the delegate dispatch path, not a raw CLI: the codex row of `browser_probes.py` passes the disposable probe in a read-only run and in a write run, and the pass is checked against Playwright's page snapshot.
+- [x] Orin ran `make delegate-codex-home` on the Mac, 2026-09-12. The home holds `config.toml` and an `auth.json` symlink; `codex mcp list` shows one server and `codex login status` prints "Logged in using ChatGPT" from it.
+- [ ] The same on omarchy.
+- [x] Proof through the delegate dispatch path, not a raw CLI: the codex row of `browser_probes.py` passes the disposable probe in a read-only run, checked against Playwright's page snapshots. See below.
+- [ ] The same in a write run (`--write`).
+
+## Proof through the dispatch path, 2026-09-12 (Mac)
+
+`python3 scripts/browser_probes.py --only codex --probe disposable`, after `make delegate-codex-home`:
+
+| harness | CLI version | probe | PASS/FAIL | reason |
+|---|---|---|---|---|
+| codex | 0.154.0 | disposable | PASS | title=Example Domain echoed=423ca1ca7395 |
+
+Run `20260912T194854Z-luna-low@codex-e1d1e69b`, lane `luna-low@codex` at low effort, 35 s, status `done`, read-only.
+
+Three things carry this row, and none of them is the worker's own word:
+
+- Playwright wrote three files inside the run's window — `page-…19-49-16-735Z.yml` (heading "Example Domain"), `page-…19-49-20-430Z.yml` (the httpbin form), and `page-…19-49-32-915Z.yml`, which holds httpbin's JSON echo with `"custname": "423ca1ca7395"`. That is the run's own nonce, so the form really was submitted from a browser. The directory was listed before the run, so these files are this run's and not an earlier one's.
+- The run's `events.jsonl` holds 12 `mcp_tool_call` entries with `"server":"playwright"`, among them 4 `browser_navigate` and 2 `browser_click`.
+- Those calls are themselves the evidence that the new path was taken. A codex run under `--ignore-user-config` has no MCP server at all, so a Playwright tool call is only possible through the delegate-owned home. The real relay writes no `argv.json` — only the fake relay in the tests does — so the flag change cannot be read back from the run directory directly.
 
 ## Proof so far, 2026-09-12 (Mac, raw `codex exec`)
 
