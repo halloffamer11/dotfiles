@@ -298,6 +298,8 @@ with tempfile.TemporaryDirectory() as tmp:
           "agy" in sl_lines[0] and "grok" in sl_lines[1], out)
     check("statusline grok shows em dash for 5h", "grok   5h ·····    —" in sl_lines[1], sl_lines[1])
     check("statusline fable leaves 5h blank", "fable                   wk" in sl_lines[2], sl_lines[2])
+    check("statusline unbadged rows start with a placeholder, never a space",
+          all(l.startswith("·  ") for l in sl_lines[2:]), out)
     check("statusline fable shows remaining_weekly_model", "59%·4d" in sl_lines[2], sl_lines[2])
     check("statusline codex carries ✗ when gated", "8%·3d✗" in sl_lines[4], sl_lines[4])
     check("statusline running agent shows tier glyph on agy", sl_lines[0].endswith("①"), sl_lines[0])
@@ -312,6 +314,23 @@ with tempfile.TemporaryDirectory() as tmp:
 
     rc, out_nocache, _ = run(["statusline"] + cfg, {"DELEGATE_CACHE": os.path.join(tmp, "missing_cache.json")})
     check("statusline with missing cache exits 0 and prints nothing", rc == 0 and out_nocache == "", out_nocache)
+
+    sw_env = dict(sl_env, DELEGATE_STATUSLINE_SWITCH=os.path.join(tmp, "sl_switch", "statusline.off"))
+    rc, out_st, _ = run(["statusline", "status"] + cfg, sw_env)
+    check("statusline status reports on by default", rc == 0 and out_st.strip() == "on", out_st)
+    rc, out_off, _ = run(["statusline", "off"] + cfg, sw_env)
+    check("statusline off creates the flag file", rc == 0 and os.path.exists(sw_env["DELEGATE_STATUSLINE_SWITCH"]), out_off)
+    rc, out_sw, _ = run(["statusline", "--no-color"] + cfg, sw_env)
+    check("statusline prints nothing while the switch is off", rc == 0 and out_sw == "", out_sw)
+    rc, out_st, _ = run(["statusline", "status"] + cfg, sw_env)
+    check("statusline status reports off", out_st.strip() == "off", out_st)
+    rc, out_tg, _ = run(["statusline", "toggle"] + cfg, sw_env)
+    check("statusline toggle turns the rows back on", out_tg.strip() == "delegate rows on"
+          and not os.path.exists(sw_env["DELEGATE_STATUSLINE_SWITCH"]), out_tg)
+    rc, out_sw, _ = run(["statusline", "--no-color"] + cfg, sw_env)
+    check("statusline prints rows again after toggle", len([l for l in out_sw.splitlines() if l.strip()]) == 5, out_sw)
+    rc, out_on, _ = run(["statusline", "on"] + cfg, sw_env)
+    check("statusline on is idempotent", rc == 0 and out_on.strip() == "delegate rows on", out_on)
 
     rc, out_badcat, err_badcat = run(["statusline", "--config-dir", missing], sl_env)
     check("statusline with missing catalog exits 1", rc == 1, err_badcat)

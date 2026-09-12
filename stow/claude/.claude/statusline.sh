@@ -167,6 +167,8 @@ LINE2=("$S_SESS" "$S_WT" "$S_AGENT" "$S_HERDR" "$S_STYLE" "$S_VIM")
 # One row per catalog meter from the installed skill: remaining 5h and weekly
 # windows, the tier each harness wins now, and running agents. Reads caches
 # only, never probes. Absent python3 or script, or a non-zero exit, adds nothing.
+# Switch: `report.py statusline off|on|toggle` (flag file
+# ~/.cache/delegate/statusline.off); the next refresh, 30 s at most, follows it.
 extra_rows=""
 script="$HOME/.claude/skills/delegate/scripts/report.py"
 if command -v python3 >/dev/null 2>&1 && [[ -f $script ]]; then

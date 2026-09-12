@@ -36,6 +36,8 @@ except ImportError:
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUNS = os.environ.get("DELEGATE_RUNS") or os.path.expanduser("~/.cache/delegate/runs.jsonl")
 CACHE = os.environ.get("DELEGATE_CACHE") or os.path.expanduser("~/.cache/delegate/usage.json")
+# Flag file: while it exists, `statusline` prints no rows.
+SWITCH = os.environ.get("DELEGATE_STATUSLINE_SWITCH") or os.path.expanduser("~/.cache/delegate/statusline.off")
 VERDICTS = ("clean", "findings", "partial", "failed")
 DAYS_PER_MONTH = 30.4375
 WEEK_DAYS = 7
@@ -484,9 +486,32 @@ def format_label(lbl, won_tiers, c):
 
 
 def format_badge(won_tiers, c):
+    # Claude Code trims leading whitespace off every status line row, so an
+    # unbadged row keeps its column with a dim placeholder, never with spaces.
     if not won_tiers:
-        return ""
+        return f"{c['MUTE']}·{c['R']}"
     return "".join(f"{c['TIER_COL'][t]}{TIER_GLYPH[t]}{c['R']}" for t in sorted(won_tiers))
+
+
+def statusline_switch(state):
+    """on / off / toggle / status for the rows; the switch is a flag file."""
+    path = SWITCH
+    if state == "status":
+        print("off" if os.path.exists(path) else "on")
+        return
+    if state == "toggle":
+        state = "on" if os.path.exists(path) else "off"
+    if state == "off":
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("delegate status line rows are off; remove this file or run "
+                    "`report.py statusline on` to show them\n")
+    else:
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+    print(f"delegate rows {state}")
 
 
 def running_glyphs(running_tiers, c):
@@ -498,6 +523,11 @@ def running_glyphs(running_tiers, c):
 
 
 def cmd_statusline(a):
+    if a.state:
+        statusline_switch(a.state)
+        return
+    if os.path.exists(SWITCH):
+        return
     no_color = a.no_color or bool(os.environ.get("NO_COLOR"))
     c = get_colors(no_color)
     catalog = load_catalog_or_die(a.config_dir)
@@ -668,6 +698,8 @@ def main():
     sl = sub.add_parser("statusline", parents=[cfg], help="Claude Code statusline meter rows")
     sl.add_argument("--no-color", action="store_true", help="strip ANSI color escapes")
     sl.add_argument("--no-running", action="store_true", help="suppress the running agents column")
+    sl.add_argument("state", nargs="?", choices=["on", "off", "toggle", "status"],
+                    help="switch the rows instead of printing them (flag file ~/.cache/delegate/statusline.off)")
     sl.set_defaults(fn=cmd_statusline)
 
     a = p.parse_args()

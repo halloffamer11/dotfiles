@@ -31,19 +31,25 @@ something collapsible"). Prototyped the same day; Orin chose variant H. Branch
 - [x] `usage.py` writes `remaining_weekly_model` on a model meter (claude-fable): the model's own weekly figure, while `remaining_weekly` stays `min(all-models, model)` for ranking. The fable row shows `remaining_weekly_model`
 - [x] `stow/claude/.claude/statusline.sh` appends the rows after its second line and drops its own `🕔` segment, which duplicated the claude 5h cell; bash 3.2 and BSD userland still work; a missing `python3` or `report.py` adds no rows and no error
 - [x] `tests/test_report.py` covers the rows from fixture usage, ledger and the sample catalog through `--config-dir`, `DELEGATE_CACHE` and `DELEGATE_LEDGER`; `tests/test_usage_reset.py` (or `test_events.py`) covers the new field. Full suite green
-- [ ] Orin sees the rows in a live session (his)
+- [x] Orin sees the rows in a live session (his): seen 2026-09-11 23:14, which showed the unbadged rows pulled to column 0
+- [x] Every row starts with a non-space glyph, so Claude Code's per-row trim cannot shift the columns: an unbadged row carries a dim `·` in the badge column
+- [x] `report.py statusline off|on|toggle|status` switches the rows through the flag file `~/.cache/delegate/statusline.off` (`DELEGATE_STATUSLINE_SWITCH` in tests); while it exists `statusline` prints nothing and exits 0. Covered in `test_report.py`
+- [ ] Orin picks the WezTerm chord that runs the toggle (his; the snippet is in the 2026-09-11 tweaks section)
 
 ## The row
 
-From the prototype (variant H), live 2026-09-11, fake running agents:
+Live 2026-09-11 after the tweaks below, no running agents:
 
 ```
-②  agy    5h ██▏░░  44%·3h wk ███▍░  68%·5d  ②②
-③  grok   5h ·····    —    wk █░░░░  20%·4d  ③
-   codex  5h █████ 100%·4h wk ▍░░░░   8%·3d✗ ③
-   claude 5h ██▉░░  58%·2h wk ██▎░░  46%·4d
-   fable                   wk ██▉░░  59%·4d  ④
+②  agy    5h █████ 100%·4h wk ███▎░  66%·5d
+③  grok   5h ·····    —    wk ▉░░░░  17%·4d
+·  fable                   wk ██▊░░  54%·3d
+·  claude 5h ████▋  92%·4h wk ██░░░  41%·3d
+·  codex  5h █████ 100%·4h wk ▍░░░░   8%·3d✗
 ```
+
+With running agents the trailing column carries one circled digit per agent
+in its lane's tier, for example `②②` after agy's weekly cell.
 
 - Label: the harness name, unless the harness has several catalog meters, then
   the meter suffix with `general` meaning the harness (`claude-general` →
@@ -116,3 +122,33 @@ styles; with no skill installed it prints two lines and no error.
 
 Row order among unbadged meters is the catalog's `meters` order, so fable
 sits above claude in the live file. Reorder `lanes.json` to change it.
+
+## Tweaks, 2026-09-11
+
+Orin's first live screenshot (23:14) showed fable, claude and codex starting
+at column 0 while agy and grok started after their badge. `report.py` emitted
+three leading spaces on those rows; Claude Code trims leading whitespace from
+each status line row before drawing it (not documented on the statusline page,
+established from the screenshot against the script's bytes). Fix: the badge
+column is never blank; an unbadged row shows a dim `·`. Trailing whitespace
+was already stripped by the script.
+
+Orin also asked for an on/off switch, "best-case a keyboard shortcut". Claude
+Code's `keybindings.json` binds built-in actions only (checked against the
+keybindings reference the same day: no action runs a command, a skill, or
+touches the status line), so the switch is a flag file that the next refresh
+follows within 30 s:
+
+```
+python3 ~/.claude/skills/delegate/scripts/report.py statusline off|on|toggle|status
+```
+
+Typed at the Claude prompt as `! python3 … statusline toggle` it costs no
+model turn. A WezTerm key can run the same command through
+`wezterm.action_callback` and `wezterm.run_child_process`; the chord is Orin's
+to pick within his tier map, so `wezterm.lua` is untouched here.
+
+Verified: `test_report.py` 87 PASS (was 79), the other five files unchanged
+and green; live render shows every row starting with a glyph; `off` printed
+zero rows and `toggle` restored five against a scratch flag path, and
+`~/.cache/delegate/statusline.off` does not exist afterwards.
