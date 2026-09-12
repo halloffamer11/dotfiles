@@ -57,7 +57,8 @@ lane made here also needs a `lane-*` agent file in `agents/agents/` (ticket 22).
   `(Reasoning)` names no effort, so its rows are skipped, and `none` for the second,
   which no lane can select. The reader is right: AA does not measure Haiku at a
   lane's effort. Recorded in `sources.json`. Claude Code itself runs Haiku with no
-  effort level: "Haiku does not support effort levels"
+  effort level: its docs list the models that take effort, say "Models not
+  listed here do not support effort", and do not list Haiku
   (https://code.claude.com/docs/en/model-config, read 2026-09-12).
 
 ## AA rows in the report

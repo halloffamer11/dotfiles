@@ -124,8 +124,9 @@ HARNESS_COMMANDS = {
 }
 
 # Claude models that take no effort level at all. The Claude Code docs
-# (https://code.claude.com/docs/en/model-config, checked 2026-09-12): "Haiku
-# does not support effort levels." Matched as a word in the model slug.
+# (https://code.claude.com/docs/en/model-config, checked 2026-09-12) list the models that take effort and say "Models not
+# listed here do not support effort"; Haiku is not listed. Matched as a word in
+# the model slug.
 CLAUDE_MODELS_WITHOUT_EFFORT = ("haiku",)
 
 

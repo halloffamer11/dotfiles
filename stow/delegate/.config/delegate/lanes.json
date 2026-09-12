@@ -147,7 +147,7 @@
       },
       "tier": 1,
       "basis": "Claude general pool; native lane (ticket 22)",
-      "note": "PROVISIONAL: tier set 2026-09-11 pending the wizard; tier, meter_weight and timeout are not measurements; price not sourced. Haiku 4.5 does not accept effort (code.claude.com/docs/en/model-config: \"Haiku does not support effort levels\"); high is a label only, so no other effort of it is a lane.",
+      "note": "PROVISIONAL: tier set 2026-09-11 pending the wizard; tier, meter_weight and timeout are not measurements; price not sourced. Haiku 4.5 does not accept effort (code.claude.com/docs/en/model-config lists the models that take effort and says \"Models not listed here do not support effort\"; Haiku is not listed); high is a label only, so no other effort of it is a lane.",
       "published_as": [
         "Claude 4.5 Haiku"
       ]
