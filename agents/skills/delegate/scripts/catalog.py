@@ -27,6 +27,27 @@ CONFIG_DIR = "~/.config/delegate"
 
 HARNESSES = ("claude", "codex", "agy", "grok")
 EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
+# The efforts each harness offers, and so the only efforts a lane on it may
+# carry (ticket 19). Sources, each checked 2026-09-12:
+#   codex   every effort; `codex debug models` lists them per model, and ultra
+#           is one of them.
+#   claude  `claude --help` (Claude Code 2.1.269): `--effort <level>` with
+#           `(low, medium, high, xhigh, max)` on the next line; the same five in
+#           https://code.claude.com/docs/en/model-config. That page also says
+#           Haiku supports no effort level, which is a model's limit, not the
+#           harness's: discover.py applies it.
+#   agy     `agy --help`: `--effort ... (low|medium|high)`, and `agy models`
+#           lists a -low, -medium and -high slug per Gemini Flash model.
+#   grok    `grok --help` documents `--reasoning-effort <EFFORT>` with no
+#           values, and `grok --reasoning-effort bogus models` exits 0, so the
+#           CLI checks nothing locally. Only high is proven: it is the effort
+#           grok46-high@grok has run at. A probe that proves more costs a paid run.
+HARNESS_EFFORTS = {
+    "codex": EFFORTS,
+    "claude": ("low", "medium", "high", "xhigh", "max"),
+    "agy": ("low", "medium", "high"),
+    "grok": ("high",),
+}
 CLASSES = ("scout", "mechanical", "impl", "review", "hard-impl")
 LANES_VERSION = "delegate-lanes.v1"
 ROUTING_VERSION = "delegate-routing.v1"
@@ -162,7 +183,7 @@ def published_as_map(lanes_doc):
     return out
 
 
-def resolve_published_model(published, lanes_doc):
+def resolve_published_model(published, lanes_doc, effort=None):
     """The lane model that a source's printed model name denotes, or None.
 
     A `published_as` entry is consulted first: it is the human's own correction,
@@ -179,6 +200,13 @@ def resolve_published_model(published, lanes_doc):
     working lane off. A name that two lane models could equally denote therefore
     resolves to neither, and a name no lane runs resolves to None: the
     leaderboards are full of models that are nobody's lane.
+
+    The one exception is a family of lane models that differ only by their
+    effort suffix, which is how agy names one model at several efforts
+    (`gemini-3.8-flash-high`, `gemini-3.8-flash-medium`). A row that states its
+    `effort` resolves to the one family member carrying that effort; without
+    an effort, or with an effort no member carries, it still resolves to
+    neither (ticket 19).
     """
     key = normalize_name(published)
     if not key:
@@ -199,6 +227,11 @@ def resolve_published_model(published, lanes_doc):
             candidates.add(model)
     if len(candidates) == 1:
         return candidates.pop()
+    if effort and len(candidates) > 1:
+        at_effort = {m for m in candidates
+                     if strip_effort_suffix(normalize_name(m))[1] == str(effort)}
+        if len(at_effort) == 1:
+            return at_effort.pop()
     return None
 
 
@@ -314,6 +347,12 @@ def validate_lanes(doc, source="lanes.json"):
         if lane["effort"] not in EFFORTS:
             raise CatalogError(
                 f"{source}: lane '{lane_name}': effort must be one of {', '.join(EFFORTS)}, got {lane['effort']!r}"
+            )
+        offered = HARNESS_EFFORTS[harness]
+        if lane["effort"] not in offered:
+            raise CatalogError(
+                f"{source}: lane '{lane_name}': {harness} does not offer effort {lane['effort']!r}; "
+                f"{harness} offers {', '.join(offered)}"
             )
 
         meter_id = lane["meter"]

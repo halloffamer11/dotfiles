@@ -6,10 +6,13 @@ or any other script, skill, or hook.
 
 Sources:
   Epoch AI, Benchmarking Hub, https://epoch.ai/data/eci_benchmarks.csv, CC-BY 4.0
-  Artificial Analysis, https://artificialanalysis.ai, free API (attribution required)
+  Artificial Analysis, https://artificialanalysis.ai, the per-effort rows that
+    `effort.py aa` reads out of a /models/<slug> page and accepts (ticket 19).
+    No API and no key: the free API held one entry per model on a first page
+    of 200, so most lanes had no figure at their own effort.
 
   python3 bench.py [--config-dir DIR] [--out-dir DIR] [--date YYYY-MM-DD]
-                   [--epoch-csv FILE] [--aa-json FILE] [--key-file FILE]
+                   [--epoch-csv FILE] [--effort-rows FILE ...]
 """
 import argparse
 import csv
@@ -17,7 +20,6 @@ import io
 import json
 import os
 import sys
-import urllib.error
 import urllib.request
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -29,7 +31,6 @@ import catalog
 from catalog import CatalogError, normalize_name, strip_effort_suffix
 
 EPOCH_URL = "https://epoch.ai/data/eci_benchmarks.csv"
-AA_URL = "https://artificialanalysis.ai/api/v2/language/models/free"
 DEFAULT_OUT_DIR = "~/.cache/delegate/bench/"
 EXPECTED_HEADER = (
     "model_id,benchmark_id,performance,benchmark,benchmark_release_date,"
@@ -59,12 +60,13 @@ EFFORT_PREFERENCE = tuple(e for e in LANE_EFFORT_ORDER if e != "ultra")
 # other, so the figure is never dropped for being unlabelled - and it matches
 # no lane, so it is never attributed for being unlabelled either.
 UNKNOWN_EFFORT = "unknown"
-AA_COLUMNS = (
-    ("Coding Index", ("coding-index",)),
-    ("Agentic Index", ("agentic-index",)),
-    ("Terminal-Bench", ("terminal-bench",)),
-    ("Output tokens/s", ("median-output-tokens-per-second", "output-tokens-per-second")),
-)
+AA_SOURCE = "aa"
+# The AA columns are whichever component benchmarks the accepted rows carry, in
+# the order the rows first name them; the composite Intelligence Index is never
+# one (its weighting is unpublished, assets/sources.json). Cost per task sits
+# beside them and is never ranked: it is the index's figure for the variant.
+AA_COST_COLUMN = "Cost/task (USD)"
+AA_NO_ROWS = "no rows from effort.py aa given (--effort-rows)"
 
 
 class BenchError(Exception):
@@ -121,30 +123,6 @@ def model_matches_slug(catalog_model, slug):
     return bool(base) and slug == base
 
 
-def aa_match_info(catalog_model, aa_name):
-    n_aa = normalize_name(aa_name)
-    n_model = normalize_name(catalog_model)
-    if not n_aa or not n_model:
-        return False, False, None
-    cat_base, _ = strip_effort_suffix(catalog_model)
-    n_base = normalize_name(cat_base)
-
-    if n_aa == n_model or (n_base and n_aa == n_base):
-        return True, True, None
-
-    aa_base, aa_effort = strip_effort_suffix(n_aa)
-    if aa_effort is not None:
-        if aa_base == n_model or (n_base and aa_base == n_base):
-            return True, False, aa_effort
-
-    return False, False, None
-
-
-def aa_name_matches(catalog_model, aa_name):
-    matches, _, _ = aa_match_info(catalog_model, aa_name)
-    return matches
-
-
 def as_number(value):
     if value is None or isinstance(value, bool):
         return None
@@ -187,11 +165,19 @@ def fmt_pct(score):
 
 
 def fmt_aa_value(score):
+    """An AA component score as the rows carry it: most are fractions
+    (Terminal-Bench 2.1 0.873), Omniscience is a signed figure (-63.05)."""
     if score is None:
         return "—"
     if abs(score - round(score)) < 1e-9:
         return str(int(round(score)))
+    if abs(score) < 1:
+        return f"{score:.3f}"
     return f"{score:.1f}"
+
+
+def fmt_cost(cost):
+    return "—" if cost is None else f"{cost:.2f}"
 
 
 def md_table(headers, rows):
@@ -465,207 +451,118 @@ def build_epoch_section(models, matched):
     return items, md_table(headers, rows)
 
 
-def load_key(key_file):
-    if not key_file:
-        return None, "key file missing"
-    path = os.path.abspath(os.path.expanduser(key_file))
-    if not os.path.isfile(path):
-        return None, "key file missing"
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            line = f.readline()
-    except OSError as e:
-        return None, f"cannot read key file: {e}"
-    key = line.strip()
-    if not key:
-        return None, "empty key file"
-    return key, None
-
-
-def extract_aa_models(doc):
-    if isinstance(doc, list) and all(isinstance(x, dict) for x in doc):
-        return doc
-    if isinstance(doc, dict):
-        for key in ("data", "models"):
-            value = doc.get(key)
-            if isinstance(value, list) and all(isinstance(x, dict) for x in value):
-                return value
-    return []
-
-
-def aa_model_name(obj):
-    for key in ("slug", "id", "name"):
-        if key in obj and obj[key] not in (None, ""):
-            return str(obj[key])
-    return ""
-
-
-def iter_aa_fields(obj):
-    if not isinstance(obj, dict):
-        return
-    for item in obj.items():
-        yield item
-    for value in obj.values():
-        if isinstance(value, dict):
-            yield from value.items()
-
-
-def key_matches_needles(norm_key, needles):
-    return any(needle in norm_key for needle in needles)
-
-
-def extract_aa_columns(obj):
-    found = {}
-    keys_used = {}
-    for key, value in iter_aa_fields(obj):
-        number = as_number(value)
-        if number is None:
-            continue
-        norm = normalize_name(key)
-        for col, needles in AA_COLUMNS:
-            if col in found:
-                continue
-            if key_matches_needles(norm, needles):
-                found[col] = number
-                keys_used[col] = str(key)
-    return found, keys_used
-
-
-def load_aa_json_text(text):
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"invalid JSON: {e}") from e
-
-
-def load_aa(aa_json, key_file):
-    if aa_json:
-        path = os.path.abspath(os.path.expanduser(aa_json))
-        try:
-            text = read_text_file(path)
-            doc = load_aa_json_text(text)
-        except OSError as e:
-            return None, f"cannot read AA JSON: {e}"
-        except ValueError as e:
-            return None, str(e)
-        return doc, None
-    key, err = load_key(key_file)
-    if err:
-        return None, err
-    try:
-        raw = fetch_bytes(AA_URL, headers={"x-api-key": key})
-        doc = json.loads(raw.decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        if e.code == 401:
-            return None, "HTTP 401"
-        return None, f"HTTP {e.code}"
-    except Exception as e:
-        return None, str(e)
-    return doc, None
-
-
-def build_aa_section(models, doc):
-    aa_models = extract_aa_models(doc)
-    first_keys = list(aa_models[0].keys()) if aa_models else []
-    keys_used = {}
-    candidates_by_model = defaultdict(list)
-    for idx, obj in enumerate(aa_models):
-        name = aa_model_name(obj)
-        cols, used = extract_aa_columns(obj)
-        for col, key in used.items():
-            keys_used.setdefault(col, key)
-        for model in models:
-            matches, is_exact, effort = aa_match_info(model, name)
-            if matches:
-                candidates_by_model[model].append(
-                    {
-                        "obj": obj,
-                        "name": name,
-                        "cols": cols,
-                        "is_exact": is_exact,
-                        "effort": effort,
-                        "index": idx,
-                    }
-                )
-
-    matched = {}
-    matched_effort = {}
-    for model, rec in models.items():
-        cands = candidates_by_model.get(model, [])
-        if not cands:
-            continue
-        lane_effort = lane_effort_of(rec)
-        lane_idx = (
-            LANE_EFFORT_ORDER.index(lane_effort)
-            if lane_effort in LANE_EFFORT_ORDER
-            else 0
-        )
-
-        def cand_key(c):
-            if c["is_exact"]:
-                return (0, 0, 0, c["name"], c["index"])
-            e = c["effort"]
-            e_idx = (
-                LANE_EFFORT_ORDER.index(e)
-                if e in LANE_EFFORT_ORDER
-                else 99
-            )
-            dist = abs(e_idx - lane_idx)
-            return (1, dist, e_idx, c["name"], c["index"])
-
-        best = min(cands, key=cand_key)
-        matched[model] = best["cols"]
-        matched_effort[model] = best["effort"]
-
-    col_names = [c[0] for c in AA_COLUMNS]
-    scores_by_col = {c: {} for c in col_names}
-    for model, cols in matched.items():
-        for col in col_names:
-            if col in cols:
-                scores_by_col[col][model] = cols[col]
-    ranks_by_col = {c: rank_by_score(scores_by_col[c]) for c in col_names}
-    items = []
-    for model, rec in models.items():
-        cols = matched.get(model, {})
-        mean, mean_s = mean_rank_display(ranks_by_col, model)
-        items.append(
-            {
-                "model": model,
-                "lanes": ", ".join(sorted(rec["lanes"])),
-                "lane_effort": lane_effort_of(rec),
-                "lane_efforts": rec["efforts"],
-                "cols": cols,
-                "mean": mean,
-                "mean_s": mean_s,
-                "present": model in matched,
-                "effort": matched_effort.get(model),
-            }
-        )
-    items = sort_report_rows(items)
-    headers = ["Lane(s)", "Model", *col_names, "Mean rank"]
+def load_effort_rows(paths):
+    """Every row from one accepted-rows file or several, in order."""
     rows = []
-    for item in items:
-        cols = item["cols"]
-        rows.append(
-            [
-                item["lanes"],
-                item["model"],
-                *[fmt_aa_value(cols.get(c)) for c in col_names],
-                item["mean_s"],
-            ]
-        )
-    used_names = [keys_used[c] for c in col_names if c in keys_used]
-    return items, md_table(headers, rows), used_names, first_keys
+    for path in paths or ():
+        full = os.path.abspath(os.path.expanduser(path))
+        try:
+            doc = json.loads(read_text_file(full))
+        except OSError as e:
+            raise BenchError(f"cannot read effort rows: {e}") from e
+        except json.JSONDecodeError as e:
+            raise BenchError(f"effort rows {path}: invalid JSON: {e}") from e
+        if not isinstance(doc, list):
+            raise BenchError(f"effort rows {path}: expected a JSON list")
+        rows.extend(doc)
+    return rows
 
 
-def build_notes(models, epoch_items, aa_items, aa_skipped, aa_keys_used, aa_first_keys):
+def aa_component_rows(effort_rows, lanes_doc):
+    """The Artificial Analysis component rows that name a lane model.
+
+    Rows of other sources, the composite index, and rows naming nobody's
+    model are left out; a row's model is resolved by the catalog, with its
+    effort, so an agy family member is found by the effort it carries.
+    """
+    out = []
+    for row in effort_rows or []:
+        if not isinstance(row, dict) or row.get("source") != AA_SOURCE or row.get("composite"):
+            continue
+        benchmark = row.get("benchmark")
+        score = as_number(row.get("score"))
+        if not isinstance(benchmark, str) or not benchmark.strip() or score is None:
+            continue
+        effort = row.get("effort")
+        model = catalog.resolve_published_model(row.get("model"), lanes_doc, effort=effort)
+        if model is None:
+            continue
+        out.append({
+            "model": model,
+            "effort": effort_cell_key(effort),
+            "benchmark": benchmark,
+            "score": score,
+            "cost_usd": as_number(row.get("cost_usd")),
+        })
+    return out
+
+
+def aa_measurements(component_rows):
+    """({model: {effort: {benchmark: score}}}, {(model, effort): cost per task},
+    [benchmark, in the order the rows first name them]). The first row for one
+    model, effort and benchmark is the figure; effort.py has already de-duplicated."""
+    scores = defaultdict(lambda: defaultdict(dict))
+    costs = {}
+    benchmarks = []
+    for row in component_rows:
+        scores[row["model"]][row["effort"]].setdefault(row["benchmark"], row["score"])
+        if row["cost_usd"] is not None:
+            costs.setdefault((row["model"], row["effort"]), row["cost_usd"])
+        if row["benchmark"] not in benchmarks:
+            benchmarks.append(row["benchmark"])
+    return scores, costs, benchmarks
+
+
+def aa_model_effort(measured, lane_efforts):
+    """The one effort whose figures stand for a model in the model view: the
+    strongest effort a lane runs that AA measured, else the strongest effort AA
+    measured. `none` and an unstated effort never stand for a model."""
+    for effort in EFFORT_PREFERENCE:
+        if effort in lane_efforts and effort in measured:
+            return effort
+    for effort in EFFORT_PREFERENCE:
+        if effort in measured:
+            return effort
+    return None
+
+
+def build_aa_models(models, scores, costs, benchmarks):
+    """{model: {cols, effort, cost_usd, mean, mean_s} or None}: one figure per
+    model per column, all measured at one effort, ranked model against model."""
+    chosen = {}
+    for model, rec in models.items():
+        effort = aa_model_effort(scores.get(model) or {}, rec["efforts"])
+        if effort is not None:
+            chosen[model] = effort
+    ranks = {}
+    for benchmark in benchmarks:
+        figures = {m: scores[m][e][benchmark] for m, e in chosen.items() if benchmark in scores[m][e]}
+        if figures:
+            ranks[benchmark] = rank_by_score(figures)
+    out = {}
+    for model in models:
+        effort = chosen.get(model)
+        if effort is None:
+            out[model] = None
+            continue
+        mean, mean_s = mean_rank_display(ranks, model)
+        out[model] = {
+            "cols": dict(scores[model][effort]),
+            "effort": effort,
+            "cost_usd": costs.get((model, effort)),
+            "mean": mean,
+            "mean_s": mean_s,
+        }
+    return out
+
+
+def build_notes(models, epoch_items, aa_models, aa_skipped):
     notes = []
     epoch_by_model = {item["model"]: item for item in epoch_items}
-    aa_by_model = {item["model"]: item for item in (aa_items or [])}
     for model in models:
         if epoch_by_model[model]["gap"]:
             notes.append(f"{model} absent from Epoch AI")
-        if aa_skipped is None and not aa_by_model[model]["present"]:
+        if aa_skipped is None and aa_models.get(model) is None:
             notes.append(f"{model} absent from Artificial Analysis")
     for item in epoch_items:
         model = item["model"]
@@ -699,25 +596,28 @@ def build_notes(models, epoch_items, aa_items, aa_skipped, aa_keys_used, aa_firs
                     f"({cell[effort]['performance']:.2f}); no lane runs that effort"
                 )
     if aa_skipped is None:
-        for item in (aa_items or []):
-            if not item.get("present"):
-                continue
-            model = item["model"]
-            lane_efforts = set(item.get("lane_efforts") or [item["lane_effort"]])
-            lane_effort = item["lane_effort"]
-            used_effort = item.get("effort")
-            if used_effort is not None and used_effort not in lane_efforts:
+        for model, rec in models.items():
+            aa = aa_models.get(model)
+            if aa is not None and aa["effort"] not in rec["efforts"]:
                 notes.append(
-                    f"{model} Artificial Analysis used effort {used_effort} (lane effort {lane_effort})"
+                    f"{model} Artificial Analysis figures are at effort {aa['effort']}; "
+                    "no lane runs that effort, so no lane claims them"
                 )
-        if aa_keys_used:
-            notes.append("AA keys used: " + ", ".join(aa_keys_used))
-        else:
-            key_list = ", ".join(aa_first_keys) if aa_first_keys else "(none)"
-            notes.append(
-                "AA keys used: none; first model object keys: " + key_list
-            )
     return notes
+
+
+def aa_source_line(effort_rows):
+    """Where the AA rows came from: the page URLs and the dates observed."""
+    urls, dates = [], []
+    for row in effort_rows or []:
+        if isinstance(row, dict) and row.get("source") == AA_SOURCE:
+            if row.get("url") and row["url"] not in urls:
+                urls.append(row["url"])
+            if row.get("observed") and row["observed"] not in dates:
+                dates.append(row["observed"])
+    where = ", ".join(urls) if urls else "https://artificialanalysis.ai"
+    when = f", observed {', '.join(sorted(dates))}" if dates else ""
+    return f"Source: Artificial Analysis, {where}, per-effort rows accepted by effort.py aa{when}"
 
 
 def render_report(
@@ -726,6 +626,7 @@ def render_report(
     aa_table,
     aa_skipped,
     notes,
+    aa_source=None,
 ):
     lines = [
         f"# Lane benchmark ranking {date}",
@@ -735,9 +636,7 @@ def render_report(
         f"Source: Epoch AI, Benchmarking Hub, {EPOCH_URL}, CC-BY 4.0, fetched {date}",
     ]
     if aa_skipped is None:
-        lines.append(
-            f"Source: Artificial Analysis, https://artificialanalysis.ai, free API, fetched {date}"
-        )
+        lines.append(aa_source or aa_source_line(None))
     else:
         lines.append(f"Artificial Analysis: skipped ({aa_skipped})")
     lines.extend(["", "## Epoch AI", "", epoch_table, "", "## Artificial Analysis", ""])
@@ -755,17 +654,22 @@ def render_report(
     return "\n".join(lines)
 
 
-def build_lane_section(lanes_doc, collected_models, aa_skipped):
+def build_lane_section(lanes_doc, collected_models, aa_skipped, aa_scores=None, aa_costs=None,
+                       aa_benchmarks=()):
     """One record per catalog lane, holding only the figures measured at that
-    lane's own effort.
+    lane's own effort, and the AA columns some lane has a figure for.
 
     `models` stays the model-level view, which is what a comparison against
     models nobody runs needs. This is the view a per-lane decision needs: the
     mean rank and its `n=` count that lane's own figures, so it is a mean of
     measurements that could have happened together. A lane whose model was
     never measured at its effort has an empty record, which is the honest
-    answer and not the same as a model nobody measured.
+    answer and not the same as a model nobody measured. Artificial Analysis
+    measures most models at every effort (ticket 19), so its figures are
+    attributed per lane by the same rule, `effort_attributes`.
     """
+    aa_scores = aa_scores or {}
+    aa_costs = aa_costs or {}
     lanes = {}
     for lane_name, lane in (lanes_doc.get("lanes") or {}).items():
         model = lane.get("model")
@@ -779,10 +683,12 @@ def build_lane_section(lanes_doc, collected_models, aa_skipped):
                 figure = lane_figure(epoch_cells.get(bench), effort)
                 if figure:
                     cells[bench] = figure
-            aa_rec = rec.get("aa")
-            if (aa_skipped is None and aa_rec
-                    and effort_attributes(aa_rec.get("effort"), effort)):
-                aa = {"cols": dict(aa_rec["cols"]), "effort": effort}
+        if aa_skipped is None:
+            for measured, cols in (aa_scores.get(model) or {}).items():
+                if cols and effort_attributes(measured, effort):
+                    aa = {"cols": dict(cols), "effort": effort,
+                          "cost_usd": aa_costs.get((model, measured))}
+                    break
         lanes[lane_name] = {"model": model, "effort": effort, "cells": cells, "aa": aa}
 
     # ranks compare lane against lane, each at its own effort, so a rank is
@@ -799,8 +705,10 @@ def build_lane_section(lanes_doc, collected_models, aa_skipped):
         rec["mean"] = mean
         rec["mean_s"] = mean_s
         rec["n"] = len(rec["cells"])
+    aa_names = []
     if aa_skipped is None:
-        aa_names = [col for col, _needles in AA_COLUMNS]
+        aa_names = [col for col in aa_benchmarks
+                    if any(rec["aa"] and col in rec["aa"]["cols"] for rec in lanes.values())]
         aa_ranks = {}
         for col in aa_names:
             scores = {name: rec["aa"]["cols"][col] for name, rec in lanes.items()
@@ -813,36 +721,32 @@ def build_lane_section(lanes_doc, collected_models, aa_skipped):
             mean, mean_s = mean_rank_display(aa_ranks, name)
             rec["aa"]["mean"] = mean
             rec["aa"]["mean_s"] = mean_s
-    return lanes
+    return lanes, aa_names
 
 
-def collect(lanes_doc, epoch_csv=None, aa_json=None, key_file=None):
-    """Collect benchmark data for the report and interactive consumers."""
+def collect(lanes_doc, epoch_csv=None, effort_rows=None):
+    """Collect benchmark data for the report and interactive consumers.
+
+    `effort_rows` are accepted rows from effort.py, any mix of sources; only
+    the `aa` rows are read here. Without any, Artificial Analysis is skipped
+    with a reason, the way a missing source always was.
+    """
     models = catalog_models(lanes_doc["lanes"])
     epoch_rows = load_epoch(epoch_csv)
     matched = match_epoch_rows(epoch_rows, models)
     epoch_items, _epoch_table = build_epoch_section(models, matched)
 
-    aa_doc, aa_skipped = load_aa(aa_json, key_file)
-    aa_items = None
-    aa_keys_used = []
-    aa_first_keys = []
-    if aa_skipped is None:
-        aa_items, _aa_table, aa_keys_used, aa_first_keys = build_aa_section(
-            models, aa_doc
-        )
+    given = any(isinstance(r, dict) and r.get("source") == AA_SOURCE for r in (effort_rows or []))
+    aa_skipped = None if given else AA_NO_ROWS
+    aa_scores, aa_costs, aa_benchmarks = aa_measurements(aa_component_rows(effort_rows, lanes_doc))
+    aa_models = (build_aa_models(models, aa_scores, aa_costs, aa_benchmarks)
+                 if aa_skipped is None else {model: None for model in models})
 
-    notes = build_notes(
-        models, epoch_items, aa_items, aa_skipped, aa_keys_used, aa_first_keys
-    )
+    notes = build_notes(models, epoch_items, aa_models, aa_skipped)
     epoch_by_model = {item["model"]: item for item in epoch_items}
-    aa_by_model = {
-        item["model"]: item for item in (aa_items or [])
-    }
     collected_models = {}
     for model, rec in models.items():
         epoch = epoch_by_model[model]
-        aa = aa_by_model.get(model)
         collected_models[model] = {
             "lanes": sorted(rec["lanes"]),
             "lane_effort": epoch["lane_effort"],
@@ -852,23 +756,18 @@ def collect(lanes_doc, epoch_csv=None, aa_json=None, key_file=None):
                 "mean": epoch["mean"],
                 "mean_s": epoch["mean_s"],
             },
-            "aa": None
-            if aa is None
-            else {
-                "cols": aa["cols"],
-                "mean": aa["mean"],
-                "mean_s": aa["mean_s"],
-                # the effort the matched Artificial Analysis row was measured
-                # at, or None when the row named none: without it the figure
-                # could only be attributed to a lane by assuming it
-                "effort": aa.get("effort"),
-            },
+            # cols, the effort they were all measured at, cost per task at that
+            # effort, and the model-against-model mean rank; None when AA
+            # measured the model at no effort that can stand for it
+            "aa": aa_models.get(model),
         }
+    lanes, aa_columns = build_lane_section(
+        lanes_doc, collected_models, aa_skipped, aa_scores, aa_costs, aa_benchmarks)
     return {
         "models": collected_models,
-        "lanes": build_lane_section(lanes_doc, collected_models, aa_skipped),
+        "lanes": lanes,
         "epoch_benchmarks": list(EPOCH_BENCHMARKS),
-        "aa_columns": [name for name, _needles in AA_COLUMNS],
+        "aa_columns": aa_columns,
         "aa_skipped": aa_skipped,
         "notes": notes,
     }
@@ -906,22 +805,24 @@ def epoch_table_from_collection(data):
 
 
 def aa_table_from_collection(data):
-    headers = ["Lane(s)", "Model", *data["aa_columns"], "Mean rank"]
+    headers = ["Lane(s)", "Model", "Effort", *data["aa_columns"], AA_COST_COLUMN, "Mean rank"]
     items = []
     for model, rec in data["models"].items():
         aa = rec["aa"]
-        items.append({"model": model, "mean": aa["mean"], "rec": rec})
+        items.append({"model": model, "mean": aa["mean"] if aa else None, "rec": rec})
     rows = []
     for item in sort_report_rows(items):
-        model = item["model"]
         rec = item["rec"]
-        aa = rec["aa"]
+        aa = rec["aa"] or {}
+        cols = aa.get("cols") or {}
         rows.append(
             [
                 ", ".join(rec["lanes"]),
-                model,
-                *[fmt_aa_value(aa["cols"].get(c)) for c in data["aa_columns"]],
-                aa["mean_s"],
+                item["model"],
+                aa.get("effort") or "—",
+                *[fmt_aa_value(cols.get(c)) for c in data["aa_columns"]],
+                fmt_cost(aa.get("cost_usd")),
+                aa.get("mean_s") or "— (n=0)",
             ]
         )
     return md_table(headers, rows)
@@ -931,21 +832,21 @@ def run(args):
     config_dir = os.path.expanduser(args.config_dir or catalog.CONFIG_DIR)
     out_dir = os.path.expanduser(args.out_dir or DEFAULT_OUT_DIR)
     date = args.date or utc_today()
-    key_file = args.key_file or os.path.join(config_dir, "aa-key")
 
     cat = catalog.load_catalog(config_dir=config_dir)
+    effort_rows = load_effort_rows(args.effort_rows)
     data = collect(
         {"lanes": cat["lanes"]},
         epoch_csv=args.epoch_csv,
-        aa_json=args.aa_json,
-        key_file=key_file,
+        effort_rows=effort_rows,
     )
     epoch_table = epoch_table_from_collection(data)
     aa_table = (
         aa_table_from_collection(data) if data["aa_skipped"] is None else None
     )
     text = render_report(
-        date, epoch_table, aa_table, data["aa_skipped"], data["notes"]
+        date, epoch_table, aa_table, data["aa_skipped"], data["notes"],
+        aa_source=aa_source_line(effort_rows),
     )
 
     os.makedirs(out_dir, exist_ok=True)
@@ -967,8 +868,8 @@ def main(argv=None):
     parser.add_argument("--out-dir", default=None, help="directory for <date>.md")
     parser.add_argument("--date", default=None, help="report date YYYY-MM-DD (UTC today)")
     parser.add_argument("--epoch-csv", default=None, help="local Epoch CSV; skip the fetch")
-    parser.add_argument("--aa-json", default=None, help="local AA JSON; skip the fetch and key")
-    parser.add_argument("--key-file", default=None, help="AA API key file (first line)")
+    parser.add_argument("--effort-rows", action="append", default=[],
+                        help="rows effort.py accepted (the aa rows are read); repeat for several files")
     args = parser.parse_args(argv)
     try:
         path = run(args)

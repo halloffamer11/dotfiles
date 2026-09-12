@@ -136,7 +136,7 @@ SWEEP += [
 
 # --- the basics ------------------------------------------------------------------
 try:
-    collected = bench.collect(LANES, epoch_csv=FIXTURE, key_file=None)
+    collected = bench.collect(LANES, epoch_csv=FIXTURE)
     html = bench_page.render(collected, LANES)
     record("page from epoch fixture",
            "claude-fable-5-1" in html and "DeepSWE" in html and "98.0" in html
@@ -161,7 +161,7 @@ except Exception as e:
     record("page with bench=None names missing data", False, repr(e))
 
 try:
-    collected = bench.collect(LANES, epoch_csv=FIXTURE, key_file=None)
+    collected = bench.collect(LANES, epoch_csv=FIXTURE)
     html = bench_page.render(collected, LANES, EFFORT_ROWS)
     record("page with per-effort rows carries every number and its provenance",
            "unlabelled" in html and "SWE Refactor Bench" in html and "uncertain" in html
@@ -175,7 +175,7 @@ except Exception as e:
 try:
     with tempfile.TemporaryDirectory() as td:
         path = os.path.join(td, "bench.html")
-        collected = bench.collect(LANES, epoch_csv=FIXTURE, key_file=None)
+        collected = bench.collect(LANES, epoch_csv=FIXTURE)
         returned = bench_page.write(path, collected, LANES, EFFORT_ROWS)
         with open(path, encoding="utf-8") as f:
             text = f.read()
@@ -194,7 +194,7 @@ except Exception as e:
     record("light and dark are both defined, and the toggle wins both ways", False, repr(e))
 
 try:
-    collected = bench.collect(copy.deepcopy(ASTRA), epoch_csv=FIXTURE, key_file=None)
+    collected = bench.collect(copy.deepcopy(ASTRA), epoch_csv=FIXTURE)
     page = bench_page.render(collected, ASTRA, SWEEP)
 
     def inside_details(index):
@@ -409,7 +409,7 @@ except Exception as e:
 
 # --- the trap: a per-model score is never a lane's score by default --------------
 try:
-    collected = bench.collect(copy.deepcopy(ASTRA), epoch_csv=FIXTURE, key_file=None)
+    collected = bench.collect(copy.deepcopy(ASTRA), epoch_csv=FIXTURE)
     # the fixture measures fable at max; the only fable lane runs xhigh
     page = bench_page.render(collected, ASTRA, SWEEP)
     table = page[page.find('<table class="scores">'):page.find("</table>", page.find('<table class="scores">'))]
@@ -437,7 +437,7 @@ except Exception as e:
            False, repr(e))
 
 try:
-    collected = bench.collect(LANES, epoch_csv=FIXTURE, key_file=None)
+    collected = bench.collect(LANES, epoch_csv=FIXTURE)
     doctored = copy.deepcopy(collected)
     # the source stated no effort: `unknown` is the cell's key, not a value
     cell = doctored["models"]["gpt-5.6-sol"]["epoch"]["cells"]["DeepSWE"]
@@ -457,7 +457,7 @@ try:
     # the shape after the attribution fix: a cell keyed by measured effort,
     # `unknown` a literal key, several figures on one benchmark, and the AA
     # effort carried through collect()
-    collected = bench.collect(LANES, epoch_csv=FIXTURE, key_file=None)
+    collected = bench.collect(LANES, epoch_csv=FIXTURE)
     future = copy.deepcopy(collected)
     sol = future["models"]["gpt-5.6-sol"]
     sol["epoch"]["cells"]["DeepSWE"] = {

@@ -115,21 +115,25 @@ with tempfile.TemporaryDirectory() as td:
     # grok46-high@grok -> grok-4.6
     # fable-xhigh@claude -> claude-fable-5-1
     # Note: gpt-6-astra and gpt-5.5 have no lane in sample lanes.json!
+    # agy slugs are grouped into families (ticket 19): flash-high's lane maps
+    # gemini-3.8-flash, so its -medium and -low slugs are no longer models
+    # with no lane, and gemini-3.7-flash is one unmapped model, not three.
     unmapped_slugs = {(u["harness"], u["slug"]) for u in res["unmapped"]}
     unmapped_ok = (
         ("codex", "gpt-6-astra") in unmapped_slugs
         and ("codex", "gpt-5.5") in unmapped_slugs
         and ("grok", "grok-4.5") in unmapped_slugs
-        and ("agy", "gemini-3.8-flash-medium") in unmapped_slugs
+        and ("agy", "gemini-3.7-flash") in unmapped_slugs
+        and not any(slug.startswith("gemini-3.8-flash") for _h, slug in unmapped_slugs)
         and ("codex", "gpt-5.6-sol") not in unmapped_slugs
-        and ("agy", "gemini-3.8-flash-high") not in unmapped_slugs
         and ("grok", "grok-4.6") not in unmapped_slugs
     )
 
     # Retired should be empty with sample catalog (all sample lanes exist in fixtures)
     retired_ok = len(res["retired"]) == 0
 
-    record("discover() full fixture evaluation against sample catalog", codex_status_ok and claude_ok and unmapped_ok and retired_ok)
+    record("discover() full fixture evaluation against sample catalog", codex_status_ok and claude_ok and unmapped_ok and retired_ok,
+           f"codex={codex_status_ok} claude={claude_models} unmapped={sorted(unmapped_slugs)} retired={res['retired']}")
 
 
 # -------------------------------------------------------------
@@ -203,7 +207,9 @@ with tempfile.TemporaryDirectory() as td:
         "codex   missing" in report_missing
         and "grok    missing" in report_missing
         and "claude  missing" in report_missing
-        and "gemini-3.8-flash-high" in report_missing
+        and "gemini-3.8-flash " in report_missing
+        and "lane: flash-high@agy" in report_missing
+        and "efforts: low, medium, high" in report_missing
     )
     record("format_report prints missing harness line", report_missing_ok)
 
@@ -316,12 +322,13 @@ with tempfile.TemporaryDirectory() as td:
 
     data = json.loads(res_json.stdout)
     top_keys = {"harnesses", "models", "unmapped", "retired"}
-    model_keys = {"harness", "slug", "display_name", "lane", "lanes", "reason"}
+    model_keys = {"harness", "slug", "display_name", "lane", "lanes", "efforts", "reason"}
     json_ok = (
         res_json.returncode == 0
         and set(data.keys()) == top_keys
         and all(set(m.keys()) == model_keys for m in data["models"])
-        and len(data["models"]) == 5 + 14 + 2 + 1  # 5 codex + 14 agy + 2 grok + 1 claude
+        # 5 codex + 7 agy families (14 slugs) + 2 grok + 1 claude
+        and len(data["models"]) == 5 + 7 + 2 + 1
         and any(u["slug"] == "gpt-5.5" for u in data["unmapped"])
         and data["retired"] == []
     )
@@ -353,7 +360,8 @@ with tempfile.TemporaryDirectory() as td:
         and "codex   missing" in out_missing
         and "grok    missing" in out_missing
         and "claude  missing" in out_missing
-        and "gemini-3.8-flash-high" in out_missing
+        and "gemini-3.8-flash " in out_missing
+        and "lane: flash-high@agy" in out_missing
     )
     record("CLI reports missing binary without error", missing_cli_ok, f"rc={res_missing_cli.returncode}")
 
@@ -513,7 +521,10 @@ record(
 
 
 # -------------------------------------------------------------
-# 16. discover.py --efforts on harness without effort list (agy): plain message and exit 0
+# 16. discover.py --efforts on an agy slug: its family's efforts, one stanza
+#     each, the effort in the model slug (ticket 19; until then agy offered no
+#     effort list and this printed the "does not offer" message, which 16b
+#     below still covers on a model with no effort suffix)
 res_agy_eff = subprocess.run(
     [
         sys.executable, DISCOVER_PY,
@@ -526,14 +537,29 @@ res_agy_eff = subprocess.run(
 out_agy_eff = res_agy_eff.stdout
 agy_eff_ok = (
     res_agy_eff.returncode == 0
-    and "gemini-3.8-flash-high" in out_agy_eff
-    and "does not offer reasoning effort levels" in out_agy_eff
-    and "Available models on agy:" in out_agy_eff
+    and all(f'"flash-{e}@agy": {{' in out_agy_eff for e in ("low", "medium", "high"))
+    and all(f'"model": "gemini-3.8-flash-{e}"' in out_agy_eff for e in ("low", "medium", "high"))
+    and '"model": "gemini-3.8-flash",' not in out_agy_eff
+    and out_agy_eff.count('"price": {') == 1
 )
 record(
-    "discover.py --efforts on agy model exits 0 and names available models",
+    "discover.py --efforts on an agy slug prints a stanza per effort in its family, the effort in the slug",
     agy_eff_ok,
-    f"rc={res_agy_eff.returncode}, out={out_agy_eff[:200]}",
+    f"rc={res_agy_eff.returncode}, out={out_agy_eff[:400]}",
+)
+
+# 16b. a model on a harness that offers it no effort: plain message and exit 0
+res_noeff = subprocess.run(
+    [sys.executable, DISCOVER_PY, "--fixture-dir", FIXTURES_DIR, "--efforts", "claude-sonnet-4-6"],
+    capture_output=True, text=True,
+)
+record(
+    "discover.py --efforts on an agy model with no effort suffix exits 0 and names available models",
+    res_noeff.returncode == 0
+    and "does not offer reasoning effort levels" in res_noeff.stdout
+    and "Available models on agy:" in res_noeff.stdout
+    and "gemini-3.8-flash" in res_noeff.stdout,
+    f"rc={res_noeff.returncode}, out={res_noeff.stdout[:300]}",
 )
 
 
@@ -580,6 +606,102 @@ with tempfile.TemporaryDirectory() as td:
         "pasting filled gpt-6-astra stanzas into lanes.json validates cleanly",
         paste_ok,
         f"rc={res_check_paste.returncode}, err={res_check_paste.stderr}",
+    )
+
+# -------------------------------------------------------------
+# 18. ticket 19: effort lists for claude, grok and agy
+with open(os.path.join(FIXTURES_DIR, "claude-help.txt"), encoding="utf-8") as f:
+    claude_help = f.read()
+record(
+    "the claude --help fixture (Claude Code 2.1.269) parses to its five efforts, in order",
+    discover.parse_claude_help(claude_help) == ["low", "medium", "high", "xhigh", "max"]
+    and discover.parse_claude_help("  --effort <level>  Effort level\n  --other  x (a, b)") == []
+    and discover.parse_claude_help("") == [],
+    repr(discover.parse_claude_help(claude_help)),
+)
+record(
+    "when claude --help lists no effort the harness table stands in, and says so",
+    discover.claude_efforts(runner=lambda h: "  --effort <level>  Effort level\n")
+    == (list(catalog.HARNESS_EFFORTS["claude"]), "catalog.HARNESS_EFFORTS (claude --help listed none)")
+    and discover.claude_efforts(fixture_dir=FIXTURES_DIR)[1] == "claude --help",
+    repr(discover.claude_efforts(runner=lambda h: "")),
+)
+
+families = discover.group_agy_models(agy_models)
+by_slug = {f["slug"]: f for f in families}
+record(
+    "agy slugs group into one model per family with its efforts and member slugs",
+    [f["slug"] for f in families] == ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash",
+                                      "gemini-3.1-pro", "claude-sonnet-4-6",
+                                      "claude-opus-4-6-thinking", "gpt-oss-120b"]
+    and by_slug["gemini-3.8-flash"]["efforts"] == ["low", "medium", "high"]
+    and by_slug["gemini-3.8-flash"]["members"]["medium"] == "gemini-3.8-flash-medium"
+    and by_slug["gemini-3.8-flash"]["display_name"] == "Gemini 3.8 Flash"
+    and by_slug["gemini-3.1-pro"]["efforts"] == ["low", "high"]
+    and by_slug["claude-sonnet-4-6"]["efforts"] == [],
+    repr(families[:2]),
+)
+
+def efforts_cli(model):
+    res = subprocess.run(
+        [sys.executable, DISCOVER_PY, "--fixture-dir", FIXTURES_DIR,
+         "--config-dir", SAMPLES_DIR, "--efforts", model],
+        capture_output=True, text=True,
+    )
+    return res.returncode, res.stdout
+
+rc, out = efforts_cli("claude-opus-5")
+record(
+    "discover.py --efforts claude-opus-5 prints a stanza per claude effort, even with no opus lane",
+    rc == 0
+    and all(f'"opus-{e}@claude": {{' in out for e in ("low", "medium", "high", "xhigh", "max"))
+    and '"opus-ultra@claude"' not in out
+    and out.count('"price": {') == 1,
+    out[:300],
+)
+rc, out = efforts_cli("claude-fable-5-1")
+record(
+    "discover.py --efforts claude-fable-5-1 (a catalog lane model) prints five stanzas",
+    rc == 0 and all(f'"fable-{e}@claude": {{' in out for e in ("low", "medium", "high", "xhigh", "max")),
+    out[:300],
+)
+rc, out = efforts_cli("claude-haiku-4-5-20251001")
+record(
+    "discover.py --efforts on a Haiku model says Haiku takes no effort level",
+    rc == 0 and "does not offer reasoning effort levels" in out and "Haiku supports no effort level" in out
+    and '"price": {' not in out,
+    out[:300],
+)
+rc, out = efforts_cli("grok-4.6")
+record(
+    "discover.py --efforts grok-4.6 prints only the verified grok effort",
+    rc == 0 and '"grok46-high@grok": {' in out and out.count('@grok": {') == 1,
+    out[:300],
+)
+
+# the pasted flash stanzas validate: agy lanes carry the effort in the slug
+with tempfile.TemporaryDirectory() as td:
+    rc, out = efforts_cli("gemini-3.8-flash")
+    lines, capturing = [], False
+    for line in out.splitlines():
+        if line.startswith('"flash-low@agy":'):
+            capturing = True
+        if capturing:
+            lines.append(line)
+    stanzas = json.loads("{\n" + "\n".join(lines) + "\n}")
+    with open(os.path.join(SAMPLES_DIR, "lanes.json"), encoding="utf-8") as f:
+        doc = json.load(f)
+    for name, lane in stanzas.items():
+        lane.update(meter="agy-gemini", meter_weight=1, timeout="25m", tier=1,
+                    price={"in": 1, "cache_read": 0.1, "cache_write": None, "out": 2})
+        doc["lanes"][name] = lane
+    path = os.path.join(td, "lanes.json")
+    catalog.write_json(path, doc)
+    check = subprocess.run([sys.executable, CATALOG_PY, "check", path], capture_output=True, text=True)
+    record(
+        "pasting filled gemini-3.8-flash stanzas into lanes.json validates cleanly",
+        rc == 0 and check.returncode == 0 and set(stanzas) == {"flash-low@agy", "flash-medium@agy", "flash-high@agy"},
+        f"rc={check.returncode} err={check.stderr} stanzas={sorted(stanzas)}",
     )
 
 sys.exit(1 if fails else 0)

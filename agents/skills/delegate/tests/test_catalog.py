@@ -105,15 +105,41 @@ record(
     val_false is not None and doc_false["lanes"]["fable-xhigh@claude"].get("enabled", True) is False,
 )
 
-# 1e. lane at each of the six efforts validates
+# 1e. lane at each of the six efforts validates. codex is the harness that
+#     offers all six; the fixture used a claude lane until ticket 19, and claude
+#     offers no ultra.
 for eff in ("low", "medium", "high", "xhigh", "max", "ultra"):
     doc_eff = copy.deepcopy(lanes_sample)
-    doc_eff["lanes"]["fable-xhigh@claude"]["effort"] = eff
+    doc_eff["lanes"]["sol-high@codex"]["effort"] = eff
     val_eff = catalog.validate_lanes(doc_eff)
     record(
         f"effort {eff} validates",
-        val_eff is not None and doc_eff["lanes"]["fable-xhigh@claude"]["effort"] == eff,
+        val_eff is not None and doc_eff["lanes"]["sol-high@codex"]["effort"] == eff,
     )
+
+# 1e2. a lane at an effort its harness does not offer is refused, and the
+#      message names that harness's list (ticket 19)
+for lane_name, eff, offered in (
+    ("fable-xhigh@claude", "ultra", "low, medium, high, xhigh, max"),
+    ("flash-high@agy", "xhigh", "low, medium, high"),
+    ("grok46-high@grok", "low", "high"),
+):
+    doc_eff = copy.deepcopy(lanes_sample)
+    doc_eff["lanes"][lane_name]["effort"] = eff
+    harness = lane_name.split("@")[1]
+    msg = check_catalog_error(catalog.validate_lanes, doc_eff)
+    record(
+        f"reject: {harness} lane at effort {eff}, naming what {harness} offers",
+        bool(msg and lane_name in msg and f"does not offer effort '{eff}'" in msg
+             and f"{harness} offers {offered}" in msg),
+        msg,
+    )
+record(
+    "every harness has an effort list, each inside EFFORTS",
+    set(catalog.HARNESS_EFFORTS) == set(catalog.HARNESSES)
+    and all(set(v) <= set(catalog.EFFORTS) and v for v in catalog.HARNESS_EFFORTS.values()),
+    str(catalog.HARNESS_EFFORTS),
+)
 
 # 1f. the stowed catalog carries the three native claude lanes and validates
 import json as _json
@@ -129,6 +155,45 @@ for lane_name in ("haiku-high@claude", "sonnet-high@claude", "opus-high@claude")
         f"native lane {lane_name} present in the stowed catalog",
         lane_name in _stowed["lanes"] and _stowed["lanes"][lane_name]["meter"] == "claude-general",
     )
+
+# 1g. ticket 19: Fable, Opus and Sonnet at every effort claude offers, each lane
+#     on its model's own meter, and every claude lane with its lane-* agent file
+_by_model = {}
+for _name, _lane in _stowed["lanes"].items():
+    _by_model.setdefault((_lane["harness"], _lane["model"]), {})[_lane["effort"]] = (_name, _lane)
+for _model in ("claude-fable-5-1", "claude-opus-5", "claude-sonnet-5"):
+    _lanes = _by_model.get(("claude", _model), {})
+    record(
+        f"stowed catalog runs {_model} at every effort claude offers, on one meter",
+        set(_lanes) == set(catalog.HARNESS_EFFORTS["claude"])
+        and len({l["meter"] for _n, l in _lanes.values()}) == 1,
+        str({e: (n, l["meter"]) for e, (n, l) in _lanes.items()}),
+    )
+record(
+    "stowed catalog runs gemini-3.8-flash at every effort agy offers, the effort in the slug",
+    {e: l["model"] for e, (_n, l) in
+     {**_by_model.get(("agy", "gemini-3.8-flash-low"), {}),
+      **_by_model.get(("agy", "gemini-3.8-flash-medium"), {}),
+      **_by_model.get(("agy", "gemini-3.8-flash-high"), {})}.items()}
+    == {e: f"gemini-3.8-flash-{e}" for e in catalog.HARNESS_EFFORTS["agy"]},
+)
+_agents_dir = _os.path.abspath(_os.path.join(_os.path.dirname(__file__), "..", "..", "..", "agents"))
+_missing = []
+for _name, _lane in _stowed["lanes"].items():
+    if _lane["harness"] != "claude":
+        continue
+    _path = _os.path.join(_agents_dir, "lane-" + _name.split("@")[0] + ".md")
+    if not _os.path.isfile(_path):
+        _missing.append(f"{_name}: no {_path}")
+        continue
+    with open(_path, encoding="utf-8") as _f:
+        _front = _f.read().split("---")[1]
+    _fields = dict(line.split(": ", 1) for line in _front.strip().splitlines() if ": " in line)
+    # Haiku takes no effort, so its agent file names none (ticket 22)
+    if _fields.get("model") != _lane["model"] or _fields.get("effort", _lane["effort"]) != _lane["effort"]:
+        _missing.append(f"{_name}: {_fields}")
+record("every claude lane in the stowed catalog has a lane-* agent file with its model and effort",
+       not _missing, str(_missing))
 
 # 2. Rejections
 # 2.1 lane naming a missing meter
@@ -619,6 +684,13 @@ record(
     resolve("Gemini 3.8 Flash", ambiguous) is None,
     repr(resolve("Gemini 3.8 Flash", ambiguous)),
 )
+record(
+    "7.6b an agy family name resolves by the row's effort, and to neither at an effort no member runs",
+    resolve("Gemini 3.8 Flash", ambiguous, effort="medium") == "gemini-3.8-flash-medium"
+    and resolve("Gemini 3.8 Flash", ambiguous, effort="high") == "gemini-3.8-flash-high"
+    and resolve("Gemini 3.8 Flash", ambiguous, effort="low") is None,
+    repr([resolve("Gemini 3.8 Flash", ambiguous, effort=e) for e in ("medium", "high", "low")]),
+)
 
 # 7.7 A published_as entry may not be pointed at a model another lane runs: the
 #     explicit map is consulted first, so such an entry would silently read that
@@ -669,8 +741,8 @@ record(
 # effort suffix the *catalog* carries (gemini-3.8-flash-high). A suffix on the
 # *published* side is left alone on purpose: a row states its effort in its own
 # field, and reading `gpt-6-astra-max` as plain `gpt-6-astra` would let a name
-# and a field disagree with nobody noticing. bench.py's aa_match_info is where
-# a suffixed published name is split, and it keeps the effort it split off.
+# and a field disagree with nobody noticing. The row's own `effort` field is
+# what separates agy family members (7.6b).
 record(
     "7.8 a suffix on the published side is not silently dropped",
     resolve("gpt-6-astra-max", {"lanes": {
@@ -679,6 +751,36 @@ record(
     and resolve("Gemini 3.8 Flash", {"lanes": {
         "a@agy": {"model": "gemini-3.8-flash-high", "effort": "high"},
     }}) == "gemini-3.8-flash-high",
+)
+
+# 7.9 ticket 19: every Claude name an accepted rows file prints resolves to the
+#     lane model it denotes in the stowed catalog, and a Claude model that is
+#     nobody's lane resolves to none. A new Claude name in the rows fails here
+#     until someone decides which it is.
+_data_dir = _os.path.abspath(_os.path.join(
+    _os.path.dirname(__file__), "..", "..", "..", "..", ".scratch", "delegate-redesign", "_data"))
+_claude_names = {
+    "Claude Fable 5.1": "claude-fable-5-1", "Fable 5.1": "claude-fable-5-1",
+    "Claude Opus 5": "claude-opus-5", "Opus 5": "claude-opus-5", "claude-opus-5": "claude-opus-5",
+    "Claude Sonnet 5": "claude-sonnet-5", "Sonnet 5": "claude-sonnet-5",
+    "claude-sonnet-5": "claude-sonnet-5",
+    "Claude 4.5 Haiku": "claude-haiku-4-5-20251001",
+    # other versions, which no lane runs
+    "Claude Fable 5": None, "Fable 5": None, "Claude Opus 4.8": None, "Opus 4.8": None,
+    "Claude Sonnet 4.6": None,
+}
+_seen = set()
+for _file in ("aa-accepted.json", "tbench-accepted.json", "swerb-accepted.json"):
+    _p = _os.path.join(_data_dir, _file)
+    if _os.path.isfile(_p):
+        with open(_p, encoding="utf-8") as _f:
+            _seen |= {r["model"] for r in _json.load(_f)
+                      if any(w in r["model"].lower() for w in ("claude", "fable", "opus", "sonnet", "haiku"))}
+_wrong = {n: resolve(n, _stowed) for n in _claude_names if resolve(n, _stowed) != _claude_names[n]}
+record(
+    "7.9 every Claude name in the accepted rows resolves to its lane model, and other versions to none",
+    _seen and _seen <= set(_claude_names) and not _wrong,
+    f"unaccounted={sorted(_seen - set(_claude_names))} wrong={_wrong}",
 )
 
 

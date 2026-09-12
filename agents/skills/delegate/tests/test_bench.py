@@ -91,65 +91,48 @@ def fixture_rows():
     ]
 
 
-def aa_doc():
-    return {
-        "data": [
-            {
-                "slug": "gpt-5.6-sol",
-                "evaluations": {
-                    "coding_index": 80,
-                    "agentic_index": 75,
-                    "terminal_bench_hard": 60,
-                },
-                "median_output_tokens_per_second": 100,
-            },
-            {
-                "slug": "gpt-5.6-terra",
-                "evaluations": {
-                    "coding_index": 70,
-                    "agentic_index": 70,
-                    "terminal_bench_hard": 55,
-                },
-                "median_output_tokens_per_second": 90,
-            },
-            {
-                "slug": "gpt-5.6-luna",
-                "evaluations": {
-                    "coding_index": 40,
-                    "agentic_index": 35,
-                    "terminal_bench_hard": 20,
-                },
-                "median_output_tokens_per_second": 200,
-            },
-            {
-                "slug": "grok-4.6",
-                "evaluations": {
-                    "coding_index": 65,
-                    "agentic_index": 60,
-                    "terminal_bench_hard": 50,
-                },
-                "median_output_tokens_per_second": 80,
-            },
-            {
-                "slug": "claude-fable-5-1",
-                "evaluations": {
-                    "coding_index": 85,
-                    "agentic_index": 80,
-                    "terminal_bench_hard": 70,
-                },
-                "median_output_tokens_per_second": 40,
-            },
-            {
-                "slug": "not-in-catalog-xyz",
-                "evaluations": {
-                    "coding_index": 99,
-                    "agentic_index": 99,
-                    "terminal_bench_hard": 99,
-                },
-                "median_output_tokens_per_second": 9,
-            },
-        ]
-    }
+AA_URL = "https://artificialanalysis.ai/models/gpt-5-6-sol-high"
+
+
+def aa_row(model, effort, benchmark, score, cost, composite=False):
+    """One accepted row in the shape `effort.py aa` writes: the display name AA
+    prints, the effort word of the variant, and the index's cost per task."""
+    row = {"source": "aa", "url": AA_URL, "model": model, "effort": effort,
+           "benchmark": benchmark, "score": score, "score_unit": None, "cost_usd": cost,
+           "tokens": 1000.0, "observed": "2026-09-11", "provenance": "unlabelled",
+           "uncertain": effort == "none", "variant": f"{model} ({effort})", "reasons": []}
+    if composite:
+        row["composite"] = True
+    return row
+
+
+def aa_rows():
+    """Sample-catalog models at several efforts, the composite, a none row, an
+    extra model, and a row of another source. No Gemini row.
+
+    Model view, one effort per model (the strongest lane effort measured):
+      Terminal-Bench 2.1: fable 0.90 r1, sol 0.80 r2, terra 0.70 r3, grok(medium) 0.50 r4, luna 0.30 r5
+      GPQA Diamond:       sol 0.90 r1, terra 0.85 r2
+      Omniscience:        fable -12.5 r1
+      mean: sol 1.5 (n=2), terra 2.5 (n=2), fable 1.0 (n=2)
+    """
+    return [
+        aa_row("GPT-5.6 Sol", "high", "Terminal-Bench 2.1", 0.80, 0.81),
+        aa_row("GPT-5.6 Sol", "high", "GPQA Diamond", 0.90, 0.81),
+        aa_row("GPT-5.6 Sol", "high", "Artificial Analysis Intelligence Index", 50.0, 0.81, composite=True),
+        aa_row("GPT-5.6 Sol", "low", "Terminal-Bench 2.1", 0.60, 0.20),
+        aa_row("GPT-5.6 Terra", "high", "Terminal-Bench 2.1", 0.70, 0.40),
+        aa_row("GPT-5.6 Terra", "high", "GPQA Diamond", 0.85, 0.40),
+        aa_row("GPT-5.6 Luna", "low", "Terminal-Bench 2.1", 0.30, 0.05),
+        aa_row("Grok 4.6", "none", "Terminal-Bench 2.1", 0.99, 0.01),
+        aa_row("Grok 4.6", "medium", "Terminal-Bench 2.1", 0.50, 0.30),
+        aa_row("Claude Fable 5.1", "xhigh", "Terminal-Bench 2.1", 0.90, 2.50),
+        aa_row("Claude Fable 5.1", "xhigh", "Omniscience", -12.5, 2.50),
+        aa_row("Claude Fable 5.1", "low", "Terminal-Bench 2.1", 0.55, 0.90),
+        aa_row("ZZZExtraModel", "high", "Terminal-Bench 2.1", 0.99, 0.10),
+        {"source": "tbench", "model": "GPT-5.6 Sol", "effort": "high", "benchmark": "Terminal-Bench 4.0",
+         "score": 40.0, "cost_usd": 100.0},
+    ]
 
 
 def copy_config(td):
@@ -211,21 +194,18 @@ with tempfile.TemporaryDirectory() as td:
     os.makedirs(out_dir)
     epoch_csv = os.path.join(td, "epoch.csv")
     write_epoch_csv(epoch_csv, fixture_rows())
-    aa_json = os.path.join(td, "aa.json")
-    with open(aa_json, "w", encoding="utf-8") as f:
-        json.dump(aa_doc(), f)
-    key_file = os.path.join(td, "aa-key")
-    missing_key = os.path.join(td, "missing-aa-key")
+    rows_json = os.path.join(td, "aa-accepted.json")
+    with open(rows_json, "w", encoding="utf-8") as f:
+        json.dump(aa_rows(), f)
 
     common = [
         "--config-dir", cfg,
         "--out-dir", out_dir,
         "--date", "2026-09-09",
         "--epoch-csv", epoch_csv,
-        "--key-file", key_file,
     ]
 
-    res = run_bench(common + ["--aa-json", aa_json], home)
+    res = run_bench(common + ["--effort-rows", rows_json], home)
     report_path = os.path.join(out_dir, "2026-09-09.md")
     report = ""
     if os.path.isfile(report_path):
@@ -236,10 +216,12 @@ with tempfile.TemporaryDirectory() as td:
         res.returncode == 0 and os.path.isfile(report_path) and f"bench: wrote {report_path}" in res.stdout,
         f"code={res.returncode} stdout={res.stdout!r} stderr={res.stderr!r} path_exists={os.path.isfile(report_path)}",
     )
+    # replaces "both attribution lines present with --aa-json" (ticket 19)
     record(
-        "both attribution lines present with --aa-json",
+        "both attribution lines present with --effort-rows",
         "Source: Epoch AI, Benchmarking Hub, https://epoch.ai/data/eci_benchmarks.csv, CC-BY 4.0, fetched 2026-09-09" in report
-        and "Source: Artificial Analysis, https://artificialanalysis.ai, free API, fetched 2026-09-09" in report,
+        and f"Source: Artificial Analysis, {AA_URL}, per-effort rows accepted by effort.py aa, observed 2026-09-11" in report
+        and "free API" not in report,
         report[:800],
     )
 
@@ -293,16 +275,12 @@ with tempfile.TemporaryDirectory() as td:
         f"sol={sol} gaps={gaps}",
     )
 
+    # replaces "missing key file skips AA and still renders Epoch": there is
+    # no key any more, so the case where AA cannot be read is no rows given
     skip_out = os.path.join(td, "out-skip")
     os.makedirs(skip_out)
     res_skip = run_bench(
-        [
-            "--config-dir", cfg,
-            "--out-dir", skip_out,
-            "--date", "2026-09-09",
-            "--epoch-csv", epoch_csv,
-            "--key-file", missing_key,
-        ],
+        ["--config-dir", cfg, "--out-dir", skip_out, "--date", "2026-09-09", "--epoch-csv", epoch_csv],
         home,
     )
     skip_path = os.path.join(skip_out, "2026-09-09.md")
@@ -311,9 +289,9 @@ with tempfile.TemporaryDirectory() as td:
         with open(skip_path, encoding="utf-8") as f:
             skip_report = f.read()
     record(
-        "missing key file skips AA and still renders Epoch",
+        "no effort rows skips AA with the reason and still renders Epoch",
         res_skip.returncode == 0
-        and "Artificial Analysis: skipped" in skip_report
+        and f"Artificial Analysis: skipped ({bench.AA_NO_ROWS})" in skip_report
         and "## Epoch AI" in skip_report
         and "DeepSWE" in skip_report
         and "gpt-5.6-sol" in skip_report
@@ -321,45 +299,39 @@ with tempfile.TemporaryDirectory() as td:
         f"code={res_skip.returncode} stderr={res_skip.stderr!r} report={skip_report[:900]}",
     )
 
+    # replaces "AA key detection names nested and top-level keys": which
+    # fields become columns is now which benchmarks the rows carry
+    aa_header = next((l for l in report[report.find("## Artificial Analysis"):].splitlines()
+                      if l.startswith("| Lane(s)")), "")
     record(
-        "AA key detection names nested and top-level keys",
-        "coding_index" in gaps
-        and "agentic_index" in gaps
-        and "terminal_bench_hard" in gaps
-        and "median_output_tokens_per_second" in gaps,
-        gaps,
+        "AA columns are the component benchmarks, in row order, with cost per task; the composite is not one",
+        aa_header == "| Lane(s) | Model | Effort | Terminal-Bench 2.1 | GPQA Diamond | Omniscience "
+                     "| Cost/task (USD) | Mean rank |"
+        and "Intelligence Index" not in report,
+        aa_header,
     )
 
-    empty_aa = os.path.join(td, "aa-empty.json")
-    with open(empty_aa, "w", encoding="utf-8") as f:
-        json.dump({"data": [{"slug": "gpt-5.6-sol", "foo_key": 1, "bar_key": 2}]}, f)
-    empty_out = os.path.join(td, "out-empty-aa")
-    os.makedirs(empty_out)
-    res_empty = run_bench(
-        [
-            "--config-dir", cfg,
-            "--out-dir", empty_out,
-            "--date", "2026-09-09",
-            "--epoch-csv", epoch_csv,
-            "--aa-json", empty_aa,
-            "--key-file", missing_key,
-        ],
+    # replaces "AA JSON with no metric keys prints first object key names": a
+    # rows file that holds no AA row says why AA is missing
+    other_json = os.path.join(td, "tbench-only.json")
+    with open(other_json, "w", encoding="utf-8") as f:
+        json.dump([r for r in aa_rows() if r["source"] != "aa"], f)
+    other_out = os.path.join(td, "out-other")
+    os.makedirs(other_out)
+    res_other = run_bench(
+        ["--config-dir", cfg, "--out-dir", other_out, "--date", "2026-09-09",
+         "--epoch-csv", epoch_csv, "--effort-rows", other_json],
         home,
     )
-    empty_path = os.path.join(empty_out, "2026-09-09.md")
-    empty_report = ""
-    if os.path.isfile(empty_path):
-        with open(empty_path, encoding="utf-8") as f:
-            empty_report = f.read()
-    empty_gaps = gaps_section(empty_report)
+    other_report = ""
+    if os.path.isfile(os.path.join(other_out, "2026-09-09.md")):
+        with open(os.path.join(other_out, "2026-09-09.md"), encoding="utf-8") as f:
+            other_report = f.read()
     record(
-        "AA JSON with no metric keys prints first object key names",
-        res_empty.returncode == 0
-        and "foo_key" in empty_gaps
-        and "bar_key" in empty_gaps
-        and "slug" in empty_gaps
-        and "coding_index" not in empty_gaps,
-        empty_gaps,
+        "effort rows with no Artificial Analysis row skip AA and name the flag that gives them",
+        res_other.returncode == 0 and "Artificial Analysis: skipped" in other_report
+        and "--effort-rows" in other_report,
+        other_report[:600],
     )
 
     bad_csv = os.path.join(td, "bad.csv")
@@ -373,8 +345,7 @@ with tempfile.TemporaryDirectory() as td:
             "--out-dir", bad_out,
             "--date", "2026-09-09",
             "--epoch-csv", bad_csv,
-            "--aa-json", aa_json,
-            "--key-file", missing_key,
+            "--effort-rows", rows_json,
         ],
         home,
     )
@@ -384,193 +355,87 @@ with tempfile.TemporaryDirectory() as td:
         f"code={res_bad.returncode} stderr={res_bad.stderr!r}",
     )
 
-    # New fixture-driven tests covering AA effort-suffixed matching
-    cfg_effort = os.path.join(td, "cfg-effort")
-    os.makedirs(cfg_effort)
-    shutil.copy(os.path.join(SAMPLES_DIR, "routing.json"), os.path.join(cfg_effort, "routing.json"))
-    with open(os.path.join(SAMPLES_DIR, "lanes.json"), encoding="utf-8") as f:
-        lanes_data = json.load(f)
-    lanes_data["lanes"]["astra-high@codex"] = {
-        "harness": "codex",
-        "model": "gpt-6-astra",
-        "effort": "high",
-        "meter": "codex",
-        "meter_weight": 10,
-        "timeout": "40m",
-        "price": {
-            "in": 10,
-            "cache_read": 1,
-            "cache_write": 12.5,
-            "out": 50,
-        },
-        "tier": 3,
-        "basis": "astra test",
-    }
-    with open(os.path.join(cfg_effort, "lanes.json"), "w", encoding="utf-8") as f:
-        json.dump(lanes_data, f)
-
-    aa_effort_data = {
-        "data": [
-            # 1. Suffixed-only slug: gpt-5.6-sol published only as gpt-5-6-sol-low
-            {
-                "slug": "gpt-5-6-sol-low",
-                "evaluations": {
-                    "coding_index": 78,
-                    "agentic_index": 72,
-                    "terminal_bench_hard": 58,
-                },
-                "median_output_tokens_per_second": 95,
-            },
-            # 2. Exact slug with suffixed siblings: claude-fable-5-1 exact + low + medium
-            {
-                "slug": "claude-fable-5-1-low",
-                "evaluations": {
-                    "coding_index": 50,
-                    "agentic_index": 50,
-                    "terminal_bench_hard": 40,
-                },
-                "median_output_tokens_per_second": 40,
-            },
-            {
-                "slug": "claude-fable-5-1-medium",
-                "evaluations": {
-                    "coding_index": 65,
-                    "agentic_index": 65,
-                    "terminal_bench_hard": 55,
-                },
-                "median_output_tokens_per_second": 40,
-            },
-            {
-                "slug": "claude-fable-5-1",
-                "evaluations": {
-                    "coding_index": 85,
-                    "agentic_index": 80,
-                    "terminal_bench_hard": 70,
-                },
-                "median_output_tokens_per_second": 40,
-            },
-            # 3. xhigh suffix and non-reasoning slug: gpt-6-astra-xhigh and gpt-6-astra-non-reasoning
-            {
-                "slug": "gpt-6-astra-non-reasoning",
-                "evaluations": {
-                    "coding_index": 45,
-                    "agentic_index": 40,
-                    "terminal_bench_hard": 35,
-                },
-                "median_output_tokens_per_second": 120,
-            },
-            {
-                "slug": "gpt-6-astra-xhigh",
-                "evaluations": {
-                    "coding_index": 92,
-                    "agentic_index": 88,
-                    "terminal_bench_hard": 80,
-                },
-                "median_output_tokens_per_second": 65,
-            },
-            # 4. Suffixed slug whose effort agrees with lane: gpt-5.6-luna lane effort is low, slug is low
-            {
-                "slug": "gpt-5-6-luna-low",
-                "evaluations": {
-                    "coding_index": 42,
-                    "agentic_index": 38,
-                    "terminal_bench_hard": 22,
-                },
-                "median_output_tokens_per_second": 190,
-            },
-            # 5. Non-reasoning-only model: grok-4.6 published only as non-reasoning
-            {
-                "slug": "grok-4-6-non-reasoning",
-                "evaluations": {
-                    "coding_index": 60,
-                    "agentic_index": 55,
-                    "terminal_bench_hard": 45,
-                },
-                "median_output_tokens_per_second": 80,
-            },
-            # Note: gemini-3.8-flash-high has NO row in aa_effort_data
-        ]
-    }
-    aa_effort_json = os.path.join(td, "aa-effort.json")
-    with open(aa_effort_json, "w", encoding="utf-8") as f:
-        json.dump(aa_effort_data, f)
-
-    out_effort = os.path.join(td, "out-effort")
-    os.makedirs(out_effort)
-    res_effort = run_bench(
-        [
-            "--config-dir", cfg_effort,
-            "--out-dir", out_effort,
-            "--date", "2026-09-10",
-            "--epoch-csv", epoch_csv,
-            "--aa-json", aa_effort_json,
-            "--key-file", missing_key,
-        ],
-        home,
-    )
-    effort_path = os.path.join(out_effort, "2026-09-10.md")
-    effort_report = ""
-    if os.path.isfile(effort_path):
-        with open(effort_path, encoding="utf-8") as f:
-            effort_report = f.read()
-    effort_gaps = gaps_section(effort_report)
-
-    sol_aa = aa_row_for(effort_report, "gpt-5.6-sol")
-    claude_aa = aa_row_for(effort_report, "claude-fable-5-1")
-    astra_aa = aa_row_for(effort_report, "gpt-6-astra")
-    luna_aa = aa_row_for(effort_report, "gpt-5.6-luna")
-    grok_aa = aa_row_for(effort_report, "grok-4.6")
-    gemini_aa = aa_row_for(effort_report, "gemini-3.8-flash-high")
-
+    bad_rows = os.path.join(td, "bad-rows.json")
+    with open(bad_rows, "w", encoding="utf-8") as f:
+        f.write('{"not": "a list"}')
+    res_bad_rows = run_bench(common + ["--out-dir", bad_out, "--effort-rows", bad_rows], home)
     record(
-        "AA matching: suffixed-only slug gpt-5-6-sol-low matches gpt-5.6-sol",
-        res_effort.returncode == 0
-        and "78" in sol_aa
-        and "gpt-5.6-sol absent from Artificial Analysis" not in effort_gaps,
-        f"sol_aa={sol_aa!r} gaps={effort_gaps}",
+        "an effort rows file that is not a JSON list exits 1 with bench: message",
+        res_bad_rows.returncode == 1 and res_bad_rows.stderr.startswith("bench: ")
+        and "expected a JSON list" in res_bad_rows.stderr,
+        f"code={res_bad_rows.returncode} stderr={res_bad_rows.stderr!r}",
     )
 
+    sol_aa = aa_row_for(report, "gpt-5.6-sol")
+    fable_aa = aa_row_for(report, "claude-fable-5-1")
+    luna_aa = aa_row_for(report, "gpt-5.6-luna")
+    grok_aa = aa_row_for(report, "grok-4.6")
+    sol_aa_parts = [p.strip() for p in sol_aa.split("|")]
+    fable_aa_parts = [p.strip() for p in fable_aa.split("|")]
+
+    # replaces "AA matching: suffixed-only slug gpt-5-6-sol-low matches gpt-5.6-sol"
     record(
-        "AA matching: exact slug claude-fable-5-1 wins over suffixed sibling",
-        "85" in claude_aa
-        and "50" not in claude_aa
-        and "65" not in claude_aa
-        and "claude-fable-5-1 Artificial Analysis used effort" not in effort_gaps,
-        f"claude_aa={claude_aa!r} gaps={effort_gaps}",
+        "AA rows resolve a display name to its lane model (GPT-5.6 Sol -> gpt-5.6-sol)",
+        res.returncode == 0 and "0.800" in sol_aa
+        and "gpt-5.6-sol absent from Artificial Analysis" not in gaps,
+        f"sol_aa={sol_aa!r} gaps={gaps}",
     )
 
+    # replaces "AA matching: exact slug claude-fable-5-1 wins over suffixed sibling"
     record(
-        "AA matching: xhigh suffix gpt-6-astra-xhigh matches",
-        "92" in astra_aa
-        and "gpt-6-astra absent from Artificial Analysis" not in effort_gaps,
-        f"astra_aa={astra_aa!r} gaps={effort_gaps}",
+        "AA model view uses the lane's own effort, not another measured effort",
+        len(sol_aa_parts) > 5 and sol_aa_parts[3] == "high" and sol_aa_parts[4] == "0.800"
+        and "0.600" not in sol_aa
+        and len(fable_aa_parts) > 5 and fable_aa_parts[3] == "xhigh" and "0.550" not in fable_aa,
+        f"sol_aa={sol_aa!r} fable_aa={fable_aa!r}",
     )
 
+    # replaces "AA matching: xhigh suffix gpt-6-astra-xhigh matches"
     record(
-        "AA matching: non-reasoning slug is never selected",
-        "45" not in astra_aa
-        and "grok-4.6 absent from Artificial Analysis" in effort_gaps,
-        f"astra_aa={astra_aa!r} grok_aa={grok_aa!r} gaps={effort_gaps}",
+        "AA figures measured at xhigh reach the xhigh model, a signed component printed as signed",
+        "0.900" in fable_aa and "-12.5" in fable_aa and "1.0 (n=2)" in fable_aa
+        and "claude-fable-5-1 absent from Artificial Analysis" not in gaps,
+        f"fable_aa={fable_aa!r}",
+    )
+
+    # replaces "AA matching: non-reasoning slug is never selected"
+    record(
+        "AA rows at effort none never stand for a model",
+        "0.990" not in grok_aa and len(grok_aa.split("|")) > 4 and grok_aa.split("|")[3].strip() == "medium",
+        f"grok_aa={grok_aa!r}",
     )
 
     record(
         "AA matching: model with no AA row stays absent (gemini-3.8-flash-high)",
-        "gemini-3.8-flash-high absent from Artificial Analysis" in effort_gaps,
-        effort_gaps,
+        "gemini-3.8-flash-high absent from Artificial Analysis" in gaps,
+        gaps,
+    )
+
+    # replaces "AA notes: effort note appears when matched effort differs from
+    # lane effort": ticket 19 retired that note; what remains is saying a
+    # model's AA figures belong to no lane
+    record(
+        "no 'Artificial Analysis used effort' note; a model measured only at efforts no lane runs says so",
+        "Artificial Analysis used effort" not in report
+        and "grok-4.6 Artificial Analysis figures are at effort medium; no lane runs that effort" in gaps
+        and "gpt-5.6-sol Artificial Analysis figures are at effort" not in gaps,
+        gaps,
+    )
+
+    # replaces "AA notes: effort note omitted when matched effort agrees with lane effort"
+    record(
+        "an AA figure at a lane's effort appears with its cost per task and mean rank",
+        "0.300" in luna_aa and "| 0.05 |" in luna_aa
+        and "| 0.81 | 1.5 (n=2) |" in sol_aa,
+        f"luna_aa={luna_aa!r} sol_aa={sol_aa!r}",
     )
 
     record(
-        "AA notes: effort note appears when matched effort differs from lane effort",
-        "gpt-5.6-sol Artificial Analysis used effort low (lane effort high)" in effort_gaps
-        and "gpt-6-astra Artificial Analysis used effort xhigh (lane effort high)" in effort_gaps,
-        effort_gaps,
-    )
-
-    record(
-        "AA notes: effort note omitted when matched effort agrees with lane effort",
-        "42" in luna_aa
-        and "gpt-5.6-luna Artificial Analysis used effort" not in effort_gaps,
-        f"luna_aa={luna_aa!r} gaps={effort_gaps}",
+        "bench.py has no free API fetch, key loader or key-file argument",
+        not hasattr(bench, "AA_URL") and not hasattr(bench, "load_key") and not hasattr(bench, "load_aa")
+        and run_bench(common + ["--key-file", os.path.join(td, "aa-key")], home).returncode == 2
+        and run_bench(common + ["--aa-json", rows_json], home).returncode == 2,
+        str([n for n in ("AA_URL", "load_key", "load_aa") if hasattr(bench, n)]),
     )
 
 
@@ -604,7 +469,7 @@ with tempfile.TemporaryDirectory() as td:
         epoch_row("gpt-6-astra", "max", "FrontierCode", "0.66", "alpha", "GPT-6 Astra"),
         epoch_row("gpt-5.6-sol", "high", "DeepSWE", "0.90", "alpha", "GPT-5.6 Sol"),
     ])
-    data = bench.collect(ATTRIB_LANES, epoch_csv=attrib_csv, key_file=None)
+    data = bench.collect(ATTRIB_LANES, epoch_csv=attrib_csv)
     cell = data["models"]["gpt-6-astra"]["epoch"]["cells"]["DeepSWE"]
     lanes = data["lanes"]
 
@@ -658,33 +523,70 @@ with tempfile.TemporaryDirectory() as td:
 
     # the Artificial Analysis figure carries its own effort through collect(),
     # so it can be attributed the same way an Epoch figure is
-    aa_path = os.path.join(td, "attrib-aa.json")
-    with open(aa_path, "w", encoding="utf-8") as f:
-        json.dump({"data": [
-            {"slug": "gpt-6-astra-max",
-             "evaluations": {"coding_index": 92, "agentic_index": 80},
-             "median_output_tokens_per_second": 120},
-            {"slug": "gpt-5.6-sol",
-             "evaluations": {"coding_index": 80, "agentic_index": 75},
-             "median_output_tokens_per_second": 100},
-        ]}, f)
-    aa_data = bench.collect(ATTRIB_LANES, epoch_csv=attrib_csv, aa_json=aa_path, key_file=None)
+    attrib_rows = [
+        aa_row("GPT-6 Astra", "max", "Terminal-Bench 2.1", 0.92, 3.10),
+        aa_row("GPT-6 Astra", "max", "GPQA Diamond", 0.80, 3.10),
+        aa_row("GPT-6 Astra", "high", "Terminal-Bench 2.1", 0.88, 2.20),
+        aa_row("GPT-5.6 Sol", None, "Terminal-Bench 2.1", 0.80, 0.81),
+    ]
+    aa_data = bench.collect(ATTRIB_LANES, epoch_csv=attrib_csv, effort_rows=attrib_rows)
     aa_lanes = aa_data["lanes"]
 
     record(
         "an Artificial Analysis figure carries its measured effort through collect",
         aa_data["models"]["gpt-6-astra"]["aa"]["effort"] == "max"
-        and aa_data["models"]["gpt-5.6-sol"]["aa"]["effort"] is None,
+        and aa_data["models"]["gpt-5.6-sol"]["aa"] is None,
         str({m: (r["aa"] or {}).get("effort") for m, r in aa_data["models"].items()}),
     )
 
     record(
         "an Artificial Analysis figure reaches only the lane that ran its effort",
-        aa_lanes["astra-max@codex"]["aa"]["cols"]["Coding Index"] == 92
-        and aa_lanes["astra-high@codex"]["aa"] is None
+        aa_lanes["astra-max@codex"]["aa"]["cols"]["Terminal-Bench 2.1"] == 0.92
+        and aa_lanes["astra-high@codex"]["aa"]["cols"] == {"Terminal-Bench 2.1": 0.88}
         and aa_lanes["astra-low@codex"]["aa"] is None
         and aa_lanes["sol-high@codex"]["aa"] is None,
         str({k: v["aa"] for k, v in aa_lanes.items()}),
+    )
+
+    # Terminal-Bench 2.1 over lanes: astra-max 0.92 r1, astra-high 0.88 r2;
+    # GPQA Diamond: astra-max r1. So astra-max means 1.0 (n=2).
+    record(
+        "an AA lane figure carries that lane's cost per task and a mean rank over lanes",
+        aa_lanes["astra-max@codex"]["aa"]["cost_usd"] == 3.10
+        and aa_lanes["astra-high@codex"]["aa"]["cost_usd"] == 2.20
+        and aa_lanes["astra-max@codex"]["aa"]["mean_s"] == "1.0 (n=2)"
+        and aa_lanes["astra-high@codex"]["aa"]["mean_s"] == "2.0 (n=1)"
+        and aa_data["aa_columns"] == ["Terminal-Bench 2.1", "GPQA Diamond"],
+        str({k: v["aa"] for k, v in aa_lanes.items()}),
+    )
+
+    # a column no lane has a figure for is not a column
+    shown = bench.collect(ATTRIB_LANES, epoch_csv=attrib_csv, effort_rows=[
+        aa_row("GPT-6 Astra", "max", "Terminal-Bench 2.1", 0.92, 3.10),
+        aa_row("GPT-6 Astra", "xhigh", "IFBench", 0.70, 2.90),
+    ])
+    record(
+        "an AA column no lane has a figure for is not shown",
+        shown["aa_columns"] == ["Terminal-Bench 2.1"],
+        str(shown["aa_columns"]),
+    )
+
+    # agy names one model per effort; a row resolves to the member at its effort
+    agy_lanes = {"version": "delegate-lanes.v1", "lanes": {
+        "flash-high@agy": {"harness": "agy", "model": "gemini-3.8-flash-high", "effort": "high",
+                           "tier": 2, "meter": "agy-gemini"},
+        "flash-medium@agy": {"harness": "agy", "model": "gemini-3.8-flash-medium", "effort": "medium",
+                             "tier": 1, "meter": "agy-gemini"},
+    }}
+    agy_data = bench.collect(agy_lanes, epoch_csv=attrib_csv, effort_rows=[
+        aa_row("Gemini 3.8 Flash", "high", "Terminal-Bench 2.1", 0.60, 0.30),
+        aa_row("Gemini 3.8 Flash", "medium", "Terminal-Bench 2.1", 0.50, 0.20),
+    ])
+    record(
+        "agy family members each get the AA rows measured at their own effort",
+        agy_data["lanes"]["flash-high@agy"]["aa"]["cols"] == {"Terminal-Bench 2.1": 0.60}
+        and agy_data["lanes"]["flash-medium@agy"]["aa"]["cols"] == {"Terminal-Bench 2.1": 0.50},
+        str({k: v["aa"] for k, v in agy_data["lanes"].items()}),
     )
 
     record(

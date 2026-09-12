@@ -1,0 +1,13 @@
+                                        "!1p,!file")
+  --debug-file <path>                   Write debug logs to a specific file path
+                                        (implicitly enables debug mode)
+  --disable-slash-commands              Disable all skills
+  --disallowedTools, --disallowed-tools <tools...>
+      Comma or space-separated list of tool names to deny (e.g. "Bash(git *)
+      Edit")
+  --effort <level>                      Effort level for the current session
+                                        (low, medium, high, xhigh, max)
+  --environment <environment_id>        Create a new cloud session that runs on
+                                        the given self-hosted environment
+                                        (ccpool_...).
+  --exclude-dynamic-system-prompt-sections

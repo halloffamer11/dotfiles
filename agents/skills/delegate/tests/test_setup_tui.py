@@ -42,7 +42,7 @@ def record(name, ok, detail=""):
 
 
 def data():
-    return bench.collect(copy.deepcopy(LANES), epoch_csv=FIXTURE, key_file=None)
+    return bench.collect(copy.deepcopy(LANES), epoch_csv=FIXTURE)
 
 
 def wizard(bench_data=True, message="", effort_rows=None, lanes=None, discovery=None):

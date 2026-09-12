@@ -19,11 +19,11 @@
       "url": "https://artificialanalysis.ai/models/gpt-5-6-sol-high",
       "reaches": "embedded-json",
       "models": [
-        "all seven catalog models"
+        "every catalog model except claude-haiku-4-5-20251001 (see caution)"
       ],
       "efforts": "none..max; the page prints none as (Non-reasoning)",
       "cost": "usd_per_task",
-      "caution": "Runs models in house. Use component scores, not the composite Intelligence Index, whose weighting is not published: `effort.py aa` emits the index as its own row flagged `composite`, and the carry page never decides on it. Every /models/<slug> page embeds the whole comparison dataset, one JSON object per model and effort, in its Next.js flight payload, so one page serves every catalog model and no worker reads it. Cost and output tokens are the Intelligence Index's per-task figures, the same on every benchmark row of one variant."
+      "caution": "Runs models in house. Use component scores, not the composite Intelligence Index, whose weighting is not published: `effort.py aa` emits the index as its own row flagged `composite`, and the carry page never decides on it. Every /models/<slug> page embeds the whole comparison dataset, one JSON object per model and effort, in its Next.js flight payload, so one page serves every catalog model and no worker reads it. Cost and output tokens are the Intelligence Index's per-task figures, the same on every benchmark row of one variant. AA does not measure Haiku at a lane's effort: the 2026-09-11 payload names Claude 4.5 Haiku only as `Claude 4.5 Haiku (Reasoning)` (slug claude-4-5-haiku-reasoning), which states no effort, and `(Non-reasoning)`, which is none. `effort.py aa` rightly drops the first (no effort word, so no lane can claim it) and writes the second at none, which no lane selects; so aa-accepted.json has no Haiku row and none is owed. Claude Code runs Haiku with no effort level at all (code.claude.com/docs/en/model-config, 2026-09-12)."
     },
     "tbench": {
       "name": "Terminal-Bench 4.0",

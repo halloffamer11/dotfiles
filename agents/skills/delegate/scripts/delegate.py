@@ -52,7 +52,7 @@ import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from catalog import load_catalog, CatalogError, HARNESSES, EFFORTS, CLASSES
+from catalog import load_catalog, CatalogError, HARNESSES, EFFORTS, CLASSES, HARNESS_EFFORTS
 import events
 import rank
 
@@ -210,6 +210,16 @@ def resolve(lane_name, class_name, brief_path, cwd_dir, write_dir, effort_arg, c
         sys.stderr.write(f"delegate: lane '{lane_name}' runs on {harness}, not {harness_filter}\n")
         sys.exit(2)
 
+    # An override the lane's harness does not offer is refused, not passed on
+    # to a CLI that may silently run something else (ticket 19). An agy
+    # override inside agy's list is still only ignored: agy carries the effort
+    # in the model name.
+    if effort_arg in EFFORTS and effort_arg not in HARNESS_EFFORTS[harness]:
+        sys.stderr.write(
+            f"delegate: {harness} does not offer effort '{effort_arg}' on {lane_name}; "
+            f"{harness} offers {', '.join(HARNESS_EFFORTS[harness])}\n"
+        )
+        sys.exit(2)
     if harness == "agy" and effort_arg is not None:
         sys.stderr.write(
             f"delegate: effort override ignored on {lane_name}; agy carries effort in the model name\n"

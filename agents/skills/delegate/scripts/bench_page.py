@@ -22,6 +22,7 @@ import os
 from collections import defaultdict
 
 import bench
+from bench import AA_COST_COLUMN, fmt_aa_value, fmt_cost
 from catalog import EFFORTS, resolve_published_model
 from setup_tui import certain_effort_rows, dominating_row, is_dominated_reason, propose_enabled
 
@@ -226,7 +227,8 @@ def _annotate(effort_rows, lanes_doc, proposals):
             continue
         item = dict(row)
         published = row.get("model")
-        lane_model = resolve_published_model(published, lanes_doc) if lanes_doc else None
+        lane_model = (resolve_published_model(published, lanes_doc, effort=row.get("effort"))
+                      if lanes_doc else None)
         item["_lane_model"] = lane_model
         item["_model_lanes"] = _lanes_of_model(lanes_doc, lane_model) if lane_model else []
         item["_lanes"] = _lane_at(lanes_doc, lane_model, row.get("effort")) if lane_model else []
@@ -785,22 +787,27 @@ def _scores_block(bench, lanes_doc):
                 if v is None:
                     row["cols"][("aa", name)] = []
                     continue
-                shown = str(int(round(v))) if abs(v - round(v)) < 1e-9 else f"{v:.1f}"
-                row["cols"][("aa", name)] = [(effort, v, shown)]
+                row["cols"][("aa", name)] = [(effort, v, fmt_aa_value(v))]
+            cost = _num(aa.get("cost_usd"))
+            row["cols"][("aa", AA_COST_COLUMN)] = [] if cost is None else [(effort, cost, fmt_cost(cost))]
         table.append(row)
-    columns = [("epoch", n) for n in epoch_names] + ([("aa", n) for n in aa_names] if aa_skipped is None else [])
+    # cost per task sits beside the AA scores when the rows carry it
+    aa_shown = list(aa_names)
+    if aa_skipped is None and aa_names and any(row["cols"].get(("aa", AA_COST_COLUMN)) for row in table):
+        aa_shown.append(AA_COST_COLUMN)
+    columns = [("epoch", n) for n in epoch_names] + ([("aa", n) for n in aa_shown] if aa_skipped is None else [])
     column_max = {}
     for key in columns:
         values = [v for row in table for _e, v, _s in row["cols"].get(key, []) if v is not None]
         column_max[key] = max(values) if values else None
 
-    head = ["model", "lanes", *epoch_names] + (aa_names if aa_skipped is None else [])
+    head = ["model", "lanes", *epoch_names] + (aa_shown if aa_skipped is None else [])
     out.append('<div class="scroll"><table class="scores"><thead><tr>')
     out.append("".join(f'<th{" class=num" if i >= 2 else ""}>{_esc(h)}</th>' for i, h in enumerate(head)))
     if aa_skipped is None and aa_names:
         out.append('</tr><tr class="sub"><th></th><th></th>'
                    + f'<th colspan="{len(epoch_names)}">Epoch AI</th>'
-                   + f'<th colspan="{len(aa_names)}">Artificial Analysis</th>')
+                   + f'<th colspan="{len(aa_shown)}">Artificial Analysis</th>')
     out.append("</tr></thead><tbody>")
     for row in table:
         lane_cell = "<br>".join(f'<span class="mono">{_esc(name)}</span>' for name, _e in row["lanes"]) or "—"

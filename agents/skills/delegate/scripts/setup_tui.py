@@ -3,7 +3,7 @@
 import copy
 import textwrap
 
-from bench import EPOCH_BENCHMARKS
+from bench import EPOCH_BENCHMARKS, fmt_aa_value, fmt_cost
 from catalog import CLASSES, EFFORTS, HARNESSES, resolve_published_model
 
 # These render as single lines in an 80-column terminal, where anything past
@@ -162,7 +162,7 @@ def resolve_effort_rows(lanes_doc, effort_rows):
     for row in effort_rows or []:
         if not isinstance(row, dict):
             continue
-        model = resolve_published_model(row.get("model"), lanes_doc)
+        model = resolve_published_model(row.get("model"), lanes_doc, effort=row.get("effort"))
         if model is None:
             name = row.get("model")
             if isinstance(name, str) and name.strip() and name not in unmatched:
@@ -668,7 +668,9 @@ class Wizard:
             aa = (rec or {}).get("aa")
             for name in aa_names:
                 value = aa["cols"].get(name) if aa else None
-                values.append("—" if value is None else (str(int(value)) if value == int(value) else f"{value:.1f}"))
+                values.append(fmt_aa_value(value))
+            # AA's cost per task at this lane's effort, beside its scores
+            values.append(fmt_cost((aa or {}).get("cost_usd")))
             values.append((aa or {}).get("mean_s") or "—")
         return values
 
@@ -892,7 +894,7 @@ class Wizard:
             epoch_names, aa_names = self._bench_columns()
             columns = ["mark", "lane", "model", "effort", *epoch_names, "Epoch mean rank"]
             if aa_names:
-                columns.extend([*aa_names, "AA mean rank"])
+                columns.extend([*aa_names, "AA $/task", "AA mean rank"])
             active = self._tier_names()
             rows = []
             for index, name in enumerate(active):

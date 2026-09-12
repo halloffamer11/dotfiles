@@ -530,6 +530,24 @@ def main():
             ok10 = disp10.get("effort") == "high" and "--effort" not in argv10
         record("10. ignore --effort on agy", ok10, f"rc={res10.returncode} err={res10.stderr}")
 
+        # 10b. an --effort the lane's harness does not offer is refused with
+        #      the harness's list, and no run starts (ticket 19)
+        runs_before10b = set(os.listdir(t_env["runs_dir"])) if os.path.isdir(t_env["runs_dir"]) else set()
+        refusals = []
+        for lane10b, eff10b, offered10b in (
+            ("fable-xhigh@claude", "ultra", "claude offers low, medium, high, xhigh, max"),
+            ("grok46-high@grok", "low", "grok offers high"),
+            ("flash-high@agy", "xhigh", "agy offers low, medium, high"),
+        ):
+            res10b = run_dispatch(t_env, ["--lane", lane10b, "--class", "impl", "--brief", b10, "--cwd", cwd,
+                                          "--effort", eff10b], orchestrator="codex")
+            refusals.append((res10b.returncode == 2
+                             and f"does not offer effort '{eff10b}'" in res10b.stderr
+                             and offered10b in res10b.stderr, res10b.returncode, res10b.stderr))
+        runs_after10b = set(os.listdir(t_env["runs_dir"])) if os.path.isdir(t_env["runs_dir"]) else set()
+        record("10b. --effort a harness does not offer is refused, naming its list",
+               all(r[0] for r in refusals) and runs_after10b == runs_before10b, str(refusals))
+
         # -------------------------------------------------------------
         # 11. Ledger: start and finish events
         # -------------------------------------------------------------

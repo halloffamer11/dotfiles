@@ -121,8 +121,8 @@ def show_bench(args, lanes_doc, routing_doc):
         command = [sys.executable, os.path.join(os.path.dirname(__file__), "bench.py"), "--config-dir", config_dir]
         if args.epoch_csv:
             command.extend(["--epoch-csv", args.epoch_csv])
-        if args.aa_json:
-            command.extend(["--aa-json", args.aa_json])
+        for path in args.effort_rows or ():
+            command.extend(["--effort-rows", path])
         result = subprocess.run(command, capture_output=True, text=True, check=False)
         if result.returncode != 0:
             print((result.stderr or result.stdout or f"bench: exit {result.returncode}").rstrip())
@@ -260,10 +260,9 @@ def main(argv=None):
     bench_group.add_argument("--bench-report", default=None, help="existing benchmark report to display")
     bench_group.add_argument("--no-bench", action="store_true", help="skip benchmark display")
     parser.add_argument("--epoch-csv", default=None, help="local Epoch CSV for bench.py")
-    parser.add_argument("--aa-json", default=None, help="local Artificial Analysis JSON for bench.py")
     parser.add_argument("--effort-rows", action="append", default=None,
-                        help="effort.py accepted rows for the pre-screen and benchmark page; "
-                             "repeat to put several sources on one page")
+                        help="effort.py accepted rows for the pre-screen, the benchmark page and "
+                             "the Artificial Analysis columns; repeat to put several sources on one page")
     parser.add_argument("--no-discover", action="store_true", help="skip model discovery")
     parser.add_argument("--fixture-dir", default=None, help="fixture directory for harness discovery")
     args = parser.parse_args(argv)
@@ -307,17 +306,16 @@ def main(argv=None):
                 print("note: --bench-report is ignored in TUI mode")
             bench_data = None
             initial_message = ""
+            effort_rows, effort_message = load_effort_rows(args.effort_rows)
             if not args.no_bench:
                 try:
                     bench_data = bench.collect(
                         lanes_doc,
                         epoch_csv=args.epoch_csv,
-                        aa_json=args.aa_json,
-                        key_file=os.path.join(config_dir, "aa-key"),
+                        effort_rows=effort_rows,
                     )
                 except bench.BenchError as e:
                     initial_message = f"bench: {e}"
-            effort_rows, effort_message = load_effort_rows(args.effort_rows)
             if effort_message:
                 initial_message = f"{initial_message}; {effort_message}" if initial_message else effort_message
             fd, page_path = tempfile.mkstemp(prefix="delegate-bench-", suffix=".html")
