@@ -44,16 +44,21 @@ only after `main` fast-forwards to this branch.
    would have been wrong. The tiers on the 19 generated codex lanes and the
    three native Claude lanes are provisional by construction: `meter_weight`,
    `timeout` and `tier` are not measurements. Each such lane says so in its `note`.
-3. **Tickets 25 and 19**, from Orin's first full wizard run (2026-09-12), which
-   wrote nothing. 25 is the wizard and its page: tier marks start empty (the
-   placeholder tiers pre-marked lanes), tier pages hide off and taken lanes, a
-   review page after T1, a routing description panel, a facts-only start page, and
-   board descriptions and zoom on the benchmark page. 19 is lanes and data, and is
-   implemented on branch `t19-efforts-and-rows` (2026-09-12), pending Orin's review:
-   Fable, Opus and Sonnet are lanes at all five claude efforts and Gemini 3.8 Flash
-   at all three agy efforts (Haiku takes none; grok is high only until a paid probe),
-   every Claude lane model reaches its rows, and the report reads the per-effort AA
-   rows. 20 and 21 are closed into them. Orin's wizard run (item 2) waits on both.
+3. **Tickets 25 and 19 are implemented on this branch** (2026-09-12, `2204034` and
+   `caa7b60`), from Orin's first full wizard run, which wrote nothing; 20 and 21 are
+   closed into them. Both wait on Orin's review in the wizard run of item 2.
+   25 is the wizard and its page: tier marks start empty (T1 still opens with every
+   open lane ticked, since what is left must take tier 1), tier pages hide lanes not
+   carried and lanes a higher tier took, a review page after T1, a routing
+   description panel, a facts-only start page, and quoted board descriptions and
+   zoom on the benchmark page (`assets/boards.json`). 19 is lanes and data: Fable,
+   Opus and Sonnet are lanes at all five claude efforts and Gemini 3.8 Flash at all
+   three agy efforts, 43 lanes in all (Haiku takes no effort; grok is high only until
+   a paid probe), every Claude lane model reaches its rows, and the report reads the
+   per-effort AA rows. Open limits: the carry rule never proposes an agy flash lane
+   off, because each agy effort is a separate model name. The branches
+   `t19-efforts-and-rows` and `t25-wizard-pages` and their worktrees are merged here
+   and can be removed.
 
 **Waiting on Orin** (nothing else blocks on these):
 
