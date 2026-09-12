@@ -46,4 +46,18 @@ Follow-ups found in the proof:
 
 - The runner grades the worker's own marker, and the nonce is in the brief, so a worker could report it without submitting the form. Today the Playwright snapshots are the only proof. A later change could have the runner look for the nonce in the snapshots.
 - A worker's FAIL reason is a claim like any other; grok's was invented. Read the run's transcript before a reason becomes a diagnosis.
-- agy's `playwright` server is `npx -y @playwright/mcp@latest` with no `--isolated` and no output directory, so it does not yet follow the setup rules in the research file.
+- agy's `playwright` server is `npx -y @playwright/mcp@latest` with no `--isolated` and no output directory, so it does not yet follow the setup rules in the research file. Fixed 2026-09-12.
+
+## Retest, 2026-09-12 (Mac)
+
+Orin added a `playwright` server following the setup rules to claude, grok and agy on both machines. The disposable probe was then re-run for agy and grok (`browser_probes.py --only agy,grok --probe disposable`), and codex and claude were investigated directly.
+
+| harness | CLI version | probe | result | what it rests on |
+|---|---|---|---|---|
+| agy | 1.2.2 | disposable | PASS | httpbin echoed `"custname": "4bba57ad8d70"`, the run's nonce, in Playwright's own snapshot |
+| grok | 1.0.30 | disposable | FAIL, cause found | the read-only sandbox kills every stdio MCP server; see ticket 04 |
+| codex | 0.154.0 | disposable | PASS outside the dispatch path | a delegate-owned `CODEX_HOME`; `browser_navigate` completed, snapshots at 19:16:50 and 19:17:00 show "Example Domain"; see ticket 03 |
+| claude | native | disposable | not retested | the server is configured, but a session must restart before a native worker sees it; see ticket 02 |
+
+The two follow-up rules from the baseline held up. agy's and codex's passes were each checked against Playwright's page snapshots, not the worker's marker. grok's worker again gave a reason it could not know — "Playwright MCP handshake failed" appears in its events only as streaming deltas of its own text — although this time the underlying failure was real, as grok's debug log showed.
+

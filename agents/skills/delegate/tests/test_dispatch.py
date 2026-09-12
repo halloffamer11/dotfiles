@@ -105,11 +105,17 @@ exec /usr/bin/git "$@"
     ledger_path = os.path.join(root_dir, "ledger.jsonl")
     cache_path = os.path.join(root_dir, "usage.json")
 
+    # A codex home of delegate's own changes the codex argv, so point the tests
+    # at one that does not exist. The machine running the suite may have a real
+    # home at the default path, and the argv cases must not depend on that.
+    codex_home_dir = os.path.join(root_dir, "codex-home")
+
     base_env = dict(os.environ)
     base_env["PATH"] = os.pathsep.join([fake_bin, "/bin", "/usr/bin"])
     base_env["DELEGATE_LEDGER"] = ledger_path
     base_env["DELEGATE_CACHE"] = cache_path
     base_env["ADS_DIR"] = ads_dir
+    base_env["DELEGATE_CODEX_HOME"] = codex_home_dir
 
     return {
         "config_dir": config_dir,
@@ -467,6 +473,29 @@ def main():
         argv9a = json.load(open(os.path.join(dir9a, "argv.json")))
         exp9a = ["--model", "gpt-5.6-terra", "--effort", "high", "--timeout", "25m", "--read-only", "--ignore-user-config", "--skip-git-repo-check"]
         ok9a = all(x in argv9a for x in exp9a)
+
+        # 9a2: with a codex home of delegate's own, the run points CODEX_HOME at
+        # it and drops --ignore-user-config. The worker then reads that home's
+        # config alone — one MCP server, the disposable browser — and nothing in
+        # ~/.codex: no plugins, no Gmail, no hooks, no AGENTS.md.
+        delegate_codex_home = os.path.join(tmpdir, "delegate-codex-home")
+        os.makedirs(delegate_codex_home, exist_ok=True)
+        with open(os.path.join(delegate_codex_home, "config.toml"), "w") as f:
+            f.write('approvals_reviewer = "auto_review"\n\n[mcp_servers.playwright]\ncommand = "npx"\nargs = []\n')
+        res9a2 = run_dispatch(
+            t_env,
+            ["--lane", "terra-high@codex", "--class", "impl", "--brief", b9, "--cwd", cwd],
+            extra_env={"DELEGATE_CODEX_HOME": delegate_codex_home},
+        )
+        dir9a2 = parse_run_dir_from_stdout(res9a2.stdout)
+        argv9a2 = json.load(open(os.path.join(dir9a2, "argv.json")))
+        env9a2 = json.load(open(os.path.join(dir9a2, "env.json")))
+        ok9a2 = (
+            "--ignore-user-config" not in argv9a2 and
+            "--skip-git-repo-check" in argv9a2 and
+            env9a2.get("CODEX_HOME") == delegate_codex_home
+        )
+        record("9a2. codex home replaces --ignore-user-config", ok9a2, f"argv={argv9a2} env={env9a2}")
 
         # 9b: terra-high@codex with --effort low
         res9b = run_dispatch(t_env, ["--lane", "terra-high@codex", "--class", "impl", "--brief", b9, "--cwd", cwd, "--effort", "low"])

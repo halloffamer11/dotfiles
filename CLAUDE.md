@@ -28,10 +28,18 @@ path lets workers use a browser a harness already has — a disposable browser
 everywhere, and the Helium "GenAI" agent profile through the Playwright extension — on
 the Mac and omarchy. No new config file, flag or ranking change; machine setup happens
 in conversation with Orin. Ticket 01 is done: the runner `scripts/browser_probes.py`,
-the prompt changes, and the Mac baseline table (agy's disposable row passes; every
-other row fails, as expected before 02-06). Next are 02-04. Ticket 02 predates
-ticket 22: claude lanes are now native and never use the relay it targets, so it
-needs rescoping before anyone builds it (01's notes). Facts and setup rules:
+the prompt changes, and the Mac baseline table, with a 2026-09-12 retest beneath it.
+
+State after 2026-09-12, each row proven against Playwright's own snapshots rather
+than a worker's marker: **agy** passes; **codex** passes through a home of
+delegate's own (`~/.local/share/delegate/codex-home`, built by
+`make delegate-codex-home`), which holds one MCP server, so a worker never sees
+Gmail, `codex-cli`, `node_repl`, hooks or `~/.codex/AGENTS.md` — ticket 03's code
+is done and waits on that setup plus an end-to-end probe; **grok** has a browser
+on write runs only, because its built-in `read-only` sandbox kills every stdio MCP
+server on macOS, and the proven fix is a custom sandbox profile, which needs a
+relay change (ticket 04); **claude** lanes are native since ticket 22, so ticket 02
+is rescoped to the session's own config and a restart. Facts and setup rules:
 `.scratch/delegate-browser/research/2026-09-10-browser-routes.md`.
 
 **Ticket 22 landed on `main` as `71e285c`** (2026-09-11), on top of `ea5430b`: each

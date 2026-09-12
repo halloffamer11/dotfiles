@@ -6,6 +6,7 @@
 #   make configs     # restow home-target config packages (what `dots` does, minus git pull)
 #   make skills      # restow authored skills into each harness dir + brew-provided skill links + per-file agent links
 #   make externals   # (re)install externally-managed skills via the skills CLI
+#   make delegate-codex-home  # delegate's own CODEX_HOME: the disposable browser and nothing else
 #   make update      # upgrade brew packages and externally-managed skills
 #   make audiotee    # build the audiotee system-audio capture binary into ~/.local/bin (Swift 5.9+, macOS 14.2+)
 #   make mictee      # build the mictee mic capture binary into ~/.local/bin (Swift)
@@ -34,13 +35,22 @@ CONFIG_PACKAGES ?= borders claude delegate ghostty git herdr nvim starship wezte
 HARNESS_SKILL_DIRS ?= $(HOME)/.claude/skills $(HOME)/.agents/skills $(HOME)/.kiro/skills
 EXTRA_BREWFILES ?= 
 
-.PHONY: bootstrap brew configs skills externals update audiotee mictee test-recorder
+.PHONY: bootstrap brew configs skills externals update audiotee mictee test-recorder delegate-codex-home
 
-bootstrap: brew configs skills externals audiotee mictee
+bootstrap: brew configs skills externals audiotee mictee delegate-codex-home
 
 brew:
 	brew bundle --file=$(CURDIR)/Brewfile
 	@for f in $(EXTRA_BREWFILES); do brew bundle --file=$$f; done
+
+delegate-codex-home:
+	mkdir -p $(HOME)/.local/share/delegate/codex-home $(HOME)/.cache/playwright-mcp
+	sed 's|@HOME@|$(HOME)|g' $(CURDIR)/agents/skills/delegate/assets/codex-home/config.toml > $(HOME)/.local/share/delegate/codex-home/config.toml
+	@if [ -f $(HOME)/.codex/auth.json ]; then \
+		ln -sfn $(HOME)/.codex/auth.json $(HOME)/.local/share/delegate/codex-home/auth.json; \
+	else \
+		echo "NOTE: ~/.codex/auth.json is absent — run 'codex login', then 'make delegate-codex-home' again"; \
+	fi
 
 configs:
 	stow -d $(CURDIR)/stow -t $(HOME) -R $(CONFIG_PACKAGES)
