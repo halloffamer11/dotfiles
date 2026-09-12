@@ -201,13 +201,18 @@ try:
         before = page[:index]
         return len(re.findall(r"<details\b", before)) > before.count("</details>")
 
-    tables = [m.start() for m in re.finditer(r"<table\b", page)]
+    # The comparison of boards (ticket 25) is the key to the plots, not
+    # evidence, so it is the one table left open, between the plots and the
+    # collapsed evidence.
+    tables = [m.start() for m in re.finditer(r"<table\b", page) if not page.startswith('<table class="compare"', m.start())]
     kinds = set(re.findall(r'<table class="(\w+)"', page))
-    record("every table is collapsed until asked for, under the plots",
-           kinds == {"sweep", "rows", "catalog", "scores"}
+    compare = page.find('<table class="compare"')
+    record("every evidence table is collapsed until asked for, under the plots and the board comparison",
+           kinds == {"sweep", "rows", "catalog", "scores", "compare"}
            and all(inside_details(i) for i in tables)
+           and not inside_details(compare)
            and not re.search(r"<details[^>]*\bopen\b", page)
-           and page.find('id="plots"') < page.find("<details"),
+           and page.find('id="plots"') < compare < page.find("<details"),
            f"kinds={kinds} tables={len(tables)}")
 except Exception as e:
     record("every table is collapsed until asked for, under the plots", False, repr(e))
@@ -346,7 +351,8 @@ except Exception as e:
 
 try:
     page = bench_page.render(None, ASTRA, SWEEP)
-    body = page[page.find('<table class="sweep">'):page.find("</table>")]
+    start = page.find('<table class="sweep">')
+    body = page[start:page.find("</table>", start)]
     cells = re.findall(r'<td class="num step">([^<]*)</td>', body)
     record("the sweep table gives each step's score and cost delta",
            "+3.6%" in cells and "0.0%" in cells
@@ -582,6 +588,112 @@ try:
                "(real data or node not present; skipped)")
 except Exception as e:
     record("the real data draws every board with no overprinted label", False, repr(e))
+
+
+# --- ticket 25: what each board measures, and zoom --------------------------------
+import effort  # noqa: E402
+
+FIXTURES = os.path.join(HERE, "fixtures")
+
+
+def every_known_row():
+    """The AA rows off the fixture page, the Terminal-Bench fixture, and the
+    swerb rows when the real data is present: one row set per approved source."""
+    with open(os.path.join(FIXTURES, "real_aa_model_page_sample.html"), "rb") as f:
+        _packet, rows = effort.aa_extract(f.read(), observed="2026-09-11")
+    with open(os.path.join(FIXTURES, "tbench-accepted.json"), encoding="utf-8") as f:
+        rows = rows + json.load(f)
+    for name in ("aa-accepted.json", "tbench-accepted.json", "swerb-accepted.json"):
+        path = os.path.join(REAL_DATA, name)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as f:
+                rows = rows + json.load(f)
+    return rows
+
+
+try:
+    rows = every_known_row()
+    data = bench_page.plot_data(rows, catalog.load_json(STOWED_LANES) if os.path.isfile(STOWED_LANES) else LANES)
+    missing = [(b["source"], b["benchmark"]) for b in data["boards"]
+               if not b["about"] or not b["about"]["measures"] or not b["about"]["url"]
+               or not b["about"]["url"].startswith("https://")]
+    sources = {b["source"] for b in data["boards"]}
+    record("every board on the page has a description and a source URL",
+           not missing and {"aa", "tbench"} <= sources and len(data["boards"]) >= 10
+           and all(b["aboutMissing"] is None for b in data["boards"]),
+           f"missing={missing} sources={sources}")
+    with open(bench_page.BOARDS_PATH, encoding="utf-8") as f:
+        described = json.load(f)["boards"]
+    cited = [(s, n) for s, boards in described.items() for n, e in boards.items()
+             if not (e.get("url") and e.get("fetched") and e.get("measures") and e.get("score"))]
+    record("every description on file names its page and the day it was fetched",
+           not cited, repr(cited))
+except Exception as e:
+    record("every board on the page has a description and a source URL", False, repr(e))
+
+try:
+    page = bench_page.render(None, ASTRA, SWEEP + [dict(SWEEP[0], source="t", benchmark="Nobody's board")])
+    data = data_of(page)
+    tb = board_named(data, "Terminal-Bench 4.0")
+    stranger = board_named(data, "Nobody's board")
+    compare = page[page.find('<table class="compare"'):]
+    compare = compare[:compare.find("</table>")]
+    record("a board with no methodology page on file says so, and never borrows a description",
+           tb["about"]["url"].startswith("https://") and "terminal" in tb["about"]["measures"]
+           and stranger["about"] is None and stranger["aboutMissing"] == bench_page.NO_ABOUT
+           and bench_page.board_about("t", "Nobody's board") is None,
+           f"tb={tb['about']} stranger={stranger['about']}")
+    record("the comparison table lists every board with what it measures, scale and cost basis",
+           compare.count("<tr>") == len(data["boards"]) + 1
+           and all(_h in compare for _h in ("what it measures", "scale", "cost basis"))
+           and tb["about"]["measures"].replace("'", "&#x27;") in compare
+           and "whole run" in compare and bench_page._esc(bench_page.NO_ABOUT) in compare,
+           compare[:600])
+except Exception as e:
+    record("a board with no methodology page on file says so, and never borrows a description",
+           False, repr(e))
+
+try:
+    script = open(bench_page.SCRIPT_PATH, encoding="utf-8").read()
+    record("selecting a board redraws its description, and the reset button is never hidden",
+           "drawAbout(board)" in script and "reset.hidden" not in script
+           and '"wheel"' in script and "passive: false" in script)
+except Exception as e:
+    record("selecting a board redraws its description, and the reset button is never hidden", False, repr(e))
+
+ZOOM_DRIVER = r"""
+const fs = require("fs"), vm = require("vm");
+const mod = { exports: {} };
+vm.runInNewContext(fs.readFileSync(process.argv[2], "utf8"), { module: mod });
+const P = mod.exports;
+const d = { xlo: 1, xhi: 1000, ylo: 0, yhi: 100 };
+const p = { x0: P.PAD.l, x1: P.W - P.PAD.r, y0: P.PAD.t, y1: P.H - P.PAD.b };
+const x = p.x0 + 0.3 * (p.x1 - p.x0), y = p.y0 + 0.6 * (p.y1 - p.y0);
+const at = (dom) => [Math.log10(dom.xlo) + 0.3 * (Math.log10(dom.xhi) - Math.log10(dom.xlo)),
+                     dom.yhi - 0.6 * (dom.yhi - dom.ylo)];
+const zin = P.zoomAbout(d, p, x, y, 0.5), zout = P.zoomAbout(d, p, x, y, 2);
+const asDomain = (z) => ({ xlo: z.c0, xhi: z.c1, ylo: z.s0, yhi: z.s1 });
+process.stdout.write(JSON.stringify({ before: at(d), after: at(asDomain(zin)),
+  spanIn: [Math.log10(zin.c1 / zin.c0), zin.s1 - zin.s0], coversIn: P.covers(zin, d), coversOut: P.covers(zout, d) }));
+"""
+
+try:
+    if not NODE:
+        record("the wheel zooms about the pointer, and zooming out past the full view is the full view", True,
+               "(node not on PATH; skipped)")
+    else:
+        with tempfile.TemporaryDirectory() as td:
+            driver = os.path.join(td, "zoom.js")
+            with open(driver, "w", encoding="utf-8") as f:
+                f.write(ZOOM_DRIVER)
+            out = json.loads(subprocess.run([NODE, driver, bench_page.SCRIPT_PATH], capture_output=True,
+                                            text=True, timeout=60, check=True).stdout)
+        same = all(abs(a - b) < 1e-9 for a, b in zip(out["before"], out["after"]))
+        record("the wheel zooms about the pointer, and zooming out past the full view is the full view",
+               same and abs(out["spanIn"][0] - 1.5) < 1e-9 and abs(out["spanIn"][1] - 50) < 1e-9
+               and not out["coversIn"] and out["coversOut"], repr(out))
+except Exception as e:
+    record("the wheel zooms about the pointer, and zooming out past the full view is the full view", False, repr(e))
 
 
 sys.exit(1 if fails else 0)

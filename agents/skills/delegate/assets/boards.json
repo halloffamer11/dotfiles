@@ -1,0 +1,126 @@
+{
+  "version": "delegate-boards.v1",
+  "note": "What each benchmark board measures, for the benchmark page (ticket 25). `measures`, `tasks` and `score` are quoted from the page named in `url`, fetched on `fetched`; a quote may be cut at a sentence boundary but is never reworded. `scale` says what the number on the plot is, read from the row's own field. `cost` is the basis in sources.json. `speaks_to` is the wizard's reading of the quoted description against the job classes, not the source's claim. A board with no entry is shown with no description and says so.",
+  "boards": {
+    "aa": {
+      "Artificial Analysis Intelligence Index": {
+        "url": "https://artificialanalysis.ai/methodology/intelligence-benchmarking",
+        "fetched": "2026-09-12",
+        "measures": "Artificial Analysis Intelligence Index combines a comprehensive suite of evaluation datasets to assess language model capabilities across reasoning, knowledge, maths and programming.",
+        "tasks": "Artificial Analysis Intelligence Index v4.3 incorporates 10 evaluations: AA-Briefcase, GDPval-AA v2, AutomationBench-AA, Terminal-Bench v4.0, SciCode, AA-LCR v1.1, AA-Omniscience, Humanity's Last Exam, GDP.pdf, CritPt.",
+        "score": "Intelligence Index is calculated as a weighted average across four categories: Agents (30%), Coding (20%), Scientific Reasoning (20%) and General (30%).",
+        "scale": "index, 0 to 100",
+        "cost": "per task: the cost of running the Intelligence Index",
+        "speaks_to": "no one class: a composite, shown and never counted by the carry rule"
+      },
+      "AutomationBench": {
+        "url": "https://artificialanalysis.ai/methodology/intelligence-benchmarking",
+        "fetched": "2026-09-12",
+        "measures": "It tests whether models can complete realistic SaaS workflows that span multiple simulated business apps, using REST APIs as the tool interface.",
+        "tasks": "We evaluate a private 657-task held-out split from AutomationBench dataset version 1.0.6. The tasks cover six business domains: Finance, HR, Marketing, Operations, Sales, and Support.",
+        "score": "For the headline score, a task receives 0 if the model violates any guardrail. If no guardrails are violated, the task receives the percentage of objectives the model completed. Errored tasks also score 0.",
+        "scale": "share of objectives completed, 0 to 1",
+        "cost": "per task: the Intelligence Index's cost, the same on every AA board",
+        "speaks_to": "mechanical and impl: multi-step tool calls against a spec"
+      },
+      "AA-LCR": {
+        "url": "https://artificialanalysis.ai/methodology/intelligence-benchmarking",
+        "fetched": "2026-09-12",
+        "measures": "Evaluate long context performance through testing reasoning capabilities across multiple long documents (~100k tokens measured using cl100k_base tokenizer)",
+        "tasks": "100 hard text-based questions spanning 7 categories of documents (Company Reports, Industry Reports, Government Consultations, Academia, Legal, Marketing Materials, and Survey Reports)",
+        "score": "Model responses are evaluated using GPT-5.6 Luna (medium) as an equality checker with pass@1 scoring",
+        "scale": "share of questions answered correctly, 0 to 1",
+        "cost": "per task: the Intelligence Index's cost, the same on every AA board",
+        "speaks_to": "scout and review: reasoning over a large body of text"
+      },
+      "Omniscience": {
+        "url": "https://artificialanalysis.ai/methodology/intelligence-benchmarking",
+        "fetched": "2026-09-12",
+        "measures": "AA-Omniscience is a knowledge and hallucination benchmark that measures factual reliability, rewards precise knowledge, and penalizes incorrect guesses or hallucinations.",
+        "tasks": "The benchmark consists of 6,000 questions covering 42 topics, including Business, Humanities and Social Sciences, Health, Law, Software Engineering, and Science, Engineering and Mathematics.",
+        "score": "Models are scored using the AA-Omniscience Index, which assigns points for correct answers, subtracts points for hallucinated responses, and keeps abstentions neutral, rewarding abstentions over incorrect guesses",
+        "scale": "AA-Omniscience Index, below zero when wrong answers outnumber right ones",
+        "cost": "per task: the Intelligence Index's cost, the same on every AA board",
+        "speaks_to": "scout and review: a wrong fact stated with confidence is the failure it counts"
+      },
+      "GDPval": {
+        "url": "https://artificialanalysis.ai/methodology/intelligence-benchmarking",
+        "fetched": "2026-09-12",
+        "measures": "GDPval-AA v2 is Artificial Analysis' evaluation framework for OpenAI's GDPval dataset. It assesses language models' capabilities on economically valuable tasks, covering 44 occupations across key sectors contributing to GDP in the United States.",
+        "tasks": "Task Submission – Models are given a task and required to produce one or more files.",
+        "score": "Pairwise Grading – A judge sampled from a panel of three frontier LLM judges blindly ranks two submissions for the same task, each created by a different model. The Elo scale is anchored to human expert deliverables at 1000.",
+        "scale": "Elo normalized as clamp((Elo - 500) / 2000), 0 to 1",
+        "cost": "per task: the Intelligence Index's cost, the same on every AA board",
+        "speaks_to": "impl: finished deliverables judged against each other, not tests"
+      },
+      "Terminal-Bench 2.1": {
+        "url": "https://artificialanalysis.ai/methodology/intelligence-benchmarking",
+        "fetched": "2026-09-12",
+        "measures": "A verified refresh of Terminal-Bench, developed by Stanford University researchers, the Laude Institute, and the open source community. Keeps the same 89 curated tasks across software engineering, system administration, data processing, model training, and security",
+        "tasks": "We evaluate the full Terminal-Bench v2.1 dataset (89 tasks) using the Terminus 2 agent harness in an E2B sandbox environment, with pass@1 scoring averaged over 3 repeats per task",
+        "score": "Each task ships with a verification suite that the agent must satisfy by interacting with the terminal — tasks are considered successful only if every test passes",
+        "scale": "share of tasks passed, 0 to 1",
+        "cost": "per task: the Intelligence Index's cost, the same on every AA board",
+        "speaks_to": "impl and hard-impl: agentic work in a shell, graded by tests"
+      },
+      "GPQA Diamond": {
+        "url": "https://artificialanalysis.ai/methodology/intelligence-benchmarking",
+        "fetched": "2026-09-12",
+        "measures": "Scientific knowledge and reasoning benchmark",
+        "tasks": "198 questions covering biology, physics and chemistry - we test the GPQA Diamond subset of the full GPQA dataset (448 questions total), which was defined by the original authors as the highest quality subset, where both experts answer correctly and the majority of non-experts answer incorrectly",
+        "score": "4 option multiple choice format. Regex-based answer extraction with pass@1 scoring",
+        "scale": "share of questions answered correctly, 0 to 1",
+        "cost": "per task: the Intelligence Index's cost, the same on every AA board",
+        "speaks_to": "review, at most: reasoning with no tools and no code"
+      },
+      "MMMU-Pro": {
+        "url": "https://artificialanalysis.ai/methodology/intelligence-benchmarking",
+        "fetched": "2026-09-12",
+        "measures": "An enhanced MMMU benchmark that eliminates shortcuts and guessing strategies to more rigorously test multimodal models across 30 academic disciplines",
+        "tasks": "1,730 questions",
+        "score": "Multiple Choice (10 options). Regex extraction, pass@1",
+        "scale": "share of questions answered correctly, 0 to 1",
+        "cost": "per task: the Intelligence Index's cost, the same on every AA board",
+        "speaks_to": "none: it reads images, and a delegate job is text"
+      },
+      "IFBench": {
+        "url": "https://artificialanalysis.ai/methodology/intelligence-benchmarking",
+        "fetched": "2026-09-12",
+        "measures": "A benchmark that evaluates a model's ability to follow precise instructions in a single turn. It tests a wide range of skills, including counting, formatting, and sentence manipulation.",
+        "tasks": "Uses the single-turn IFBench dataset, which contains 294 questions",
+        "score": "Our score represents the prompt level accuracy (average across all questions and repeats)",
+        "scale": "prompt-level accuracy, 0 to 1",
+        "cost": "per task: the Intelligence Index's cost, the same on every AA board",
+        "speaks_to": "mechanical: doing exactly what the brief says"
+      }
+    },
+    "tbench": {
+      "Terminal-Bench 4.0": {
+        "url": "https://hub.harborframework.com/datasets/terminal-bench/terminal-bench/4?tab=tasks",
+        "also": [
+          "https://www.tbench.ai/leaderboard/terminal-bench/4-0-0",
+          "https://github.com/harbor-framework/terminal-bench"
+        ],
+        "fetched": "2026-09-12",
+        "measures": "Terminal-Bench is a benchmark for measuring agents' abilities to complete tasks using a terminal.",
+        "tasks": "Displaying 66 of 66 tasks",
+        "score": "Resolution rate of Terminal-Bench 4.0 tasks. The whiskers span the 95% confidence interval.",
+        "scale": "resolution rate, percent",
+        "cost": "whole run, not per task; the leaderboard does not say so, and sources.json records it",
+        "speaks_to": "impl and hard-impl: an agent and a model scored as a pair (\"To test an agent and model, pass --agent and --model\")"
+      }
+    },
+    "swerb": {
+      "SWE Refactor Bench": {
+        "url": "https://lab.einsia.ai/swe-refactor-bench/",
+        "fetched": "2026-09-12",
+        "measures": "Can a coding agent move a whole repository to a new stack — another language, framework, platform or build system — and change nothing about what it does?",
+        "tasks": "20 whole-repository migrations",
+        "score": "S(τ) = 1[migration happened] · 1[every check passes] · (0.4 + 0.6 · s/6) ∈ {0} ∪ [0.4, 1]. Behavioural Tests: 130,118 checks recorded from the original. All of them, or the run scores zero.",
+        "scale": "score out of 100",
+        "cost": "per task",
+        "speaks_to": "hard-impl: hours-long work on a whole repository"
+      }
+    }
+  }
+}

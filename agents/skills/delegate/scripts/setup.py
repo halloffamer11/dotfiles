@@ -273,7 +273,23 @@ def main(argv=None):
         discovered = read_discovery(args)
         lanes_doc, routing_doc, lanes_path, routing_path = load_or_propose(config_dir, discovered)
         plain = args.plain or not sys.stdin.isatty() or not sys.stdout.isatty()
+        # Discovery shells out to three harness CLIs. It reports drift at the
+        # moment the human is already deciding tiers, and it must never be
+        # able to stop them getting there: any failure becomes the reason
+        # string the start facts print. Both interfaces print the same facts.
+        if args.no_discover:
+            discovery_data = "skipped (--no-discover)"
+        else:
+            try:
+                discovery_data = discover.discover(lanes_doc, fixture_dir=args.fixture_dir)
+            except Exception as e:
+                discovery_data = str(e)
         if plain:
+            # the prompt-driven interface writes no benchmark page; it prints
+            # the report instead, so the page line says (not written)
+            for line in setup_tui.start_facts(lanes_path, routing_path, None, discovery_data,
+                                              width=10_000):
+                print(line)
             if args.effort_rows:
                 # The pre-screen is a selectable screen; there is no prompt-driven
                 # form of it yet. Saying so is the point: the instruction a human
@@ -312,17 +328,6 @@ def main(argv=None):
                 page_path = None
                 page_message = f"benchmark page: {e}"
                 initial_message = f"{initial_message}; {page_message}" if initial_message else page_message
-            # Discovery shells out to three harness CLIs. It reports drift at the
-            # moment the human is already deciding tiers, and it must never be
-            # able to stop them getting there: any failure becomes the reason
-            # string the start screen prints.
-            if args.no_discover:
-                discovery_data = "skipped (--no-discover)"
-            else:
-                try:
-                    discovery_data = discover.discover(lanes_doc, fixture_dir=args.fixture_dir)
-                except Exception as e:
-                    discovery_data = str(e)
             wizard = setup_tui.Wizard(
                 lanes_doc, routing_doc, bench_data, discovered,
                 lanes_path, routing_path, initial_message,

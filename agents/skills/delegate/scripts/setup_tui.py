@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Selectable terminal setup UI for delegate catalogs."""
 import copy
+import textwrap
 
 from bench import EPOCH_BENCHMARKS
 from catalog import CLASSES, EFFORTS, HARNESSES, resolve_published_model
@@ -9,7 +10,6 @@ from catalog import CLASSES, EFFORTS, HARNESSES, resolve_published_model
 # column 79 is clipped. Keep each one under that; a legend cut mid-sentence
 # explains nothing.
 TIER_ONELINER = "Tier: capability 1-4; a class takes lanes from its floor up to its ceiling."
-PACE_LEGEND = "pace = unspent quota vs time left in the week. Above 1.0 it will expire unused."
 CLASSES_LEGEND = "classes: each class has a floor and ceiling tier (1-4)."
 # One gesture flips the box, and it is the same gesture on the carry screen and
 # on the tier screens, so each footer names it the same way. The box means
@@ -17,10 +17,10 @@ CLASSES_LEGEND = "classes: each class has a floor and ceiling tier (1-4)."
 # key that moves it never changes.
 FLIP_KEYS = "space/x: flip"
 TIER_FOOTER = f"↑/↓/j/k: move  {FLIP_KEYS}  enter: next  b: back  o: bench  q: quit"
-# Both of these describe a line the human cannot decide anything about, so each
-# one is earned by such a line being on screen; neither is standing furniture.
-TIER_ASSIGNED_LEGEND = "dim [n]: already taken at tier n, so that line has no decision left."
-TIER_OFF_LEGEND = "off: not carried — you said so on the carry screen. It still takes a tier."
+REVIEW_FOOTER = "↑/↓/j/k: move  1-4: set tier  enter: next  b: back  o: bench  q: quit"
+ROUTING_FOOTER = "↑/↓ or j/k: move  +/-: adjust  enter: confirm  b: back  q: quit"
+# The review page's one box per tier, best first, the way the tier pages ran.
+REVIEW_COLUMNS = ("T4", "T3", "T2", "T1")
 PRESCREEN_FOOTER = f"↑/↓ or j/k: move  {FLIP_KEYS}  enter: continue  b: back  q: quit"
 NO_DATA_MESSAGE = "No per-effort data was supplied, so nothing else could be judged."
 CONFIRM_OFF_LEGEND = "off: written with enabled: false.  On lanes omit the key."
@@ -38,6 +38,92 @@ NO_ROWS_REASON = "no rows for this lane"
 NO_DATA_REASON = "no per-effort data"
 NOT_DOMINATED_REASON = "not dominated"
 ULTRA_REASON = "ultra, never carried"
+
+
+def hidden_legend(taken, off):
+    """One line naming what a tier page left out, or "" when it left out nothing.
+
+    A tier page lists only the lanes still open to it (ticket 25). A lane that
+    vanished with no word would read as a lane lost, so the page counts them.
+    """
+    parts = []
+    if taken:
+        parts.append(f"{taken} taken at a higher tier")
+    if off:
+        parts.append(f"{off} not carried")
+    return f"Not listed: {', '.join(parts)}." if parts else ""
+
+
+def fit_line(line, width=80):
+    """One width rule for a line of prose: the renderer clips at width - 1."""
+    room = max(4, width - 1)
+    return line if len(line) <= room else line[: room - 3] + "..."
+
+
+def list_line(label, items, width=80, always_count=False):
+    """`label (n): a, b (+k more)`, filled to the width and no further.
+
+    `always_count` keeps the count on a list of one, for a block of lines
+    read together — the tier map — where a line without it reads as a
+    different kind of line.
+    """
+    room = max(4, width - 1)
+    total = len(items)
+    if total == 1 and not always_count:
+        return fit_line(f"{label}: {items[0]}", width)
+    prefix = f"{label} ({total}): "
+    chosen = []
+    for index, item in enumerate(items):
+        remaining = total - (index + 1)
+        suffix = f" (+{remaining} more)" if remaining else ""
+        if len(prefix + ", ".join(chosen + [item]) + suffix) > room and chosen:
+            break
+        chosen.append(item)
+    remaining = total - len(chosen)
+    suffix = f" (+{remaining} more)" if remaining else ""
+    return fit_line(prefix + ", ".join(chosen) + suffix, width)
+
+
+def discovery_notices(discovery, width=80):
+    """Drift notices for the start page and for `--plain`.
+
+    `discovery` is either the dict `discover.discover` returns or a string
+    saying why it did not run. Discovery shells out to three harness CLIs, so
+    it must never be able to stop the wizard: a notice is an aid, not a gate.
+    A silent absence and a failed probe must not look the same, so the
+    no-drift case says so in a line of its own.
+    """
+    if discovery is None:
+        return [fit_line("Model discovery: did not run", width)]
+    if isinstance(discovery, str):
+        return [fit_line(f"Model discovery: did not run: {discovery}", width)]
+    unmapped = discovery.get("unmapped") or []
+    retired = discovery.get("retired") or []
+    if not unmapped and not retired:
+        return [fit_line("Model discovery: no drift", width)]
+    notices = []
+    if unmapped:
+        notices.append(list_line("Models with no lane", [
+            f"{m.get('harness', '')} {m.get('slug', '')}".strip() for m in unmapped
+        ], width))
+    if retired:
+        notices.append(list_line("Lanes with retired models", [
+            f"{r.get('lane', '')} ({r.get('model', '')})" for r in retired
+        ], width))
+    return notices
+
+
+def start_facts(lanes_path, routing_path, page_path, discovery, width=80):
+    """What the start page says, and what `--plain` prints first: the two files
+    it will write, the benchmark page, and the discovery notices. Facts only —
+    the terms are defined in CONTEXT.md, and the people who run this know them
+    (Orin, 2026-09-11; ticket 25)."""
+    return [
+        fit_line(f"Will write {lanes_path}", width),
+        fit_line(f"Will write {routing_path}", width),
+        fit_line(f"Benchmark page: {page_path or '(not written)'}", width),
+        *discovery_notices(discovery, width),
+    ]
 
 
 def dominated_reason(effort, source):
@@ -261,6 +347,7 @@ STEPS = (
     ("tier3", "T3"),
     ("tier2", "T2"),
     ("tier1", "T1"),
+    ("review", "review"),
     ("routing", "routing"),
     ("confirm", "confirm"),
 )
@@ -289,11 +376,13 @@ class Wizard:
         self.message = initial_message or ("benchmark data unavailable" if bench is None else "")
         self._result = None
         self._assigned = {}
-        self._marks = {
-            tier: {name for name, lane in lanes_doc["lanes"].items()
-                   if lane["tier"] == tier}
-            for tier in range(1, 5)
-        }
+        # Every tier page opens with nothing marked, whatever lanes.json holds
+        # (Orin, 2026-09-12). Marks filled from the incoming tiers put the
+        # generated lanes' placeholder tiers on tier 4 already ticked, and enter
+        # assigned them: it read as the carry decisions carrying through.
+        self._marks = {tier: set() for tier in range(1, 5)}
+        self._review_order = []
+        self._width = 80
         _rows, self._unmatched = resolve_effort_rows(self.lanes_doc, effort_rows)
         proposals = propose_enabled(self.lanes_doc, effort_rows)
         self._enabled = {name: enabled for name, (enabled, _) in proposals.items()}
@@ -314,16 +403,27 @@ class Wizard:
         rec = self.bench.get("lanes", {}).get(lane_name)
         return rec["mean"] if rec else None
 
+    def _bench_order(self, name):
+        mean = self._mean(name)
+        return (mean is None, mean if mean is not None else 0, name)
+
+    def _carried(self):
+        return [name for name in self.lanes_doc["lanes"] if self._enabled[name]]
+
     def _tier_names(self):
-        active = [name for name in self.lanes_doc["lanes"] if name not in self._assigned]
-        active.sort(key=lambda name: (
-            self._mean(name) is None,
-            self._mean(name) if self._mean(name) is not None else 0,
-            name,
-        ))
-        dimmed = [name for name in self.lanes_doc["lanes"] if name in self._assigned]
-        dimmed.sort(key=lambda name: (-self._assigned[name], name))
-        return active, dimmed
+        """The lanes still open on a tier page: carried, and not taken by a
+        higher tier. A lane that is not is hidden, not dimmed (ticket 25): a
+        grey row that space still toggled was a decision offered twice."""
+        active = [name for name in self._carried() if name not in self._assigned]
+        active.sort(key=self._bench_order)
+        return active
+
+    def _final_tier(self, name):
+        """The tier written for a lane. A lane not carried is never asked about,
+        so it keeps the tier the catalog already has."""
+        if self._enabled[name] and name in self._assigned:
+            return self._assigned[name]
+        return self._original_lanes["lanes"][name]["tier"]
 
     def _enter_tier(self, tier):
         self.screen = "tier"
@@ -331,8 +431,25 @@ class Wizard:
         self.cursor = 0
         self.message = ""
         if tier == 1:
-            active, _ = self._tier_names()
-            self._marks[1].update(active)
+            # Whatever is still open takes tier 1, so the last page starts
+            # with every line ticked; this is the flow's rule, not lanes.json.
+            self._marks[1].update(self._tier_names())
+
+    def _enter_review(self):
+        self.screen = "review"
+        self.tier = None
+        self.cursor = 0
+        self.message = ""
+        # The order is fixed on arrival, best tier first: re-sorting as a digit
+        # moves a lane would carry the line out from under the cursor.
+        self._review_order = sorted(
+            (name for name in self._carried() if name in self._assigned),
+            key=lambda name: (-self._assigned[name], *self._bench_order(name)))
+
+    def _undo_tier(self, tier):
+        for name in list(self._assigned):
+            if self._assigned[name] == tier:
+                del self._assigned[name]
 
     def _enter_prescreen(self):
         self.screen = "prescreen"
@@ -352,7 +469,7 @@ class Wizard:
             self._enabled[name] = not self._enabled[name]
 
     def _active_name(self):
-        active, _ = self._tier_names()
+        active = self._tier_names()
         if not active:
             return None
         self.cursor = min(self.cursor, len(active) - 1)
@@ -365,7 +482,7 @@ class Wizard:
             self.screen = "quit"
             self._result = None
             return
-        if key == "o" and self.screen in ("start", "tier", "prescreen"):
+        if key == "o" and self.screen in ("start", "tier", "prescreen", "review"):
             return
         if self.screen == "start":
             self.screen = "discovery"
@@ -396,7 +513,7 @@ class Wizard:
                 self.message = ""
             return
         if self.screen == "tier":
-            active, _ = self._tier_names()
+            active = self._tier_names()
             if key == "up" and active:
                 self.cursor = (self.cursor - 1) % len(active)
             elif key == "down" and active:
@@ -413,7 +530,6 @@ class Wizard:
                     else:
                         self._marks[self.tier].add(name)
             elif key == "enter":
-                active, _ = self._tier_names()
                 if self.tier == 1 and any(name not in self._marks[1] for name in active):
                     self.message = "every lane needs a tier"
                     return
@@ -423,18 +539,29 @@ class Wizard:
                 if self.tier > 1:
                     self._enter_tier(self.tier - 1)
                 else:
-                    self.screen = "routing"
-                    self.tier = None
-                    self.cursor = 0
-                    self.message = ""
+                    self._enter_review()
             elif key == "b" and self.tier < 4:
                 previous = self.tier + 1
-                for name in list(self._assigned):
-                    if self._assigned[name] == previous:
-                        del self._assigned[name]
+                self._undo_tier(previous)
                 self._enter_tier(previous)
             elif key == "b" and self.tier == 4:
                 self._enter_prescreen()
+            return
+        if self.screen == "review":
+            names = self._review_order
+            if key == "up" and names:
+                self.cursor = (self.cursor - 1) % len(names)
+            elif key == "down" and names:
+                self.cursor = (self.cursor + 1) % len(names)
+            elif key in ("1", "2", "3", "4") and names:
+                self._assigned[names[min(self.cursor, len(names) - 1)]] = int(key)
+            elif key == "enter":
+                self.screen = "routing"
+                self.cursor = 0
+                self.message = ""
+            elif key == "b":
+                self._undo_tier(1)
+                self._enter_tier(1)
             return
         if self.screen == "routing":
             count = len(CLASSES) * 2 + 2
@@ -462,10 +589,8 @@ class Wizard:
                 self.cursor = 0
                 self.message = ""
             elif key == "b":
-                for name in list(self._assigned):
-                    if self._assigned[name] == 1:
-                        del self._assigned[name]
-                self._enter_tier(1)
+                # back to the review page, with every tier it holds intact
+                self._enter_review()
             return
         if self.screen == "confirm":
             # The list of what is about to be written is longer than a short
@@ -482,7 +607,7 @@ class Wizard:
             if key == "y":
                 result_lanes = copy.deepcopy(self._original_lanes)
                 for name, lane in result_lanes["lanes"].items():
-                    lane["tier"] = self._assigned[name]
+                    lane["tier"] = self._final_tier(name)
                     if not self._enabled[name]:
                         lane["enabled"] = False
                     else:
@@ -548,13 +673,15 @@ class Wizard:
         return values
 
     def _frame(self, screen, title, *, tier=None, columns=None, rows=None,
-               footer="", body=None, legend=None, elastic=""):
+               footer="", body=None, legend=None, elastic="", panel=None):
         return {
             "screen": screen, "title": title, "tier": tier,
             "columns": columns or [], "rows": rows or [],
             "footer": footer, "message": self.message,
             "body": body or [], "legend": legend or [],
             "steps": self._step_marker(), "elastic": elastic,
+            # paragraphs drawn beside the table, wrapped to the room it leaves
+            "panel": panel or [],
         }
 
     def _prescreen_legend(self):
@@ -570,7 +697,7 @@ class Wizard:
         if any(r in (NO_ROWS_REASON, NO_DATA_REASON) for r in reasons):
             lines.append(ABSENCE_LEGEND)
         # a `published_as` still owed to us shows up here and nowhere else
-        ignored = unmatched_message(self._unmatched) if self.effort_rows else ""
+        ignored = unmatched_message(self._unmatched, self._width - 1) if self.effort_rows else ""
         if ignored:
             lines.append(ignored)
         if any(r == ULTRA_REASON for r in reasons):
@@ -580,32 +707,31 @@ class Wizard:
         return lines
 
     def _tier_legend(self):
-        """Explain the lines on this screen that carry state instead of a choice.
+        """Say what this page left out, then the tier definition.
 
-        `[n]` and `off` are both facts arriving from an earlier screen, not
-        controls, and a reader has to be able to tell them from the `[x]` this
-        screen does answer. Each line is earned by such a row being on screen,
-        the way the pre-screen legend is: standing furniture explaining a case
-        that is not there costs the rows their room on a short window.
+        A lane taken at a higher tier and a lane not carried are both hidden
+        (ticket 25), so the count of each is the one trace they leave; the line
+        is earned only when something was left out.
         """
         lines = []
-        if self._assigned:
-            lines.append(TIER_ASSIGNED_LEGEND)
-        if any(not self._enabled[name] for name in self.lanes_doc["lanes"]):
-            lines.append(TIER_OFF_LEGEND)
+        taken = sum(1 for name in self._carried() if name in self._assigned)
+        off = sum(1 for name in self.lanes_doc["lanes"] if not self._enabled[name])
+        hidden = hidden_legend(taken, off)
+        if hidden:
+            lines.append(hidden)
         # The tier definition is reference, so it goes last: last renders
         # directly above the footer, where it reads as a second footer line, and
         # it is the first line a short window gives up.
         lines.append(TIER_ONELINER)
         return lines
 
+    def _lanes_at(self, tier):
+        return sorted(name for name in self._carried() if self._assigned.get(name) == tier)
+
     def _tier_map_lines(self):
-        by_tier = {tier: [] for tier in range(1, 5)}
-        for name, tier in self._assigned.items():
-            by_tier[tier].append(name)
         lines = []
         for tier in range(1, 5):
-            names = sorted(by_tier[tier])
+            names = self._lanes_at(tier)
             if not names:
                 lines.append(f"tier {tier} (0): (none)")
             else:
@@ -614,32 +740,12 @@ class Wizard:
                 lines.append(self._drift_line(f"tier {tier}", names, always_count=True))
         return lines
 
-    @staticmethod
-    def _fit(line):
-        """One width rule for every start-screen line: the renderer clips at 79."""
-        return line if len(line) <= 79 else line[:76] + "..."
+    def _fit(self, line):
+        """One width rule for every prose line: the renderer clips at width - 1."""
+        return fit_line(line, self._width)
 
     def _drift_line(self, label, items, always_count=False):
-        """`label (n): a, b (+k more)`, filled to the width and no further.
-
-        `always_count` keeps the count on a list of one, for a block of lines
-        read together — the tier map — where a line without it reads as a
-        different kind of line.
-        """
-        total = len(items)
-        if total == 1 and not always_count:
-            return self._fit(f"{label}: {items[0]}")
-        prefix = f"{label} ({total}): "
-        chosen = []
-        for index, item in enumerate(items):
-            remaining = total - (index + 1)
-            suffix = f" (+{remaining} more)" if remaining else ""
-            if len(prefix + ", ".join(chosen + [item]) + suffix) > 79 and chosen:
-                break
-            chosen.append(item)
-        remaining = total - len(chosen)
-        suffix = f" (+{remaining} more)" if remaining else ""
-        return self._fit(prefix + ", ".join(chosen) + suffix)
+        return list_line(label, items, self._width, always_count)
 
     def _margin_legend(self):
         value = self.routing_doc["margin"]
@@ -656,6 +762,61 @@ class Wizard:
             f"  {percent} remaining, however capable it is.",
         ]
 
+    def _routing_settings(self):
+        values = []
+        for name in CLASSES:
+            cls_info = self.routing_doc["classes"][name]
+            values.append((name, "floor", cls_info["floor"]))
+            values.append((name, "ceiling", cls_info["ceiling"]))
+        values.extend([(None, "margin", self.routing_doc["margin"]),
+                       (None, "gate", self.routing_doc["gate"])])
+        return values
+
+    def _routing_panel(self):
+        """What the setting under the cursor does, drawn beside the table
+        (ticket 25): its heading, then a sentence or two, then which of this
+        session's lanes it admits. The wording follows CONTEXT.md."""
+        settings = self._routing_settings()
+        cls, kind, value = settings[min(self.cursor, len(settings) - 1)]
+        if cls is not None:
+            info = self.routing_doc["classes"][cls]
+            floor, ceiling = info["floor"], info["ceiling"]
+            if kind == "floor":
+                paragraphs = [
+                    f"{cls} floor: {value}",
+                    f"The lowest tier a {cls} job accepts, and the tier each {cls} job "
+                    "is sent at by default.",
+                ]
+                at = self._lanes_at(floor)
+                paragraphs.append(f"Tier {floor} now holds {len(at)} lane{'s' if len(at) != 1 else ''}"
+                                  + (f": {', '.join(at)}." if at else "."))
+            else:
+                paragraphs = [
+                    f"{cls} ceiling: {value}",
+                    f"The highest tier a {cls} job accepts: extra capability for a job "
+                    "that needs it, and the most the class can ever get.",
+                ]
+                admitted = [name for tier in range(ceiling, floor - 1, -1) for name in self._lanes_at(tier)]
+                paragraphs.append(f"Range {floor}-{ceiling} admits {len(admitted)} "
+                                  f"lane{'s' if len(admitted) != 1 else ''}"
+                                  + (f": {', '.join(admitted)}." if admitted else "."))
+            paragraphs.append("A job sent to a lane by name skips the range.")
+            return paragraphs
+        if kind == "margin":
+            return [
+                f"margin: {value}",
+                "A lane further down the order takes the job from the pick only when its "
+                f"pace beats the pick's by more than {value}.",
+                "Pace is unspent quota against time left in the week; above 1.0 the "
+                "quota will expire unused.",
+            ]
+        return [
+            f"gate: {value}",
+            f"A lane is skipped outright once its meter drops below {value * 100:g}% "
+            "remaining, however capable it is.",
+            "Remaining is the lower of the meter's 5-hour and weekly fractions.",
+        ]
+
     def _step_marker(self):
         """`start · harnesses · carry · T4 · [T3] · T2 · T1 · routing · confirm`.
 
@@ -669,49 +830,19 @@ class Wizard:
         return " · ".join(parts)
 
     def _discovery_notices(self):
-        """Drift notices for the start screen.
+        return discovery_notices(self.discovery, self._width)
 
-        `discovery` is either the dict `discover.discover` returns or a string
-        saying why it did not run. Discovery shells out to three harness CLIs, so
-        it must never be able to stop the wizard: a notice is an aid, not a gate.
-        A silent absence and a failed probe must not look the same, so the
-        no-drift case says so in a line of its own.
-        """
-        if self.discovery is None:
-            return [self._fit("Model discovery: did not run")]
-        if isinstance(self.discovery, str):
-            return [self._fit(f"Model discovery: did not run: {self.discovery}")]
-
-        unmapped = self.discovery.get("unmapped") or []
-        retired = self.discovery.get("retired") or []
-        if not unmapped and not retired:
-            return [self._fit("Model discovery: no drift")]
-
-        notices = []
-        if unmapped:
-            notices.append(self._drift_line("Models with no lane", [
-                f"{m.get('harness', '')} {m.get('slug', '')}".strip() for m in unmapped
-            ]))
-        if retired:
-            notices.append(self._drift_line("Lanes with retired models", [
-                f"{r.get('lane', '')} ({r.get('model', '')})" for r in retired
-            ]))
-        return notices
-
-    def view(self):
+    def view(self, width=80):
+        """The frame for a terminal `width` places wide. Prose is fitted to
+        that width, so a wide terminal shows a whole path or list that 80
+        places cut."""
+        self._width = max(MIN_WIDTH, width)
         if self.screen == "start":
-            page = self.bench_page_path or "(not written)"
             body = [
-                "Assign each lane a tier, best tier down, benchmark numbers beside it.",
-                "Nothing is written until the confirm screen; q leaves without writing.",
-                self._fit(f"Will write {self.lanes_path}"),
-                self._fit(f"Will write {self.routing_path}"),
-                self._fit(f"Benchmark page: {page}"),
-                *self._discovery_notices(),
+                *start_facts(self.lanes_path, self.routing_path, self.bench_page_path,
+                             self.discovery, self._width),
                 "",
-                "Tier is capability, 1 to 4. Each class takes lanes from its floor tier",
-                "up to its ceiling tier, as set in routing.json. It is not computed; it",
-                "is your judgement. Lanes alike on tier are equivalent; pace separates them.",
+                "Nothing is written until the confirm screen; q leaves without writing.",
             ]
             footer = ("any key: continue  o: open benchmark page  q: quit"
                       if self.bench_page_path else "any key: continue  q: quit")
@@ -762,33 +893,17 @@ class Wizard:
             columns = ["mark", "lane", "model", "effort", *epoch_names, "Epoch mean rank"]
             if aa_names:
                 columns.extend([*aa_names, "AA mean rank"])
-            active, dimmed = self._tier_names()
+            active = self._tier_names()
             rows = []
-            for index, name in enumerate(active + dimmed):
+            for index, name in enumerate(active):
                 lane = self.lanes_doc["lanes"][name]
-                is_assigned = name in self._assigned
-                is_off = not self._enabled[name]
-                marked = name in self._marks[self.tier] if not is_assigned else False
-                # The tier a lane already went to belongs in the box, not in a
-                # tag after the table: a tag is rendered past the last column and
-                # then clipped, so `tier 3` reached the eye as `ti`. `[3]` is the
-                # same fact in the width the box already has, and it leaves `off`
-                # as the only tag, which fits. A digit is not a third state of
-                # the tick: dimmed, and with the legend line it earns, it says
-                # the line is spoken for and this screen asks nothing of it.
-                if is_assigned:
-                    box = f"[{self._assigned[name]}]"
-                else:
-                    box = "[x]" if marked else "[ ]"
-                # `off` is state carried in from the carry screen, not a control
-                # on this one: dimmed, tagged, and answered nowhere but there.
-                tag = "off" if is_off else ""
+                marked = name in self._marks[self.tier]
                 rows.append({
-                    "cells": [box, name, lane["model"], lane["effort"],
+                    "cells": ["[x]" if marked else "[ ]", name, lane["model"], lane["effort"],
                               *self._bench_cells(name, epoch_names, aa_names)],
-                    "marked": marked, "dimmed": is_assigned or is_off,
-                    "cursor": not is_assigned and index == self.cursor,
-                    "tag": tag,
+                    "marked": marked, "dimmed": False,
+                    "cursor": index == self.cursor,
+                    "tag": "",
                 })
             return self._frame(
                 "tier", f"Assign tier {self.tier}", tier=self.tier,
@@ -799,25 +914,46 @@ class Wizard:
                 # truncated footer loses the keys.
                 legend=self._tier_legend(),
             )
+        if self.screen == "review":
+            epoch_names, aa_names = self._bench_columns()
+            columns = [*REVIEW_COLUMNS, "lane", "model", "effort", *epoch_names, "Epoch mean rank"]
+            if aa_names:
+                columns.extend([*aa_names, "AA mean rank"])
+            rows = []
+            for index, name in enumerate(self._review_order):
+                lane = self.lanes_doc["lanes"][name]
+                tier = self._assigned[name]
+                # one decision on the line, which tier; the same box as every
+                # other page, one per tier, and exactly one of them ticked
+                boxes = ["[x]" if tier == t else "[ ]" for t in (4, 3, 2, 1)]
+                rows.append({
+                    "cells": [*boxes, name, lane["model"], lane["effort"],
+                              *self._bench_cells(name, epoch_names, aa_names)],
+                    "marked": True, "dimmed": False,
+                    "cursor": index == self.cursor, "tag": "",
+                })
+            off = [name for name in self.lanes_doc["lanes"] if not self._enabled[name]]
+            legend = []
+            if off:
+                legend.append(self._drift_line("Not carried, keeps its catalog tier", off))
+            return self._frame(
+                "review", "Review tiers",
+                columns=columns, rows=rows,
+                footer=REVIEW_FOOTER,
+                legend=legend,
+            )
         if self.screen == "routing":
-            values = []
-            for name in CLASSES:
-                cls_info = self.routing_doc["classes"][name]
-                values.append((f"classes.{name}.floor", cls_info["floor"]))
-                values.append((f"classes.{name}.ceiling", cls_info["ceiling"]))
-            values.extend([("margin", self.routing_doc["margin"]), ("gate", self.routing_doc["gate"])])
-            rows = [{"cells": [name, str(value)], "marked": False, "dimmed": False,
-                     "cursor": i == self.cursor, "tag": ""}
-                    for i, (name, value) in enumerate(values)]
+            rows = [{"cells": [f"{cls} {kind}" if cls else kind, str(value)], "marked": False,
+                     "dimmed": False, "cursor": i == self.cursor, "tag": ""}
+                    for i, (cls, kind, value) in enumerate(self._routing_settings())]
             return self._frame(
                 "routing", "Routing",
                 columns=["setting", "value"], rows=rows,
-                footer="↑/↓ or j/k: move  +/-: adjust  enter: confirm  b: back  q: quit",
-                # margin and gate first: they explain the values being edited on
-                # this screen, so they are what must survive a short window. The
-                # tier map is reference and gives way before they do.
-                legend=[*self._margin_legend(), *self._gate_legend(),
-                        PACE_LEGEND, *self._tier_map_lines()],
+                footer=ROUTING_FOOTER,
+                # what the setting under the cursor does sits beside the table;
+                # the tier map below is reference for every setting at once
+                panel=self._routing_panel(),
+                legend=self._tier_map_lines(),
             )
         if self.screen == "confirm":
             rows = []
@@ -829,7 +965,7 @@ class Wizard:
                 off = not self._enabled[name]
                 # the column says `off`; a tag saying it again read `off  off`
                 rows.append({"cells": [name, "off" if off else "",
-                                        f"tier {self._assigned[name]}"],
+                                        f"tier {self._final_tier(name)}"],
                              "marked": False, "dimmed": off, "tag": ""})
             for name in CLASSES:
                 cls_info = self.routing_doc["classes"][name]
@@ -904,7 +1040,7 @@ def _fit_table(view, width):
         return [], []
     elastic = view.get("elastic")
     elastic_index = columns.index(elastic) if elastic in columns else None
-    priority_names = ("mark", "carry", "lane", "Epoch mean rank")
+    priority_names = ("mark", "carry", *REVIEW_COLUMNS, "lane", "Epoch mean rank")
     deferred_names = ("model", "effort")
     priority = [columns.index(name) for name in priority_names if name in columns]
     deferred = [columns.index(name) for name in deferred_names
@@ -916,8 +1052,11 @@ def _fit_table(view, width):
     widths = {}
     used = 0
     room = max(1, width - 1)
+    # 24 places a cell at 80 and 100; a wide terminal lets a cell run longer,
+    # so `classes.mechanical.ceiling` is whole at 200 instead of cut as at 80
+    cap = max(24, room // 6)
     for i in priority + rest + deferred:
-        cell_width = min(_natural_width(view, i), 24)
+        cell_width = min(_natural_width(view, i), cap)
         if chosen and used + 2 + cell_width > room:
             # A column skipped over while a narrower one behind it is drawn
             # reads as data nobody gathered: at 100 places FrontierCode dropped
@@ -944,6 +1083,21 @@ def _fit_table(view, width):
 # reference and the rows are the work.
 ROW_FLOOR = 6
 MIN_WIDTH, MIN_HEIGHT = 80, 16
+# A panel beside a table: the gap before its rule, the narrowest it may be
+# before it is not drawn, and the widest its prose runs, for reading.
+PANEL_GAP, PANEL_MIN, PANEL_MAX = 3, 28, 72
+
+
+def _panel_lines(paragraphs, width):
+    """Wrap panel paragraphs to `width`, a blank line between paragraphs; the
+    first paragraph is the heading."""
+    out = []
+    for index, paragraph in enumerate(paragraphs):
+        if index:
+            out.append(("", "panel"))
+        role = "panel-head" if index == 0 else "panel"
+        out.extend((line, role) for line in textwrap.wrap(paragraph, width) or [""])
+    return out
 
 
 def layout_lines(view, width, height):
@@ -953,6 +1107,10 @@ def layout_lines(view, width, height):
     Every fault this function now guards against — a reason column silently
     dropped, a tag clipped to `ti`, rows scrolled away with nothing to say so —
     was invisible to tests that only ever read the frame dict.
+
+    An entry's leading spaces are its column: a panel line beside the table
+    shares a row with a table line and starts where the table ends, so it is
+    drawn at its indent rather than over the row. `overlay` composes them.
     """
     lines = []
     rows = view["rows"]
@@ -979,6 +1137,23 @@ def layout_lines(view, width, height):
         lines.append((y, line, "body"))
         y += 1
     first, shown = 0, 0
+    if chosen and view.get("panel"):
+        table_width = sum(widths) + 2 * (len(widths) - 1)
+        panel_x = table_width + PANEL_GAP
+        panel_width = min(PANEL_MAX, width - 1 - panel_x - 2)
+        if panel_width >= PANEL_MIN:
+            panel_y = y + (1 if body else 0)
+            for offset, (text, role) in enumerate(_panel_lines(view["panel"], panel_width)):
+                if panel_y + offset >= legend_y:
+                    break
+                lines.append((panel_y + offset, " " * panel_x + "│ " + text, role))
+        else:
+            # no room beside the table: the panel takes the legend's place,
+            # ahead of it, since it explains the row being edited
+            legend = [text for text, _role in _panel_lines(view["panel"], width - 1)] + legend
+            if steps_y - len(legend) < table_floor:
+                legend = legend[:max(0, steps_y - table_floor)]
+            legend_y = steps_y - len(legend)
     if chosen and y < legend_y:
         if body:
             y += 1
@@ -1024,6 +1199,19 @@ def layout_lines(view, width, height):
     return lines
 
 
+def overlay(entries, width, height):
+    """The grid a terminal of this size shows, one string per row, with each
+    entry drawn at its leading-space indent over what the row already holds."""
+    grid = [""] * height
+    for y, text, _role in entries:
+        if not (0 <= y < height) or not text:
+            continue
+        x = len(text) - len(text.lstrip(" "))
+        row = grid[y].ljust(x)
+        grid[y] = (row[:x] + text[x:] + row[len(text):])[: width - 1].rstrip()
+    return grid
+
+
 def run_curses(wizard):
     """Run the curses renderer until the wizard is done or quit."""
     import curses
@@ -1039,6 +1227,7 @@ def run_curses(wizard):
             "steps": curses.A_BOLD, "message": curses.A_BOLD,
             "body": 0, "legend": 0, "footer": 0, "row": 0,
             "row-dim": curses.A_DIM,
+            "panel": 0, "panel-head": curses.A_BOLD,
             "row-cursor": curses.A_REVERSE | curses.A_BOLD,
             "row-cursor-dim": curses.A_DIM | curses.A_REVERSE | curses.A_BOLD,
         }
@@ -1058,11 +1247,16 @@ def run_curses(wizard):
                 if code in (ord("q"), ord("Q")):
                     wizard.handle("q")
                 continue
-            view = wizard.view()
+            view = wizard.view(width)
             for y, text, role in layout_lines(view, width, height):
                 if 0 <= y < height and text:
+                    # leading spaces are the entry's column, so a panel line
+                    # beside the table does not blank the row it shares
+                    x = len(text) - len(text.lstrip(" "))
+                    if x >= width - 1:
+                        continue
                     try:
-                        stdscr.addnstr(y, 0, text, max(1, width - 1), roles[role])
+                        stdscr.addnstr(y, x, text[x:], max(1, width - 1 - x), roles[role])
                     except curses.error:
                         pass
             stdscr.refresh()

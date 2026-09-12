@@ -39,7 +39,15 @@ WEAK_PROVENANCE = ("self-reported",)
 
 ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets")
 SOURCES_PATH = os.path.join(ASSETS, "sources.json")
+BOARDS_PATH = os.path.join(ASSETS, "boards.json")
 SCRIPT_PATH = os.path.join(ASSETS, "bench_page.js")
+
+# Said in place of a description for a board `assets/boards.json` does not
+# cover. A description is quoted from the source's own methodology page, never
+# written from memory, so a board nobody has fetched a page for says so.
+NO_ABOUT = ("No description on file for this board: nobody has fetched its source's "
+            "methodology page into assets/boards.json.")
+ABOUT_FIELDS = ("url", "fetched", "measures", "tasks", "score", "scale", "cost", "speaks_to")
 
 # The four kinds of point on a plot. A lane is a thing the reader pays for
 # and can dispatch to; the rest is context, and the distinction has to survive
@@ -169,6 +177,29 @@ def _load_sources():
         return doc.get("sources") or {}
     except (OSError, ValueError):
         return {}
+
+
+def _load_boards():
+    try:
+        with open(BOARDS_PATH, encoding="utf-8") as f:
+            doc = json.load(f)
+        return doc.get("boards") or {}
+    except (OSError, ValueError):
+        return {}
+
+
+def board_about(source, benchmark, boards=None):
+    """What one board measures, quoted from its source's methodology page, with
+    that page's URL; None when `assets/boards.json` has no entry, or the entry
+    lacks a description or a URL (half a citation is not one)."""
+    if boards is None:
+        boards = _load_boards()
+    entry = ((boards or {}).get(source) or {}).get(benchmark)
+    if not isinstance(entry, dict) or not entry.get("measures") or not entry.get("url"):
+        return None
+    about = {key: entry.get(key) for key in ABOUT_FIELDS}
+    about["also"] = list(entry.get("also") or [])
+    return about
 
 
 def _cost_basis(source_meta):
@@ -388,11 +419,15 @@ def plot_data(effort_rows, lanes_doc, proposals=None):
         proposals = _proposals(lanes_doc, effort_rows)
     items = _annotate(effort_rows, lanes_doc, proposals)
     sources = _load_sources()
+    described = _load_boards()
     lanes = _lanes(lanes_doc)
     boards = []
     for i, ((source, benchmark), rows) in enumerate(_boards(items)):
         board = _board_facts(source, benchmark, rows, sources.get(source) or {})
         board["id"] = f"b{i}"
+        board["sourceName"] = (sources.get(source) or {}).get("name") or source
+        board["about"] = board_about(source, benchmark, described)
+        board["aboutMissing"] = None if board["about"] else NO_ABOUT
         board["points"] = [_point(r, lanes) for r in rows]
         boards.append(board)
     # Two plots to start: the board a decision is made on, and the best board
@@ -442,6 +477,36 @@ def _plots_section(effort_rows, lanes_doc, proposals):
             "tables under “The numbers”.</p></noscript>",
             f'<script type="application/json" id="bench-data">{_json_for_script(data)}</script>',
             "</section>"]
+    return out + _comparison_section(data)
+
+
+def _comparison_section(data):
+    """Every board side by side: what it measures, what its number is, and what
+    a dollar on its axis is. Open, not collapsed with the evidence: it is the
+    key to the plots above it, not a figure to check."""
+    boards = data["boards"]
+    head = ["board", "source", "what it measures", "scale", "cost basis"]
+    out = ['<section class="compare">', "<h2>What each board measures</h2>",
+           '<p class="lede">Quoted from each source\'s own methodology page, which is linked. '
+           "Costs are never comparable across sources, and two per-task figures measure "
+           "different task sets.</p>",
+           '<div class="scroll"><table class="compare">',
+           "<thead><tr>" + "".join(f"<th>{_esc(h)}</th>" for h in head) + "</tr></thead><tbody>"]
+    for board in boards:
+        about = board["about"]
+        name = _esc(board["benchmark"]) + (' <span class="sub">composite</span>' if board["composite"] else "")
+        if about:
+            measures = (f'{_esc(about["measures"])}'
+                        f'<span class="sub">{_esc(about["tasks"]) if about["tasks"] else ""}</span>'
+                        f'<span class="sub">speaks to {_esc(about["speaks_to"])}</span>'
+                        f'<a class="sub" href="{_esc(about["url"])}">{_esc(about["url"])}</a>')
+            scale, cost = _esc(about["scale"]), _esc(about["cost"])
+        else:
+            measures = f'<span class="quiet">{_esc(NO_ABOUT)}</span>'
+            scale, cost = "—", _esc(board["basis"])
+        out.append(f"<tr><td>{name}</td><td>{_esc(board['sourceName'])}</td>"
+                   f'<td class="measures">{measures}</td><td>{scale}</td><td>{cost}</td></tr>')
+    out += ["</tbody></table></div>", "</section>"]
     return out
 
 
@@ -838,9 +903,20 @@ header p { color: var(--ink-2); }
 .chart { position: relative; }
 .chart > svg { display: block; width: 100%; height: auto; border: 1px solid var(--grid); border-radius: 4px;
   cursor: crosshair; touch-action: none; user-select: none; -webkit-user-select: none; }
-.hint { font-size: 12.5px; color: var(--muted); margin-top: 0.35rem; }
-.reset { position: absolute; top: 0.5rem; right: 0.5rem; font: inherit; font-size: 12.5px; padding: 0.2rem 0.6rem;
+.hint { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.7rem; font-size: 12.5px;
+  color: var(--muted); margin-top: 0.45rem; }
+.reset { font: inherit; font-size: 12.5px; padding: 0.2rem 0.65rem; flex: none;
   background: var(--surface); color: var(--ink); border: 1px solid var(--rule); border-radius: 4px; cursor: pointer; }
+.reset[aria-disabled="true"] { color: var(--muted); cursor: default; }
+.about { margin-top: 0.55rem; padding-left: 0.8rem; border-left: 3px solid var(--rule); max-width: 60rem; }
+.about .measures { color: var(--ink); margin: 0; }
+.about dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 0.1rem 0.8rem;
+  margin: 0.35rem 0 0; font-size: 13px; }
+.about dt { color: var(--muted); }
+.about dd { margin: 0; color: var(--ink-2); }
+.about .cite { font-size: 12.5px; color: var(--muted); margin-top: 0.3rem; overflow-wrap: anywhere; }
+table.compare td.measures { min-width: 22rem; }
+table.compare .sub { overflow-wrap: anywhere; }
 .tip { position: absolute; z-index: 2; pointer-events: none; background: var(--surface); color: var(--ink);
   border: 1px solid var(--rule); border-radius: 4px; box-shadow: 0 3px 10px rgba(0, 0, 0, 0.14);
   font-size: 12.5px; line-height: 1.4; padding: 0.45rem 0.6rem; max-width: 21rem; }

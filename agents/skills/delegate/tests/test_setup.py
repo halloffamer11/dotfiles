@@ -61,6 +61,9 @@ def run_setup(config_dir, discover_path, answers, *extra):
             config_dir,
             "--discover-json",
             discover_path,
+            # model discovery shells out to the real harness CLIs; these cases
+            # are about the prompts, and the facts case below drives fixtures
+            "--no-discover",
             *extra,
         ],
         input=answers,
@@ -317,7 +320,38 @@ def case_effort_rows_from_several_files_combine():
     return ok, f"rows={rows} message={message!r} refused={refused} why={why!r}"
 
 
+def case_plain_prints_the_start_facts():
+    """--plain prints what the TUI's start page shows, from the same function:
+    both output paths, the benchmark page line and the discovery notices, before
+    the first prompt, and no definition of a term (ticket 25)."""
+    import setup_tui
+    fixture_dir = os.path.join(HERE, "fixtures", "discover")
+    with tempfile.TemporaryDirectory() as td:
+        cfg = os.path.join(td, "config")
+        discover_path = os.path.join(td, "discover.json")
+        write_discover(discover_path, catalog.HARNESSES)
+        result = subprocess.run(
+            [sys.executable, SETUP_PY, "--config-dir", cfg, "--discover-json", discover_path,
+             "--fixture-dir", fixture_dir, "--no-bench", "--plain"],
+            input=default_answers(len(lanes_sample["lanes"])), capture_output=True, text=True,
+            cwd=DELEGATE_DIR)
+        import discover
+        facts = setup_tui.start_facts(os.path.join(cfg, "lanes.json"), os.path.join(cfg, "routing.json"),
+                                      None, discover.discover(sample_proposal(catalog.HARNESSES),
+                                                              fixture_dir=fixture_dir), width=10_000)
+        first_prompt = result.stdout.find("tier [")
+        positions = [result.stdout.find(line) for line in facts]
+        ok = (result.returncode == 0 and len(facts) >= 4
+              and all(0 <= p < first_prompt for p in positions)
+              and "Benchmark page: (not written)" in result.stdout
+              and any(line.startswith(("Model discovery", "Models with no lane", "Lanes with retired"))
+                      for line in facts)
+              and "Tier is capability" not in result.stdout)
+        return ok, f"facts={facts} positions={positions} stdout={result.stdout[:500]!r}"
+
+
 for name, case in (
+    ("plain prints the start facts", case_plain_prints_the_start_facts),
     ("effort rows from several files combine", case_effort_rows_from_several_files_combine),
     ("all harnesses write canonical samples", case_all_harnesses_write_canonical_samples),
     ("subset filters lanes and meters", case_subset_filters_lanes_and_meters),

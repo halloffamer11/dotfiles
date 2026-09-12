@@ -182,6 +182,23 @@
 
   const KIND_RANK = { comparator: 0, own_other: 1, lane: 2, lane_off: 3 };
 
+  // One wheel step about the pointer: the cost and score under (x, y) stay
+  // under it, and every edge moves toward it by `factor` (below 1 zooms in).
+  // Cost is on a log axis, so the cost edges move in log space. No DOM.
+  function zoomAbout(d, p, x, y, factor) {
+    const lx0 = Math.log10(d.xlo), lx1 = Math.log10(d.xhi);
+    const fx = (x - p.x0) / (p.x1 - p.x0), fy = (p.y1 - y) / (p.y1 - p.y0);
+    const lc = lx0 + fx * (lx1 - lx0), s = d.ylo + fy * (d.yhi - d.ylo);
+    return { c0: Math.pow(10, lc + (lx0 - lc) * factor), c1: Math.pow(10, lc + (lx1 - lc) * factor),
+             s0: s + (d.ylo - s) * factor, s1: s + (d.yhi - s) * factor };
+  }
+
+  // Whether a zoom shows at least the whole full view, so zooming out past it
+  // is the full view again rather than empty margin around it.
+  function covers(z, full) {
+    return z.c0 <= full.xlo && z.c1 >= full.xhi && z.s0 <= full.ylo && z.s1 >= full.yhi;
+  }
+
   // Everything one plot draws, in SVG coordinates, from one board and one
   // panel's settings. No DOM.
   function layout(board, st) {
@@ -364,6 +381,8 @@
     const remove = el("button", { type: "button", class: "quiet-button" }, "Remove this plot", head);
     remove.addEventListener("click", () => onRemove(panel));
     const meta = el("p", { class: "meta" }, null, root);
+    // what the chosen board measures, quoted from its source; redrawn with the board
+    const about = el("div", { class: "about" }, null, root);
     const finding = el("p", { class: "finding" }, null, root);
 
     const body = el("div", { class: "plot-body" }, null, root);
@@ -371,11 +390,13 @@
     const chart = svg("svg", { viewBox: `0 0 ${W} ${H}`, role: "img" }, wrap);
     const tip = el("div", { class: "tip", role: "status" }, null, wrap);
     tip.hidden = true;
-    const reset = el("button", { type: "button", class: "reset" }, "Reset zoom", wrap);
-    reset.hidden = true;
+    // Always on screen, so the way back from a zoom never has to be found. It
+    // sits under the plot, not over it, where it would cover the top-right labels.
+    const hint = el("div", { class: "hint" }, null, wrap);
+    const reset = el("button", { type: "button", class: "reset" }, "Reset zoom", hint);
     reset.addEventListener("click", () => { st.zoom = null; draw(); });
-    const hint = el("p", { class: "hint" }, "Drag across the plot to zoom. Click a point to hold its model. "
-      + "Double-click to reset.", root);
+    el("span", {}, "Scroll over the plot to zoom about the pointer, or drag across it to zoom to a box. "
+      + "Click a point to hold its model.", hint);
     const legend = el("div", { class: "plot-legend" }, null, root);
     const table = el("div", { class: "frontier-table" }, null, root);
 
@@ -611,6 +632,27 @@
       band.style.display = "none";
     }
 
+    function drawAbout(board) {
+      about.textContent = "";
+      const a = board.about;
+      if (!a) {
+        el("p", { class: "cite" }, board.aboutMissing, about);
+        return;
+      }
+      el("p", { class: "measures" }, a.measures, about);
+      const dl = el("dl", {}, null, about);
+      for (const [term, value] of [["Tasks", a.tasks], ["Score", a.score], ["Number shown", a.scale],
+                                   ["Cost", a.cost], ["Speaks to", a.speaks_to]]) {
+        if (!value) continue;
+        el("dt", {}, term, dl);
+        el("dd", {}, value, dl);
+      }
+      const cite = el("p", { class: "cite" }, "Quoted from ", about);
+      el("a", { href: a.url }, a.url, cite);
+      cite.appendChild(document.createTextNode(`, fetched ${a.fetched}. Number shown, cost and speaks to `
+        + "are the wizard's reading, not the source's words."));
+    }
+
     function showTip(q, board, decimals) {
       tip.textContent = "";
       for (const [text, cls] of tipLines(q.p, board, decimals)) el("div", cls ? { class: cls } : {}, text, tip);
@@ -669,6 +711,19 @@
       focus(null);
     });
     chart.addEventListener("dblclick", () => { st.zoom = null; draw(); });
+    // The wheel zooms only over the plotting area; over the axes and margins it
+    // scrolls the page as usual, so a reader scrolling past a plot is not caught.
+    chart.addEventListener("wheel", (e) => {
+      if (!last || !last.plot || drag) return;
+      const [x, y] = toSvg(e), p = last.plot;
+      if (x < p.x0 || x > p.x1 || y < p.y0 || y > p.y1) return;
+      e.preventDefault();
+      const step = e.deltaY * (e.deltaMode === 1 ? 0.05 : e.deltaMode === 2 ? 1 : 0.0015);
+      const next = zoomAbout(last.domain, p, x, y, Math.exp(Math.max(-0.5, Math.min(0.5, step))));
+      const full = layout(boards.get(st.board), Object.assign({}, st, { zoom: null })).domain;
+      st.zoom = full && covers(next, full) ? null : next;
+      draw();
+    }, { passive: false });
 
     function draw() {
       const board = boards.get(st.board);
@@ -679,6 +734,7 @@
       meta.appendChild(document.createTextNode(`, ${board.basis}, observed ${board.when}. `
         + `${board.rows} rows, ${board.models} models.`
         + (board.unplotted.length ? ` Not drawn, no usable score or cost: ${board.unplotted.join(", ")}.` : "")));
+      drawAbout(board);
       finding.textContent = board.finding;
       const decimals = scoreDecimals(board);
       last = layout(board, st);
@@ -688,7 +744,7 @@
       fillModels();
       syncHarness();
       syncEfforts();
-      reset.hidden = !st.zoom;
+      reset.setAttribute("aria-disabled", String(!st.zoom));
       tip.hidden = true;
       remove.hidden = host.querySelectorAll("section.plot").length < 2;
       focus(null);
@@ -756,7 +812,8 @@
   }
 
   if (typeof module !== "undefined" && module.exports) {
-    module.exports = { layout, frontier, logTicks, logDomain, niceLinear, fmtMoney, fmtTickMoney, place, W, H, PAD };
+    module.exports = { layout, frontier, logTicks, logDomain, niceLinear, fmtMoney, fmtTickMoney, place,
+                       zoomAbout, covers, W, H, PAD };
   } else if (typeof document !== "undefined") {
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
     else boot();
