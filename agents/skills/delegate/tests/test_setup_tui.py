@@ -1681,4 +1681,22 @@ except Exception as e:
     record("42 prose is fitted to the terminal's width, not to 80", False, repr(e))
 
 
+try:
+    doc = {"lanes": {name: {"model": model, "effort": effort}
+           for name, model, effort in [("a-high", "a", "high"), ("a-low", "a", "low"),
+                                        ("b-high", "b", "high"), ("c-high", "c", "high"),
+                                        ("d-high", "d", "high")]}}
+    ranks = {"lanes": {"a-high": {"mean": None, "aa": {"mean": 6}},
+                        "a-low": {"mean": None, "aa": {"mean": 2}},
+                        "b-high": {"mean": 3}, "c-high": {"mean": None, "aa": {"mean": 4}},
+                        "d-high": {"mean": None, "aa": None}}}
+    fallback = setup_tui.lane_order(doc, ranks)
+    ranks["lanes"]["a-high"]["mean"] = 5
+    ranks["lanes"]["a-low"]["aa"]["mean"] = 1
+    record("46 groups without Epoch use their best AA rank and keep efforts descending",
+           fallback == ["a-high", "a-low", "b-high", "c-high", "d-high"]
+           and setup_tui.lane_order(doc, ranks) == ["b-high", "c-high", "a-high", "a-low", "d-high"])
+except Exception as e:
+    record("46 groups without Epoch use their best AA rank and keep efforts descending", False, repr(e))
+
 sys.exit(1 if fails else 0)

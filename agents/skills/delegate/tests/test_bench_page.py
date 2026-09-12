@@ -782,15 +782,15 @@ out.review = P.reviewOrder(lanes, c.tiers).map((l) => l.name);
 out.text = P.tierLinesText(lanes, c.tiers);
 // layout: the lines, the bands, the page's tiers and the focus
 const st = { frontier: "lanes", labels: "lanes", lines: true, zoom: null, hiddenModels: new Set(),
-             hiddenHarness: new Set(), hiddenEfforts: new Set(), tiers: c.pointTiers, tierLines: [1.5, 2.5, 3.5], focusTier: null };
+             hiddenHarness: new Set(), hiddenEfforts: new Set(), tiers: c.pointTiers, tierLines: [12, 18, 25], focusTier: null };
 const lay = P.layout(c.board, st);
-out.lines = lay.lines.map((l) => [l.cost, l.inside, Math.round(l.x)]);
+out.lines = lay.lines.map((l) => [l.score, l.inside, Math.round(l.y)]);
 out.bandNames = lay.bands.map((b) => b.tier);
 out.pointTiers = lay.points.map((q) => [q.p.name, q.tier, q.band, q.dim]);
 const focused = P.layout(c.board, Object.assign({}, st, { focusTier: 2 }));
 out.dimmed = focused.points.map((q) => [q.p.name, q.dim]);
 const zoom = P.focusDomain(c.board, st, 2);
-out.focus = zoom && [zoom.c0 < 1.5, zoom.c1 > 2.5, zoom.c1 < 3.5, zoom.s0, zoom.s1];
+out.focus = zoom && [zoom.s0 <= 12, zoom.s1 >= 18, zoom.s1 < 25, zoom.s0, zoom.s1];
 out.focusNothing = P.focusDomain(c.board, Object.assign({}, st, { tierLines: null, tiers: {} }), 3);
 process.stdout.write(JSON.stringify(out));
 """
@@ -830,9 +830,9 @@ try:
         record("a drag pans the content with the pointer, in log space on the cost axis",
                abs(pan["c0"] - 10 ** -1.5) < 1e-9 and abs(pan["c1"] - 10 ** 1.5) < 1e-9
                and abs(pan["s0"] - 25) < 1e-9 and abs(pan["s1"] - 125) < 1e-9, repr(pan))
-        record("a band proposes one more than the lines at or below the cost, and no lines propose nothing",
+        record("a band proposes one more than the lines at or below the score, and no lines propose nothing",
                out["bands"] == [1, 2, 3, 4, 4] and out["noLines"] is None
-               and out["defaults"] == [0.32, 1, 3.2] and len(out["flat"]) == 3
+               and out["defaults"] == [2.575, 5.05, 7.525] and len(out["flat"]) == 3
                and out["flat"][0] < out["flat"][1] < out["flat"][2], repr((out["bands"], out["defaults"], out["flat"])))
         record("the script groups lanes exactly as setup_tui.group_lanes does, and the copy is in the review "
                "page's order",
@@ -845,11 +845,11 @@ try:
                repr((out["grouped"], out["review"], out["text"])))
         record("the layout places the tier lines, names each band, carries the page's tier and the band per "
                "point, and dims the points outside a focused tier",
-               [l[0] for l in out["lines"]] == [1.5, 2.5, 3.5] and all(l[1] for l in out["lines"])
-               and out["lines"][0][2] < out["lines"][1][2] < out["lines"][2][2]
+               [l[0] for l in out["lines"]] == [12, 18, 25] and all(l[1] for l in out["lines"])
+               and out["lines"][0][2] > out["lines"][1][2] > out["lines"][2][2]
                and out["bandNames"] == [1, 2, 3, 4]
                and sorted(out["pointTiers"]) == sorted([["d", None, 4, False], ["a", 1, 1, False],
-                                                        ["b", 2, 2, False], ["c", 2, 3, False]])
+                                                        ["b", 2, 3, False], ["c", 2, 2, False]])
                and sorted(out["dimmed"]) == sorted([["d", True], ["a", True], ["b", False], ["c", False]])
                and out["focus"] and out["focus"][:3] == [True, True, True]
                and out["focus"][3] <= 15.0 <= out["focus"][4] and out["focus"][3] <= 20.0 <= out["focus"][4]
@@ -864,5 +864,40 @@ try:
 except Exception as e:
     record("the script pans, cuts bands, groups lanes as the wizard does, and focuses a tier", False, repr(e))
 
+
+# Round 2: automatic bands preserve hand assignments, including after reload.
+try:
+    driver = r"""
+const assert = require('assert');
+const P = require(process.argv[1]);
+const board = {source:'aa', benchmark:'toy', points: [
+  {plotted:true, score:0, lanes:[{name:'a'}]},
+  {plotted:true, score:15, lanes:[{name:'b'}]},
+  {plotted:true, score:30, lanes:[{name:'c'}]},
+  {plotted:true, score:40, lanes:[{name:'off'}]}]};
+const lanes = ['a','b','c','no-rows'].map(name => ({name,carried:true})).concat([{name:'off',carried:false}]);
+const tiers = {b:4,'no-rows':2}, manual = {b:true};
+P.applyBands(board,[10,20,25],lanes,tiers,manual);
+assert.deepStrictEqual(tiers,{a:1,b:4,c:4,'no-rows':2});
+P.applyBands(board,[-5,5,35],lanes,tiers,manual);
+assert.deepStrictEqual(tiers,{a:2,b:4,c:3,'no-rows':2});
+delete manual.b;
+P.applyBands(board,[-5,5,35],lanes,tiers,manual);
+assert.strictEqual(tiers.b,3);
+let saved = {tiers:{a:4},lines:{aa:[1,2,3]}};
+global.localStorage = {getItem:()=>JSON.stringify(saved),setItem:(k,v)=>{saved=JSON.parse(v)}};
+let store = P.makeStore({catalogKey:'fixture',lanes,boards:[board]});
+assert.strictEqual(store.manual.a,true);
+assert.deepStrictEqual(store.lines,{});
+store.lines[P.boardKey(board)] = [-5,0,5]; store.save();
+store = P.makeStore({catalogKey:'fixture',lanes,boards:[board]});
+assert.deepStrictEqual(store.lines[P.boardKey(board)],[-5,0,5]);
+assert.strictEqual(store.manual.a,true);
+"""
+    result = subprocess.run([NODE, "-e", driver, os.path.abspath(bench_page.SCRIPT_PATH)], capture_output=True, text=True)
+    record("score bands preserve overrides, clear releases them, and reload migrates cost lines safely",
+           result.returncode == 0, result.stderr)
+except Exception as e:
+    record("score bands preserve overrides, clear releases them, and reload migrates cost lines safely", False, repr(e))
 
 sys.exit(1 if fails else 0)

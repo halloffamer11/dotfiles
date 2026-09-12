@@ -161,19 +161,27 @@ def group_lanes(names, lanes_doc):
     return out
 
 
-def bench_order_key(bench, name):
-    """A lane's place in benchmark order: by its own mean rank, measured
+def bench_order_key(bench, name, lanes_doc=None):
+    """A lane's place by Epoch rank, or AA rank if its group has no Epoch; measured
     lanes first, then by name. This is the order the tier pages open in and
     the order the benchmark page lists lanes in, so it lives in one place."""
     rec = ((bench or {}).get("lanes") or {}).get(name) if bench else None
-    mean = rec["mean"] if rec else None
+    mean = rec.get("mean") if rec else None
+    if mean is None and rec:
+        lanes = (lanes_doc or {}).get("lanes") or {}
+        group = model_group(lanes.get(name))
+        has_epoch = any(model_group(lane) == group
+                        and ((bench or {}).get("lanes", {}).get(other) or {}).get("mean") is not None
+                        for other, lane in lanes.items())
+        if not has_epoch:
+            mean = (rec.get("aa") or {}).get("mean")
     return (mean is None, mean if mean is not None else 0, name)
 
 
 def lane_order(lanes_doc, bench):
     """Every lane in the order a tier page lists them: benchmark order, then
     grouped by model with efforts most to least."""
-    names = sorted((lanes_doc or {}).get("lanes") or {}, key=lambda n: bench_order_key(bench, n))
+    names = sorted((lanes_doc or {}).get("lanes") or {}, key=lambda n: bench_order_key(bench, n, lanes_doc))
     return group_lanes(names, lanes_doc)
 
 
@@ -455,7 +463,7 @@ class Wizard:
         return rec["mean"] if rec else None
 
     def _bench_order(self, name):
-        return bench_order_key(self.bench, name)
+        return bench_order_key(self.bench, name, self.lanes_doc)
 
     def _carried(self):
         return [name for name in self.lanes_doc["lanes"] if self._enabled[name]]

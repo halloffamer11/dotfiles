@@ -214,33 +214,31 @@
 
   // --- the tiers drawn on this page (pure) ------------------------------------
 
-  // The tier a cost's band proposes: one more than the number of tier lines
-  // at or below it. A guide, never a rule: nothing reads it but the tooltip
-  // and the one button that applies it.
-  function bandTier(cost, lines) {
+  // Score thresholds belong to one benchmark, whose scale is independent.
+  function bandTier(score, lines) {
     if (!lines || lines.length !== 3) return null;
-    let tier = 1;
-    for (const c of lines) if (cost >= c) tier++;
-    return tier;
+    return 1 + lines.filter((line) => score >= line).length;
   }
 
-  // Three lines at the log quartiles of the lane costs shown, to be dragged
-  // from there; rounded to two figures so a line sits on a number a person
-  // could have chosen.
-  function defaultLines(costs) {
-    const positive = costs.filter((c) => c > 0);
-    if (!positive.length) return null;
-    let lo = Math.min(...positive), hi = Math.max(...positive);
-    if (hi / lo < 1.5) {
-      const mid = Math.sqrt(lo * hi);
-      lo = mid / 2;
-      hi = mid * 2;
-    }
-    const llo = Math.log10(lo), lhi = Math.log10(hi);
-    const exact = [0.25, 0.5, 0.75].map((f) => Math.pow(10, llo + f * (lhi - llo)));
-    const rounded = exact.map((v) => +v.toPrecision(2));
-    return rounded[0] < rounded[1] && rounded[1] < rounded[2] ? rounded : exact;
+  function defaultLines(scores) {
+    const values = scores.filter(Number.isFinite);
+    if (!values.length) return null;
+    let lo = Math.min(...values), hi = Math.max(...values);
+    if (lo === hi) { lo -= Math.abs(lo) * 0.1 || 1; hi += Math.abs(hi) * 0.1 || 1; }
+    return [0.25, 0.5, 0.75].map((f) => lo + f * (hi - lo));
   }
+
+  function applyBands(board, lines, lanes, tiers, manual) {
+    const carried = new Set(lanes.filter((l) => l.carried).map((l) => l.name));
+    for (const p of board.points) {
+      if (!p.plotted) continue;
+      for (const lane of p.lanes) {
+        if (carried.has(lane.name) && !manual[lane.name]) tiers[lane.name] = bandTier(p.score, lines);
+      }
+    }
+  }
+
+  function boardKey(board) { return JSON.stringify([board.source, board.benchmark]); }
 
   // The tier this page gives a point: its lanes' tier when they have one.
   function pointTier(p, tiers) {
@@ -279,27 +277,23 @@
   }
 
   // The zoom that shows one tier: its band between the tier lines when there
-  // are lines, else the points this page gives that tier; the score range
-  // fits those points. Null when there is nothing to show.
+  // are lines, else the points this page gives that tier. Hand assignments
+  // remain in view even outside their score band. Null when there is nothing to show.
   function focusDomain(board, st, tier) {
     const shown = board.points.filter((p) => isShown(p, st));
     const mine = shown.filter((p) => p.lanes.length && pointTier(p, st.tiers) === tier);
     const lines = st.tierLines;
-    let costs, pool;
+    let pool = mine, scores;
     if (lines && lines.length === 3) {
-      const lo = tier > 1 ? lines[tier - 2] : null, hi = tier < 4 ? lines[tier - 1] : null;
-      const inBand = shown.filter((p) => (lo === null || p.cost >= lo) && (hi === null || p.cost < hi));
-      pool = mine.length ? mine : inBand;
-      if (!pool.length) return null;
-      const all = shown.map((p) => p.cost);
-      costs = [lo === null ? Math.min(...all) : lo, hi === null ? Math.max(...all) : hi];
-    } else {
-      pool = mine;
-      if (!pool.length) return null;
-      costs = pool.map((p) => p.cost);
-    }
-    const [xlo, xhi] = logDomain(costs);
-    const lin = niceLinear(Math.min(...pool.map((p) => p.score)), Math.max(...pool.map((p) => p.score)));
+      const lo = tier > 1 ? lines[tier - 2] : Math.min(...shown.map((p) => p.score));
+      const hi = tier < 4 ? lines[tier - 1] : Math.max(...shown.map((p) => p.score));
+      pool = shown.filter((p) => bandTier(p.score, lines) === tier);
+      pool = [...new Set([...pool, ...mine])];
+      scores = [lo, hi, ...mine.map((p) => p.score)];
+    } else scores = mine.map((p) => p.score);
+    if (!pool.length) return null;
+    const [xlo, xhi] = logDomain(pool.map((p) => p.cost));
+    const lin = niceLinear(Math.min(...scores), Math.max(...scores));
     return { c0: xlo, c1: xhi, s0: lin.lo, s1: lin.hi };
   }
 
@@ -311,6 +305,7 @@
     const out = { shown, points: [], labels: [], sweeps: [], frontier: [], xTicks: [], yTicks: [],
                   lines: [], bands: [], steps: "", wash: "", domain: null, plot: null };
     if (!shown.length) return out;
+    const H = st.height || 500;
     const iw = W - PAD.l - PAD.r, ih = H - PAD.t - PAD.b;
     out.plot = { x0: PAD.l, y0: PAD.t, x1: W - PAD.r, y1: H - PAD.b };
     let xlo, xhi, ylo, yhi, yticks;
@@ -361,10 +356,10 @@
     // the tier lines, and the name of each band they cut the axis into
     const tierLines = st.tierLines && st.tierLines.length === 3 ? st.tierLines : null;
     if (tierLines) {
-      out.lines = tierLines.map((cost, index) => ({ cost, index, x: X(cost), inside: cost >= xlo && cost <= xhi }));
-      const edges = [xlo, ...tierLines, xhi].map((c) => Math.min(Math.max(c, xlo), xhi));
-      out.bands = TIERS.slice().reverse().map((tier, i) => ({ tier, x0: X(edges[i]), x1: X(edges[i + 1]) }))
-        .filter((b) => b.x1 - b.x0 > 34);
+      out.lines = tierLines.map((score, index) => ({ score, index, y: Y(score), inside: score >= ylo && score <= yhi }));
+      const edges = [ylo, ...tierLines, yhi].map((s) => Math.min(Math.max(s, ylo), yhi));
+      out.bands = TIERS.slice().reverse().map((tier, i) => ({ tier, y0: Y(edges[i + 1]), y1: Y(edges[i]) }))
+        .filter((b) => b.y1 - b.y0 > 14);
     }
 
     const tiers = st.tiers || {};
@@ -373,7 +368,7 @@
       .map((p) => {
         const tier = pointTier(p, tiers);
         return { p, x: X(p.cost), y: Y(p.score), frontier: onFrontier.has(p), tier,
-                 band: bandTier(p.cost, tierLines), dim: !!st.focusTier && tier !== st.focusTier };
+                 band: bandTier(p.score, tierLines), dim: !!st.focusTier && tier !== st.focusTier };
       })
       .sort((a, b) => KIND_RANK[a.p.kind] - KIND_RANK[b.p.kind] || a.frontier - b.frontier);
 
@@ -479,7 +474,7 @@
         lines.push([`${lane.name}: ${here ? `tier ${here} here` : "no tier here yet"}, `
                     + `${lane.tier ?? "—"} in the catalog`, "mono"]);
       }
-      const band = bandTier(p.cost, tierLines);
+      const band = bandTier(p.score, tierLines);
       if (band) lines.push([`the band proposes tier ${band}`, "quiet"]);
     } else if (p.ours) {
       lines.push(["no lane runs this effort", "quiet"]);
@@ -516,6 +511,7 @@
                  zoom: null, pinned: null, filter: "" };
     const root = el("section", { class: "plot", "aria-label": "Score against cost plot" }, null, host);
     let last = null, pickerOpen = false;
+    let H = 500;
 
     // head: which board, what its dollar is, and the sentence it says
     const head = el("div", { class: "plot-head" }, null, root);
@@ -542,7 +538,8 @@
 
     const body = el("div", { class: "plot-body" }, null, root);
     const wrap = el("div", { class: "chart" }, null, body);
-    const chart = svg("svg", { viewBox: `0 0 ${W} ${H}`, role: "img" }, wrap);
+    const canvas = el("div", { class: "plot-canvas" }, null, wrap);
+    const chart = svg("svg", { viewBox: `0 0 ${W} ${H}`, role: "img" }, canvas);
     const tip = el("div", { class: "tip", role: "status" }, null, wrap);
     tip.hidden = true;
     const picker = el("div", { class: "picker" }, null, wrap);
@@ -582,23 +579,22 @@
     linesBox.addEventListener("change", () => { st.lines = linesBox.checked; draw(); });
     linesLabel.appendChild(document.createTextNode("Join each model's efforts"));
 
-    // the tier lines belong to the source, since its dollar is the axis: every
-    // plot of that source draws the same three, and a drag on any moves all
+    // Each benchmark has its own score scale and thresholds.
     const tiersFs = el("fieldset", {}, null, rail);
     el("legend", {}, "Tier lines", tiersFs);
     const tierLinesLabel = el("label", { class: "check" }, null, tiersFs);
     const tierLinesBox = el("input", { type: "checkbox" }, null, tierLinesLabel);
-    tierLinesLabel.appendChild(document.createTextNode("Draw the three lines on this source's cost axis"));
+    tierLinesLabel.appendChild(document.createTextNode("Draw the three lines on this benchmark's score axis"));
     tierLinesBox.addEventListener("change", () => {
       const board = boards.get(st.board);
       if (tierLinesBox.checked) {
-        if (!page.lines[board.source]) {
-          const costs = board.points.filter((p) => isShown(p, st) && p.lanes.length).map((p) => p.cost);
-          const lines = defaultLines(costs.length ? costs : board.points.filter((p) => isShown(p, st)).map((p) => p.cost));
-          if (lines) page.lines[board.source] = lines;
+        if (!page.lines[boardKey(board)]) {
+          const scores = board.points.filter((p) => isShown(p, st) && p.lanes.length).map((p) => p.score);
+          const lines = defaultLines(scores.length ? scores : board.points.filter((p) => isShown(p, st)).map((p) => p.score));
+          if (lines) page.lines[boardKey(board)] = lines;
         }
       } else {
-        delete page.lines[board.source];
+        delete page.lines[boardKey(board)];
       }
       page.save();
       page.redraw();
@@ -607,14 +603,11 @@
                            "Give every lane on this plot its band's tier", tiersFs);
     bandsButton.addEventListener("click", () => {
       const board = boards.get(st.board);
-      const lines = page.lines[board.source];
+      const lines = page.lines[boardKey(board)];
       if (!lines) return;
-      const changes = [];
-      for (const p of board.points) {
-        if (!isShown(p, st) || !p.lanes.length) continue;
-        changes.push([p.lanes.map((l) => l.name), bandTier(p.cost, lines)]);
-      }
-      page.setTiers(changes);
+      applyBands(board, lines, data.lanes, page.tiers, page.manual);
+      page.save();
+      page.redraw();
     });
 
     function chips(title, values, hidden, words) {
@@ -731,8 +724,8 @@
         el("span", {}, st.frontier === "lanes" ? "frontier of your lanes; the shade under it is beaten"
                                                : "frontier of every point shown; the shade under it is beaten", item);
       }
-      if (page.lines[board.source]) {
-        el("span", { class: "item note" }, "The dashed lines are guides between tiers; a dot takes any tier you give it.", legend);
+      if (page.lines[boardKey(board)]) {
+        el("span", { class: "item note" }, "Dragging a score line assigns bands. Hand-set tiers stay until cleared.", legend);
       }
       if (board.composite) el("span", { class: "item note" }, "A composite index: shown, never counted by the pre-screen.", legend);
     }
@@ -819,19 +812,19 @@
       }
       if (lay.steps) svg("path", { d: lay.steps, class: "steps" }, clipped);
       for (const b of lay.bands) {
-        svg("text", { x: (b.x0 + b.x1) / 2, y: PAD.t + 11, "text-anchor": "middle", class: "band-name" }, chart)
+        svg("text", { x: W - PAD.r - 5, y: (b.y0 + b.y1) / 2, "text-anchor": "end", class: "band-name" }, chart)
           .textContent = `tier ${b.tier}`;
       }
       for (const l of lay.lines) {
         if (!l.inside) continue;
         const g = svg("g", { class: "tier-handle", "data-line": l.index }, chart);
-        svg("line", { x1: l.x, x2: l.x, y1: PAD.t, y2: H - PAD.b, class: "tier-grip" }, g);
-        svg("line", { x1: l.x, x2: l.x, y1: PAD.t, y2: H - PAD.b, class: "tier-line" }, g);
+        svg("line", { x1: PAD.l, x2: W - PAD.r, y1: l.y, y2: l.y, class: "tier-grip" }, g);
+        svg("line", { x1: PAD.l, x2: W - PAD.r, y1: l.y, y2: l.y, class: "tier-line" }, g);
         g.addEventListener("pointerdown", (e) => {
           if (e.button !== 0) return;
           e.stopPropagation();
           e.preventDefault();
-          lineDrag = { index: l.index, source: board.source };
+          lineDrag = { index: l.index, key: boardKey(board) };
           g.querySelector(".tier-line").classList.add("held");
           try { chart.setPointerCapture(e.pointerId); } catch (_err) { /* still drags inside the plot */ }
         });
@@ -877,7 +870,7 @@
     }
 
     function placeNear(box, q) {
-      const scale = chart.getBoundingClientRect().width / W;
+      const scale = chart.clientWidth / W;
       const left = q.x * scale, top = q.y * scale;
       const bw = box.offsetWidth, wrapW = wrap.clientWidth;
       box.style.left = `${left + 14 + bw > wrapW ? left - 14 - bw : left + 14}px`;
@@ -887,7 +880,7 @@
     function showTip(q, board, decimals) {
       if (pickerOpen && selectedKey() === pointKey(q.p)) return;
       tip.textContent = "";
-      for (const [text, cls] of tipLines(q.p, board, decimals, page, page.lines[board.source])) {
+      for (const [text, cls] of tipLines(q.p, board, decimals, page, page.lines[boardKey(board)])) {
         el("div", cls ? { class: cls } : {}, text, tip);
       }
       tip.hidden = false;
@@ -910,7 +903,7 @@
       tierBoxes(row, q.p.lanes.map((l) => l.name), page);
       const none = el("button", { type: "button", class: "quiet-button" }, "none", row);
       none.addEventListener("click", (e) => { e.stopPropagation(); page.setTier(q.p.lanes.map((l) => l.name), null); });
-      const band = bandTier(q.p.cost, page.lines[board.source]);
+      const band = bandTier(q.p.score, page.lines[boardKey(board)]);
       el("p", { class: "quiet" }, band ? `Press 1 to 4. The band proposes tier ${band}.` : "Press 1 to 4.", picker);
       picker.hidden = false;
       placeNear(picker, q);
@@ -920,7 +913,7 @@
     // drag to zoom or pan, click to select a dot, double-click to reset
     let band = null, drag = null, downOnPoint = null, lineDrag = null, frame = null;
     function toSvg(e) {
-      const r = chart.getBoundingClientRect(), scale = r.width / W;
+      const r = chart.getBoundingClientRect(), scale = chart.clientWidth / W;
       return [(e.clientX - r.left) / scale, (e.clientY - r.top) / scale];
     }
     function costAt(x) {
@@ -957,15 +950,16 @@
     chart.addEventListener("pointermove", (e) => {
       if (lineDrag) {
         if (!last || !last.plot) return;
-        const [x] = toSvg(e);
-        const lines = page.lines[lineDrag.source];
+        const [, y] = toSvg(e);
+        const lines = page.lines[lineDrag.key];
         if (!lines) return;
-        let cost = costAt(x);
+        let score = scoreAt(y);
         const i = lineDrag.index;
-        if (i > 0) cost = Math.max(cost, lines[i - 1] * 1.02);
-        if (i < 2) cost = Math.min(cost, lines[i + 1] / 1.02);
-        lines[i] = cost;
-        soon(() => page.redraw(lineDrag ? lineDrag.source : null));
+        if (i > 0) score = Math.max(score, lines[i - 1] + (last.domain.yhi - last.domain.ylo) * 0.001);
+        if (i < 2) score = Math.min(score, lines[i + 1] - (last.domain.yhi - last.domain.ylo) * 0.001);
+        lines[i] = score;
+        applyBands(boards.get(st.board), lines, data.lanes, page.tiers, page.manual);
+        soon(() => page.redraw());
         return;
       }
       if (!drag) return;
@@ -1054,7 +1048,7 @@
     // this panel's settings with the page's tiers, lines and focus beside them
     function pageState(extra) {
       const board = boards.get(st.board);
-      return Object.assign({}, st, { tiers: page.tiers, tierLines: page.lines[board.source] || null,
+      return Object.assign({}, st, { height: H, tiers: page.tiers, tierLines: page.lines[boardKey(board)] || null,
                                      focusTier: page.focusTier }, extra || {});
     }
 
@@ -1070,6 +1064,8 @@
       drawAbout(board);
       finding.textContent = board.finding;
       const decimals = scoreDecimals(board);
+      H = Math.max(PAD.t + PAD.b + 50, chart.clientHeight / (chart.clientWidth || W) * W);
+      chart.setAttribute("viewBox", `0 0 ${W} ${H}`);
       last = layout(board, pageState());
       drawChart(board, last, decimals);
       drawLegend(board);
@@ -1077,13 +1073,14 @@
       fillModels();
       syncHarness();
       syncEfforts();
-      tierLinesBox.checked = !!page.lines[board.source];
-      bandsButton.disabled = !page.lines[board.source];
+      tierLinesBox.checked = !!page.lines[boardKey(board)];
+      bandsButton.disabled = !page.lines[boardKey(board)];
       reset.setAttribute("aria-disabled", String(!st.zoom && !page.focusTier));
       tip.hidden = true;
       drawPicker(board);
       remove.hidden = host.querySelectorAll("section.plot").length < 2;
       focus(null);
+      highlightLane();
     }
 
     select.addEventListener("change", () => {
@@ -1093,8 +1090,25 @@
       draw();
     });
 
+    function highlightLane() {
+      chart.querySelectorAll(".lane-highlight").forEach((n) => n.remove());
+      const names = page.hovered ? [page.hovered] : (page.selected ? page.selected.lanes : []);
+      for (const q of (last ? last.points : [])) {
+        if (!q.p.lanes.some((l) => names.includes(l.name))) continue;
+        const g = svg("g", { class: "lane-highlight", "pointer-events": "none" }, chart);
+        svg("circle", { cx: q.x, cy: q.y, r: 14, class: "sel" }, g);
+        const text = names.filter((n) => q.p.lanes.some((l) => l.name === n)).join(", ");
+        const x = Math.min(W - PAD.r - text.length * CHAR_PX, Math.max(PAD.l, q.x + 16));
+        svg("text", { x, y: Math.max(PAD.t + 14, q.y - 16), class: "label hot" }, g).textContent = text;
+      }
+    }
+    if (typeof ResizeObserver !== "undefined") {
+      new ResizeObserver(() => { if (last) draw(); }).observe(canvas);
+    }
+
     const panel = {
       root,
+      highlightLane,
       board: () => st.board,
       source: () => boards.get(st.board).source,
       draw,
@@ -1236,6 +1250,7 @@
       sections.textContent = "";
       for (const tier of TIERS) section(tier);
       section(null);
+      page.highlight(page.hovered);
       for (const row of sections.querySelectorAll(".lane-row")) {
         row.addEventListener("mouseenter", () => page.highlight(row.getAttribute("data-lane")));
         row.addEventListener("mouseleave", () => page.highlight(null));
@@ -1259,14 +1274,19 @@
     for (const [name, t] of Object.entries(saved.tiers || {})) {
       if (known.has(name) && TIERS.includes(t)) tiers[name] = t;
     }
-    const lines = {};
-    for (const [source, xs] of Object.entries(saved.lines || {})) {
-      if (Array.isArray(xs) && xs.length === 3 && xs.every((v) => typeof v === "number" && v > 0)) lines[source] = xs.slice();
+    const manual = {};
+    for (const name of Object.keys(tiers)) {
+      if (saved.version !== 2 || (saved.manual || {})[name]) manual[name] = true;
     }
-    const page = { tiers, lines, tierView: !!saved.tierView, focusTier: null, selected: null, storage: "ok" };
+    const lines = {};
+    for (const [key, xs] of Object.entries(saved.version === 2 ? saved.lines || {} : {})) {
+      if (data.boards.some((b) => boardKey(b) === key) && Array.isArray(xs) && xs.length === 3
+          && xs.every(Number.isFinite) && xs[0] < xs[1] && xs[1] < xs[2]) lines[key] = xs.slice();
+    }
+    const page = { tiers, lines, manual, hovered: null, tierView: !!saved.tierView, focusTier: null, selected: null, storage: "ok" };
     page.save = () => {
       try {
-        localStorage.setItem(key, JSON.stringify({ tiers, lines, tierView: page.tierView }));
+        localStorage.setItem(key, JSON.stringify({ version: 2, tiers, lines, manual, tierView: page.tierView }));
         page.storage = "ok";
       } catch (_err) {
         page.storage = "unavailable";
@@ -1297,7 +1317,8 @@
     page.setTiers = (changes) => {
       for (const [names, tier] of changes) {
         for (const name of names) {
-          if (tier) page.tiers[name] = tier; else delete page.tiers[name];
+          if (tier) { page.tiers[name] = tier; page.manual[name] = true; }
+          else { delete page.tiers[name]; delete page.manual[name]; }
         }
       }
       page.save();
@@ -1307,6 +1328,7 @@
     page.select = (selection, owner) => {
       page.selected = selection;
       every((p) => p.selected(owner));
+      page.highlight(null);
     };
     page.focus = (tier) => {
       page.focusTier = tier;
@@ -1320,12 +1342,11 @@
       if (tierPanel) tierPanel.draw();
     };
     page.highlight = (laneName) => {
-      const lane = data.lanes.find((l) => l.name === laneName);
-      for (const chart of host.querySelectorAll("svg[role=img]")) {
-        chart.classList.toggle("focusing", !!lane);
-        for (const node of chart.querySelectorAll("[data-m]")) {
-          node.classList.toggle("hot", !!lane && node.getAttribute("data-m") === lane.model);
-        }
+      page.hovered = laneName;
+      every((p) => p.highlightLane());
+      const names = page.selected ? page.selected.lanes : [];
+      for (const row of tierHost.querySelectorAll(".lane-row")) {
+        row.classList.toggle("selected", names.includes(row.dataset.lane));
       }
     };
 
@@ -1373,7 +1394,7 @@
   if (typeof module !== "undefined" && module.exports) {
     module.exports = { layout, frontier, logTicks, logDomain, niceLinear, fmtMoney, fmtTickMoney, place,
                        zoomAbout, covers, panBy, bandTier, defaultLines, pointTier, groupLanes, reviewOrder,
-                       tierLinesText, focusDomain, W, H, PAD };
+                       tierLinesText, focusDomain, applyBands, makeStore, boardKey, W, H, PAD };
   } else if (typeof document !== "undefined") {
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
     else boot();

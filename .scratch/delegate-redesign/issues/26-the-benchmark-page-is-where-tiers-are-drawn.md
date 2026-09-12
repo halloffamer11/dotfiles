@@ -83,10 +83,10 @@ words: the tier lines should be horizontal, "showing where things cut off".
 - [x] 7 focus a tier
 - [x] 8 tier view
 - [x] 9 reload survives, copy as lines
-- [ ] 10 horizontal tier lines; a drag tiers its band; hand-set tiers survive
-- [ ] 11 panel and plot highlight each other for every lane
-- [ ] 12 plot fills its column
-- [ ] 13 group order without Epoch uses AA mean rank
+- [x] 10 horizontal tier lines; a drag tiers its band; hand-set tiers survive
+- [x] 11 panel and plot highlight each other for every lane
+- [x] 12 plot fills its column
+- [x] 13 group order without Epoch uses AA mean rank
 - [ ] Orin draws his tiers on the page and sets them in the wizard
 
 ## Landed, 2026-09-12
@@ -205,3 +205,49 @@ Verification:
   `layout_lines` and `overlay` on the real catalog and rows, with the Epoch
   columns from the test fixture CSV (no network); the grouping reads as item 1.
 - Not verified: Orin with a real mouse, and his own tiers (his box).
+
+
+## Landed round 2, 2026-09-12
+
+Implemented in the working tree; no commits created. The session's explicit
+no-commit instruction overrides the brief's commit and clean-status requests.
+
+- Score thresholds are horizontal, per benchmark (scores have different scales,
+  even within AA). Dragging reassigns every carried plotted lane on that board,
+  including lanes hidden by display filters. Scores exactly on a boundary take
+  the higher tier. Hand assignments survive dragging and reload; clearing a tier
+  releases its override for the next drag. No-row lanes stay unchanged.
+- Saved state version 2 preserves old tiers as hand assignments and discards old
+  cost thresholds. New thresholds may be negative or zero and must be ordered.
+- Panel hover and selection draw an explicit ring and label for the exact lane,
+  even with labels off. Dot selection highlights the corresponding panel row.
+- The SVG fills the column beside its settings, using its actual aspect ratio
+  for layout, labels, pointer coordinates, and zoom. An independent canvas
+  container prevents SVG intrinsic sizing from feeding back into row height.
+- Model groups with no Epoch mean use their best lane AA mean in benchmark
+  order. A group with Epoch keeps Epoch ordering; efforts remain descending.
+
+Verification: 486 PASS lines across all 12 test files, no FAIL and all exit 0;
+bench_page 43 (was 42), setup_tui 77 (was 76), all other counts unchanged.
+Affected suites rerun after the final group-order and layout adjustments pass.
+Node syntax and git diff whitespace checks pass. No tests deleted. Replaced
+assertions: log-cost defaults and cost-band boundary test now check linear score
+thresholds; vertical x-position/band/focus assertions now check horizontal
+score y-position, score bands and score focus. Added override/clear/storage
+migration fixtures and AA group fallback/retained Epoch precedence fixtures.
+
+Browser: served locally and checked with Playwright on the 43-lane catalog and
+624 accepted AA/Terminal-Bench rows (Epoch is the local test CSV, no network).
+A real mouse drag assigned all 38 carried AA dots to their expected bands;
+Opus xhigh manually set to tier 1 survived another drag and reload. With labels
+set to none, panel hover and selection displayed opus-xhigh's label and ring.
+Clicking astra-xhigh's dot selected its panel row. Plot body and chart column
+both measured 873 px, with 794 px SVG and the hint below it. At 600 px viewport,
+page width remained 600 px. Only console error: missing local favicon.
+
+Evidence under `.scratch/t26r2/`: `suite.txt`, `browser-checks.json`, `gen-page.py`,
+`page.html`, `t26r2-highlight.png`, and `t26r2-bands.png`. The supplied external
+scratchpad was not read or written because this session restricts all paths to
+this worktree. The generator was recreated here using bench.collect/write.
+
+Still open: Orin's own tier drawing and wizard run (his existing last checkbox).

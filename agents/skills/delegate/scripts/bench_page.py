@@ -956,9 +956,10 @@ header p { color: var(--ink-2); }
 .pick select { font: inherit; font-size: 1.1rem; font-weight: 650; color: var(--ink); background: var(--surface);
   border: 1px solid var(--rule); border-radius: 4px; padding: 0.25rem 0.45rem; max-width: 100%; }
 .finding { font-size: 15px; line-height: 1.45; margin-top: 0.45rem; max-width: 60rem; }
-.plot-body { display: grid; grid-template-columns: minmax(0, 1fr) 15.5rem; gap: 1.1rem; margin-top: 0.7rem; align-items: start; }
-.chart { position: relative; }
-.chart > svg { display: block; width: 100%; height: auto; border: 1px solid var(--grid); border-radius: 4px;
+.plot-body { display: grid; grid-template-columns: minmax(0, 1fr) 15.5rem; gap: 1.1rem; margin-top: 0.7rem; align-items: stretch; }
+.chart { position: relative; display: flex; flex-direction: column; min-width: 0; }
+.plot-canvas { position: relative; flex: 1; min-height: 350px; }
+.plot-canvas > svg { position: absolute; display: block; width: 100%; height: 100%; border: 1px solid var(--grid); border-radius: 4px;
   cursor: crosshair; touch-action: none; user-select: none; -webkit-user-select: none; }
 .hint { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.7rem; font-size: 12.5px;
   color: var(--muted); margin-top: 0.45rem; }
@@ -1032,7 +1033,7 @@ svg.focusing .sweep.hot { stroke-width: 2.2; }
 svg .pt.dim, svg text.label.dim { opacity: 0.16; }
 svg.panning { cursor: grabbing; }
 svg .tier-line { stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: 5 4; }
-svg .tier-grip { stroke: transparent; stroke-width: 14; cursor: ew-resize; }
+svg .tier-grip { stroke: transparent; stroke-width: 14; cursor: ns-resize; }
 svg .tier-grip:hover + .tier-line, svg .tier-line.held { stroke: var(--ink); stroke-width: 1.6; stroke-dasharray: none; }
 svg text.band-name { font-size: 11px; fill: var(--ink-2); paint-order: stroke; stroke: var(--surface); stroke-width: 3px; }
 svg .sel { fill: none; stroke: var(--ink); stroke-width: 1.5; }
@@ -1069,7 +1070,7 @@ table.counts tr.tot th, table.counts tr.tot td { border-bottom: 0; border-top: 1
 .tiers textarea { width: 100%; font: 12px var(--mono); color: var(--ink); background: var(--page);
   border: 1px solid var(--rule); border-radius: 4px; padding: 0.35rem 0.45rem; margin-top: 0.35rem; resize: vertical; }
 .lane-row { display: flex; align-items: center; gap: 0.45rem; padding: 0.08rem 0; }
-.lane-row:hover { background: var(--head); }
+.lane-row.selected, .lane-row:hover { background: var(--head); }
 .lane-row .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font: 12.5px var(--mono); color: var(--ink); background: none; border: 0; padding: 0; text-align: left; cursor: pointer; }
 .lane-row .nm:hover { text-decoration: underline; text-decoration-color: var(--muted); }
