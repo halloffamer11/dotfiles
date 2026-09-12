@@ -53,14 +53,11 @@ first wizard run, plus its own rewrite of this section. It must merge `main` bef
 **Waiting on Orin** (nothing else blocks on these):
 
 - Ticket 23, delegate meter rows under the status line, is on `main` and live
-  in Orin's status line since 2026-09-11. The alignment fix and the
-  `report.py statusline off|on|toggle` switch are one commit past `main` on
-  `worktree/quiet-forest-811d`, no conflict:
-  `git -C ~/dotfiles merge --ff-only worktree/quiet-forest-811d`. The stowed
-  `statusline.sh` calls the installed skill, which is `main`'s, so the fix shows
-  only after that. Ticket 23 holds the row format and the decisions; its last
-  open box is pressing the ⌥⌘D Hammerspoon shortcut for the switch, which needs
-  Hammerspoon running and `~/.hammerspoon` stowed.
+  in Orin's status line since 2026-09-11, with the
+  `report.py statusline off|on|toggle` switch and its ⌥⌘D Hammerspoon shortcut
+  (`~/.hammerspoon` is the Makefile's whole-directory symlink into the repo,
+  never a stow package). Ticket 23 holds the row format and the decisions; its
+  last open box is one press of ⌥⌘D in each direction.
 - Run the wizard against the repo catalog, then link the live folder to it. From
   `~/dotfiles`:
   `python3 agents/skills/delegate/scripts/setup.py --config-dir stow/delegate/.config/delegate --effort-rows .scratch/delegate-redesign/_data/tbench-accepted.json`
