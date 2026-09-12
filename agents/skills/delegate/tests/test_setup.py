@@ -253,17 +253,17 @@ def case_routing_edits_keep_other_classes():
         cfg = os.path.join(td, "config")
         discover_path = os.path.join(td, "discover.json")
         write_discover(discover_path, catalog.HARNESSES)
-        answers = "\n" * 6 + "n\n" + "\n" * 3 + "3\n\n0.3\n\n" + "y\n"
+        answers = "\n" * 6 + "n\n" + "\n" * 6 + "3\n3\n" + "\n" * 2 + "0.3\n\n" + "y\n"
         result = run_setup(cfg, discover_path, answers, "--no-bench")
         _lanes, routing = load_written(cfg)
         unchanged = all(
-            routing["classTier"][name] == value
-            for name, value in routing_sample["classTier"].items()
+            routing["classes"][name] == routing_sample["classes"][name]
+            for name in catalog.CLASSES
             if name != "review"
         )
         return (
             result.returncode == 0
-            and routing["classTier"]["review"] == 3
+            and routing["classes"]["review"] == {"floor": 3, "ceiling": 3}
             and routing["margin"] == 0.3
             and unchanged,
             f"code={result.returncode}, routing={routing}",

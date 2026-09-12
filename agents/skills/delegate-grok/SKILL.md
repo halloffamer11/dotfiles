@@ -13,7 +13,7 @@ Resolve the lane using the existing ranker:
 
     python3 ~/.claude/skills/delegate/scripts/rank.py <class> --harnesses grok --json
 
-This returns `{"class", "need", "margin", "gate", "pick", "rows": [...]}` with `lane`, `model`, `effort`, `tier`, `pace`, `eligible`, and `reason` on each row.
+This returns `{"class", "floor", "ceiling", "margin", "gate", "pick", "rows": [...]}` with `lane`, `model`, `effort`, `tier`, `pace`, `eligible`, and `reason` on each row.
 
 1. Filter the rows by applying the user's plain-language constraints:
    - **Exclusions**: drop any model or lane the user asked to avoid or exclude.

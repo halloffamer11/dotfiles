@@ -172,35 +172,59 @@ def write_meters_doc(path, meters_list):
     return path
 
 
-def run_dispatch(t_env, args, extra_env=None):
+def run_dispatch(t_env, args, extra_env=None, orchestrator=None):
     env = dict(t_env["env"])
     if extra_env:
         env.update(extra_env)
-    cmd = [
-        sys.executable,
-        DELEGATE_PY,
-        "dispatch",
-        "--config-dir", t_env["config_dir"],
-        "--ads-dir", t_env["ads_dir"],
-        "--runs-dir", t_env["runs_dir"],
-        "--no-probe",
-    ] + args
+    if orchestrator is not None:
+        cmd = [
+            sys.executable,
+            "-c",
+            f"import sys; sys.path.insert(0, {DELEGATE_DIR!r}); import delegate; delegate.ORCHESTRATOR = {orchestrator!r}; sys.exit(delegate.main())",
+            "dispatch",
+            "--config-dir", t_env["config_dir"],
+            "--ads-dir", t_env["ads_dir"],
+            "--runs-dir", t_env["runs_dir"],
+            "--no-probe",
+        ] + args
+    else:
+        cmd = [
+            sys.executable,
+            DELEGATE_PY,
+            "dispatch",
+            "--config-dir", t_env["config_dir"],
+            "--ads-dir", t_env["ads_dir"],
+            "--runs-dir", t_env["runs_dir"],
+            "--no-probe",
+        ] + args
     return subprocess.run(cmd, capture_output=True, text=True, env=env)
 
 
-def run_run(t_env, args, extra_env=None):
+def run_run(t_env, args, extra_env=None, orchestrator=None):
     env = dict(t_env["env"])
     if extra_env:
         env.update(extra_env)
-    cmd = [
-        sys.executable,
-        DELEGATE_PY,
-        "run",
-        "--config-dir", t_env["config_dir"],
-        "--ads-dir", t_env["ads_dir"],
-        "--runs-dir", t_env["runs_dir"],
-        "--no-probe",
-    ] + args
+    if orchestrator is not None:
+        cmd = [
+            sys.executable,
+            "-c",
+            f"import sys; sys.path.insert(0, {DELEGATE_DIR!r}); import delegate; delegate.ORCHESTRATOR = {orchestrator!r}; sys.exit(delegate.main())",
+            "run",
+            "--config-dir", t_env["config_dir"],
+            "--ads-dir", t_env["ads_dir"],
+            "--runs-dir", t_env["runs_dir"],
+            "--no-probe",
+        ] + args
+    else:
+        cmd = [
+            sys.executable,
+            DELEGATE_PY,
+            "run",
+            "--config-dir", t_env["config_dir"],
+            "--ads-dir", t_env["ads_dir"],
+            "--runs-dir", t_env["runs_dir"],
+            "--no-probe",
+        ] + args
     return subprocess.run(cmd, capture_output=True, text=True, env=env)
 
 
@@ -468,8 +492,8 @@ def main():
         argv9e = json.load(open(os.path.join(dir9e, "argv.json")))
         ok9e = ("--dangerously-skip-permissions" in argv9e and "--read-only" not in argv9e)
 
-        # 9f: fable-xhigh@claude
-        res9f = run_dispatch(t_env, ["--lane", "fable-xhigh@claude", "--class", "impl", "--brief", b9, "--cwd", cwd])
+        # 9f: fable-xhigh@claude (relay path when ORCHESTRATOR is codex)
+        res9f = run_dispatch(t_env, ["--lane", "fable-xhigh@claude", "--class", "impl", "--brief", b9, "--cwd", cwd], orchestrator="codex")
         dir9f = parse_run_dir_from_stdout(res9f.stdout)
         argv9f = json.load(open(os.path.join(dir9f, "argv.json")))
         ok9f = ("--effort" in argv9f and argv9f[argv9f.index("--effort") + 1] == "xhigh" and "--timeout" in argv9f and argv9f[argv9f.index("--timeout") + 1] == "60m")
@@ -647,12 +671,12 @@ def main():
             meter("codex", weekly=0.55, five_h=0.55, pace=0.75, status="ok"),
             meter("grok", weekly=1.00, pace=0.90, status="ok"),
             meter("claude-fable", weekly=0.70, five_h=0.70, pace=0.85, status="ok"),
-            meter("claude-general", weekly=0.70, five_h=0.70, pace=0.85, status="ok"),
+            meter("claude-general", weekly=0.70, five_h=0.70, pace=0.70, status="ok"),
             meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
         ])
         b19 = make_brief("b19.md", f"fake-relay: status=completed final={done_final}\nBrief 19.")
         runs_before19 = set(os.listdir(t_env["runs_dir"]))
-        res19 = run_run(t_env, ["scout", "--brief", b19, "--cwd", cwd, "--meters", healthy_meters, "--dry-run"])
+        res19 = run_run(t_env, ["mechanical", "--brief", b19, "--cwd", cwd, "--meters", healthy_meters, "--dry-run"])
         runs_after19 = set(os.listdir(t_env["runs_dir"]))
         lines19 = res19.stdout.strip().splitlines()
         ok19 = (
@@ -661,10 +685,10 @@ def main():
             "delegate: dry run, nothing dispatched" in res19.stdout and
             runs_after19 == runs_before19
         )
-        record("19. run scout --dry-run", ok19, f"rc={res19.returncode} stdout={res19.stdout} stderr={res19.stderr}")
+        record("19. run mechanical --dry-run", ok19, f"rc={res19.returncode} stdout={res19.stdout} stderr={res19.stderr}")
 
         b20 = make_brief("b20.md", f"fake-relay: status=completed final={done_final}\nBrief 20.")
-        res20 = run_run(t_env, ["scout", "--brief", b20, "--cwd", cwd, "--meters", healthy_meters])
+        res20 = run_run(t_env, ["mechanical", "--brief", b20, "--cwd", cwd, "--meters", healthy_meters])
         dir20 = parse_run_dir_from_stdout(res20.stdout)
         ok20 = (
             res20.returncode == 0 and
@@ -677,25 +701,28 @@ def main():
         if ok20:
             disp20 = json.load(open(os.path.join(dir20, "dispatch.json")))
             ok20 = disp20.get("lane") == "flash-high@agy"
-        record("20. run scout dispatches flash-high@agy", ok20, f"rc={res20.returncode} stdout={res20.stdout} stderr={res20.stderr}")
+        record("20. run mechanical dispatches flash-high@agy", ok20, f"rc={res20.returncode} stdout={res20.stdout} stderr={res20.stderr}")
 
         b21 = make_brief("b21.md", f"fake-relay: status=completed final={done_final}\nBrief 21.")
-        res21 = run_run(t_env, ["impl", "--brief", b21, "--cwd", cwd, "--meters", healthy_meters, "--effort", "low"])
+        res21 = run_run(t_env, ["impl", "--brief", b21, "--cwd", cwd, "--meters", healthy_meters, "--tier", "3"])
         dir21 = parse_run_dir_from_stdout(res21.stdout)
-        terra_line = next((ln for ln in res21.stdout.splitlines() if "terra-high@codex" in ln), "")
-        ok21 = (
+        sol_line = next((ln for ln in res21.stdout.splitlines() if "sol-high@codex" in ln), "")
+        ok21_pick = (
             res21.returncode == 0 and
-            "tier=2" in terra_line and
+            "pick" in sol_line and
             dir21 is not None
         )
-        if ok21:
-            argv21 = json.load(open(os.path.join(dir21, "argv.json")))
+        if ok21_pick:
             disp21 = json.load(open(os.path.join(dir21, "dispatch.json")))
-            ok21 = (
-                "--effort" in argv21 and argv21[argv21.index("--effort") + 1] == "low" and
-                disp21.get("effort") == "low"
-            )
-        record("21. run impl --effort low keeps catalog tier", ok21, f"rc={res21.returncode} terra={terra_line} stderr={res21.stderr}")
+            ok21_pick = disp21.get("lane") == "sol-high@codex"
+
+        res21_bad = run_run(t_env, ["impl", "--brief", b21, "--cwd", cwd, "--meters", healthy_meters, "--tier", "1"])
+        ok21_bad = (
+            res21_bad.returncode == 2 and
+            "outside [2, 3] for class 'impl'" in res21_bad.stderr
+        )
+        ok21 = ok21_pick and ok21_bad
+        record("21. run impl --tier 3 raises floor and bad tier exits 2", ok21, f"rc={res21.returncode} sol={sol_line} bad_err={res21_bad.stderr}")
 
         gated_meters = write_meters_doc(os.path.join(tmpdir, "gated_meters.json"), [
             meter("codex", weekly=0.05, five_h=0.05, pace=0.75, status="unavailable"),
@@ -848,6 +875,98 @@ def main():
         out28c = delegate.map_result(dir28c, "40m", 0, None)
         ok28c = (out28c["status"] == "blocked" and out28c["reason"] == gate_reason)
         record("28c. gate cancel with an empty final message names the gate", ok28c, f"out={out28c}")
+
+        # -------------------------------------------------------------
+        # Cases 29-31 need a claude lane inside the impl range. The sample keeps
+        # only fable-xhigh@claude (tier 4), so add opus-high@claude to this copy.
+        import json as _json
+        _lanes_path = os.path.join(t_env["config_dir"], "lanes.json")
+        with open(_lanes_path, encoding="utf-8") as _f:
+            _lanes_doc = _json.load(_f)
+        _opus = {k: v for k, v in _lanes_doc["lanes"]["fable-xhigh@claude"].items()
+                 if k not in ("published_as", "note")}
+        _opus.update(model="claude-opus-5", effort="high", meter="claude-general",
+                     tier=3, basis="test fixture: native claude lane")
+        _lanes_doc["lanes"]["opus-high@claude"] = _opus
+        with open(_lanes_path, "w", encoding="utf-8") as _f:
+            _json.dump(_lanes_doc, _f, indent=2)
+
+        # -------------------------------------------------------------
+        # 29. dispatch native lane prints native line, writes prompt.md, no relay
+        b29 = make_brief("b29.md", "Brief 29.")
+        runs_before29 = set(os.listdir(t_env["runs_dir"]))
+        res29 = run_dispatch(t_env, ["--lane", "opus-high@claude", "--class", "impl", "--brief", b29, "--cwd", cwd])
+        runs_after29 = set(os.listdir(t_env["runs_dir"]))
+        new_runs29 = list(runs_after29 - runs_before29)
+        ok29 = (
+            res29.returncode == 0 and
+            len(new_runs29) == 1 and
+            res29.stdout.strip().startswith("delegate: native lane=opus-high@claude agent=lane-opus-high prompt=")
+        )
+        if ok29:
+            dir29 = os.path.join(t_env["runs_dir"], new_runs29[0])
+            prompt_in_stdout = res29.stdout.strip().split("prompt=")[-1]
+            expected_prompt = os.path.abspath(os.path.join(dir29, "prompt.md"))
+            ok29 = (
+                prompt_in_stdout == expected_prompt and
+                os.path.isfile(expected_prompt) and
+                not os.path.exists(os.path.join(dir29, "argv.json")) and
+                not os.path.exists(os.path.join(dir29, "relay.stdout"))
+            )
+        record("29. dispatch native lane prints native line, writes prompt.md, no relay", ok29, f"rc={res29.returncode} stdout={res29.stdout}")
+
+        # -------------------------------------------------------------
+        # 30. run native lane prints rank and native line, no relay
+        native_meters = write_meters_doc(os.path.join(tmpdir, "native_meters.json"), [
+            meter("codex", weekly=0.55, five_h=0.55, pace=0.75, status="ok"),
+            meter("grok", weekly=1.00, pace=0.90, status="ok"),
+            meter("claude-fable", weekly=0.70, five_h=0.70, pace=0.85, status="ok"),
+            meter("claude-general", weekly=0.70, five_h=0.70, pace=1.50, status="ok"),
+            meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
+        ])
+        b30 = make_brief("b30.md", "Brief 30.")
+        runs_before30 = set(os.listdir(t_env["runs_dir"]))
+        res30 = run_run(t_env, ["impl", "--brief", b30, "--cwd", cwd, "--meters", native_meters, "--tier", "3"])
+        runs_after30 = set(os.listdir(t_env["runs_dir"]))
+        new_runs30 = list(runs_after30 - runs_before30)
+        lines30 = [ln for ln in res30.stdout.strip().splitlines() if ln.strip()]
+        last_line30 = lines30[-1] if lines30 else ""
+        ok30 = (
+            res30.returncode == 0 and
+            len(new_runs30) == 1 and
+            "delegate: dispatching" not in res30.stdout and
+            last_line30.startswith("delegate: native lane=opus-high@claude agent=lane-opus-high prompt=")
+        )
+        if ok30:
+            dir30 = os.path.join(t_env["runs_dir"], new_runs30[0])
+            prompt_in_stdout30 = last_line30.split("prompt=")[-1]
+            expected_prompt30 = os.path.abspath(os.path.join(dir30, "prompt.md"))
+            ok30 = (
+                prompt_in_stdout30 == expected_prompt30 and
+                os.path.isfile(expected_prompt30) and
+                not os.path.exists(os.path.join(dir30, "argv.json")) and
+                not os.path.exists(os.path.join(dir30, "relay.stdout"))
+            )
+        record("30. run native lane prints native line, writes prompt.md, no relay", ok30, f"rc={res30.returncode} stdout={res30.stdout}")
+
+        # -------------------------------------------------------------
+        # 31. ORCHESTRATOR=codex sends claude lane through fake relay
+        b31 = make_brief("b31.md", f"fake-relay: status=completed final={done_final}\nBrief 31.")
+        runs_before31 = set(os.listdir(t_env["runs_dir"]))
+        res31 = run_dispatch(t_env, ["--lane", "opus-high@claude", "--class", "impl", "--brief", b31, "--cwd", cwd], orchestrator="codex")
+        runs_after31 = set(os.listdir(t_env["runs_dir"]))
+        new_runs31 = list(runs_after31 - runs_before31)
+        ok31 = (
+            res31.returncode == 0 and
+            len(new_runs31) == 1 and
+            "delegate:" in res31.stdout and
+            "delegate-metrics:" in res31.stdout and
+            "delegate: native" not in res31.stdout
+        )
+        if ok31:
+            dir31 = os.path.join(t_env["runs_dir"], new_runs31[0])
+            ok31 = os.path.exists(os.path.join(dir31, "argv.json")) and os.path.exists(os.path.join(dir31, "relay.stdout"))
+        record("31. ORCHESTRATOR=codex sends claude lane through fake relay", ok31, f"rc={res31.returncode} stdout={res31.stdout}")
 
     if fails > 0:
         print(f"FAIL: {fails} tests failed", file=sys.stderr)

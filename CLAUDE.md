@@ -6,6 +6,7 @@ Machine configuration and agent tooling managed as one Git repository.
 
 - Read `Makefile` before changing installation or stow behavior.
 - Read `references/CLAUDE.md` for repository-wide operating context.
+- Read `CONTEXT.md` for the domain vocabulary (today: delegate's terms).
 - Each active skill under `agents/skills/` owns its detailed context.
 - `tools/` holds what a skill uses but does not execute: `tools/delegate-mon/` is a
   Rust crate, the `delegate-mon` monitoring TUI, built out to its plan and owning
@@ -17,34 +18,27 @@ Machine configuration and agent tooling managed as one Git repository.
 The delegate redesign is the only live thread. Spec
 `docs/superpowers/specs/2026-09-08-delegate-redesign.md`; tickets in
 `.scratch/delegate-redesign/issues/`, each carrying its own decisions and a
-"Landed" note; skill context `agents/skills/delegate/CLAUDE.md`. The boxes left
-unticked in a landed ticket are Orin's own confirmations, which its Status line names.
+"Landed" note; skill context `agents/skills/delegate/CLAUDE.md`. Tickets 01-18 and
+22-24 are landed, and the boxes left unticked there are Orin's own confirmations,
+which each ticket's Status line names.
 
-**`main` and `bench-aa-effort-slugs` have diverged from `ea5430b`** (2026-09-11):
+**Branch `bench-aa-effort-slugs`** (worktree
+`~/.herdr/worktrees/dotfiles/delegate-lane-catalog`) merged `main` at `c35f892`
+(2026-09-12). It holds ticket 18 (AA rows from the page's own dataset, the majority
+carry rule) and ticket 24 (the benchmark page as plots with settings). Ticket 24 was
+numbered 22 and then 23 on this branch until `main`'s 22 and 23 were seen, so
+commit `221283c` says 22 and `71b8b47` says 23. `main` holds ticket 22 (each class has
+a floor and a ceiling in `routing.json` `classes`, no class reaches tier 4,
+`run --tier` raises the floor for one job, Claude lanes run natively as the `lane-*`
+agents in `agents/agents/`) and ticket 23 (meter rows in the status line).
 
-- `main` (`7c966a7`, the `~/dotfiles` checkout) landed ticket 22: each class has a
-  floor and a ceiling, no class reaches tier 4, and Claude lanes run natively as the
-  `lane-*` agents. It also added a root `CONTEXT.md`, which is ticket 20's glossary.
-  Its `CLAUDE.md` is newer than this one on what waits on Orin.
-- This branch (worktree `~/.herdr/worktrees/dotfiles/delegate-lane-catalog`) landed
-  ticket 18 (AA rows from the page's own dataset, the majority carry rule) and
-  ticket 23 (the benchmark page as plots with settings; its commit `221283c` still
-  says 22, the number it held before `main`'s 22 was seen), and holds the text of
-  tickets 19-21. Suite green at 394 `PASS` lines across 12 files (two of the twelve
-  report one summary line rather than one line per assertion).
-
-The branch must merge `main` before `main` can take it. Both sides changed
-`CLAUDE.md`, `agents/skills/delegate/CLAUDE.md`, `scripts/setup.py`,
-`scripts/setup_tui.py`, `tests/test_setup.py` and `tests/test_setup_tui.py`, so
-expect conflicts in all six. `~/.claude/skills/delegate` and the four `delegate-*`
-wrappers symlink into `~/dotfiles`, so the installed skill has ticket 22 and not 18
-or 23.
+`~/.claude/skills/delegate` and the four `delegate-*` wrappers symlink into
+`~/dotfiles`, the **main** checkout, so the installed skill has tickets 18 and 24
+only after `main` fast-forwards to this branch.
 
 **Open, in priority order:**
 
-1. **Merge `main` into this branch**, resolve the six conflicts, run the whole
-   suite, and then fast-forward `main`. For this file, take `main`'s text for the
-   stow step and the Delegation section, and keep this branch's for tickets 18 and 23.
+1. **Fast-forward `main` to this branch** once the suite is green here.
 2. **Orin's own wizard run.** Nothing in the workflow is known to be wrong now:
    attribution is per lane (ticket 17), every codex effort is a lane, and each page
    makes one decision per line. The tiers on the 19 generated codex lanes and the
@@ -52,18 +46,24 @@ or 23.
    `timeout` and `tier` are not measurements. Each such lane says so in its `note`.
 3. **Tickets 19-21**, in that order: 19 gives claude, agy and grok the per-effort
    lanes only codex has today, and each Claude lane it makes also needs a `lane-*`
-   agent file (ticket 22); 20's glossary half is done by `main`'s `CONTEXT.md`, and
-   its start-page half is not; 21 makes the report and the tier pages read the
+   agent file (ticket 22); 20's glossary half is done by `CONTEXT.md`, and its
+   start-page half is not; 21 makes the report and the tier pages read the
    per-effort AA rows instead of the free API's one entry per model.
 
 **Waiting on Orin** (nothing else blocks on these):
 
-- After the merge, run the wizard against the repo catalog, then link the live
-  folder to it. From the worktree root:
+- Ticket 23, delegate meter rows under the status line, is on `main` and live
+  in Orin's status line since 2026-09-11, with the
+  `report.py statusline off|on|toggle` switch and its ⌥⌘D Hammerspoon shortcut
+  (`~/.hammerspoon` is the Makefile's whole-directory symlink into the repo,
+  never a stow package). Ticket 23 holds the row format and the decisions; its
+  last open box is one press of ⌥⌘D in each direction.
+- Run the wizard against the repo catalog, then link the live folder to it. From
+  the repo root:
   `python3 agents/skills/delegate/scripts/setup.py --config-dir stow/delegate/.config/delegate --effort-rows .scratch/delegate-redesign/_data/aa-accepted.json --effort-rows .scratch/delegate-redesign/_data/tbench-accepted.json`
   then move the plain `lanes.json` and `routing.json` out of `~/.config/delegate` and
   run `stow -d stow -t ~ -R delegate` (never `--adopt`, which would pull the 10-lane
-  live file over the repo's); ticket 22's last section has the full steps. The run
+  live file over the repo's). Ticket 22's last section has the full steps. The run
   closes tickets 06, 07, 07b and 15's last box. The carry page should propose
   `astra-xhigh@codex` off ("high wins on aa" or "on tbench") and the three `ultra`
   lanes off as never carried. The `o` key's page opens on the AA Intelligence Index
@@ -123,7 +123,7 @@ was the reference for where the dataset sits in the page.
   tie-break, so a steal only ever crosses tiers (tickets 01 and 02).
 - Each class has a floor and a ceiling; the floor is the default, and tier 4 is
   reached only by naming a lane until setup says otherwise. Tiers are what Orin sets:
-  tests check the rule on fixtures, never his tiers (ticket 22, on `main`).
+  tests check the rule on fixtures, never his tiers (ticket 22).
 - The Delegation section of `~/.claude/CLAUDE.md` is gone (2026-09-11); the skill is
   the only routing rule, and "Fable never runs as a worker" went with it.
 - One decision per line on each page, with the same `[x]`/`[ ]` marker on every
@@ -140,7 +140,7 @@ was the reference for where the dataset sits in the page.
   on. The AA composite index is shown and never counted (Orin, 2026-09-11, ticket
   18).
 - The benchmark page's frontier is a display aid, not a rule: nothing reads it, and
-  the carry rule above is the only thing that proposes a lane off (ticket 23).
+  the carry rule above is the only thing that proposes a lane off (ticket 24).
 
 Preserve unrelated working-tree changes. Validate the smallest affected surface
 before committing.
@@ -159,5 +159,5 @@ The five default roles, written as a waiting ticket's `**Status:**` value. See
 
 ### Domain docs
 
-Single-context: the glossary is the root `CONTEXT.md` on `main` (this branch gets it
-at the merge); `docs/adr/` does not exist yet. See `docs/agents/domain.md`.
+Single-context: the glossary is the root `CONTEXT.md`; `docs/adr/` does not exist
+yet. See `docs/agents/domain.md`.

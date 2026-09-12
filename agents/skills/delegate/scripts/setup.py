@@ -191,7 +191,8 @@ def ask_lanes(lanes_doc):
 
 def show_routing(routing_doc):
     for name in CLASSES:
-        print(f"classTier.{name}: {routing_doc['classTier'][name]}")
+        cls_info = routing_doc["classes"][name]
+        print(f"classes.{name}: floor={cls_info['floor']} ceiling={cls_info['ceiling']}")
     print(f"margin: {routing_doc['margin']}")
     print(f"gate: {routing_doc['gate']}")
 
@@ -201,9 +202,11 @@ def ask_routing(routing_doc):
     if read_answer("keep routing as shown? [Y/n] ").strip().lower() != "n":
         return
     for name in CLASSES:
-        routing_doc["classTier"][name] = ask_int(
-            f"{name} tier", routing_doc["classTier"][name], 1, 4
-        )
+        cls_info = routing_doc["classes"][name]
+        f = ask_int(f"{name} floor", cls_info["floor"], 1, 4)
+        c = ask_int(f"{name} ceiling", max(f, cls_info["ceiling"]), f, 4)
+        cls_info["floor"] = f
+        cls_info["ceiling"] = c
     routing_doc["margin"] = ask_fraction("margin", routing_doc["margin"])
     routing_doc["gate"] = ask_fraction("gate", routing_doc["gate"])
 

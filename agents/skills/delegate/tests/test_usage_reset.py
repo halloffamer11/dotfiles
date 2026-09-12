@@ -4,7 +4,7 @@ import json, os, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.abspath(os.path.join(HERE, "..", "scripts")))
-from usage import claude_reset, write_cache, load_cache
+from usage import claude_reset, write_cache, load_cache, lane
 
 
 def fail(msg):
@@ -95,6 +95,29 @@ def main():
         with open(ledger_path) as f:
             lines2 = [l.strip() for l in f if l.strip()]
         assert_true(len(lines2) == 1, f"load_cache unexpectedly appended to ledger; count is {len(lines2)}")
+
+        # 3. Test remaining_weekly_model on model meter lane and general lane
+        l_fable = lane("claude", "fable", 0.58, 0.46, None, None, remaining_weekly_model=0.59)
+        assert_true(l_fable.get("remaining_weekly_model") == 0.59, "l_fable remaining_weekly_model != 0.59")
+        assert_true(l_fable.get("remaining_weekly") == 0.46, "l_fable remaining_weekly != 0.46")
+
+        l_gen = lane("claude", "general", 0.58, 0.46, None, None)
+        assert_true(l_gen.get("remaining_weekly_model") is None, "l_gen remaining_weekly_model is not None")
+
+        doc_with_model = {
+            "probed_at": now,
+            "probed_at_iso": "2026-09-02T23:00:00+00:00",
+            "gate": 0.1,
+            "rollover_min": 30,
+            "lanes": [l_fable, l_gen],
+        }
+        write_cache(doc_with_model, cache_path=cache_path)
+        with open(ledger_path) as f:
+            lines3 = [l.strip() for l in f if l.strip()]
+        assert_true(len(lines3) == 2, f"expected 2 lines in ledger, got {len(lines3)}")
+        event2 = json.loads(lines3[1])
+        assert_true(event2["lanes"][0].get("remaining_weekly_model") == 0.59, "ledger event fable remaining_weekly_model mismatch")
+        assert_true(event2["lanes"][1].get("remaining_weekly_model") is None, "ledger event general remaining_weekly_model mismatch")
 
     print("PASS: all test_usage_reset tests passed")
     sys.exit(0)

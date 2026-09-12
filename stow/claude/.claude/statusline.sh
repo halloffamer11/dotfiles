@@ -136,8 +136,6 @@ S_MODEL="${C_ACC}${B}🤖 ${model}${R}"
 S_CTX="🧠 $(ctx_pct "$ctx_pct")"
 SEC_MAIN="${S_MODEL}${isep}${S_CTX}"
 
-SEC_USAGE=""; [[ -n $five_pct ]] && SEC_USAGE="🕔 $(pct "$five_pct")${isep}${D}↻$(until_short "$five_reset")${R}"
-
 S_CACHE=""
 if [[ $cache_warm == true ]]; then
   S_CACHE="🔥 ${C_GRN}${cache_hit:-?}%${R}"
@@ -162,8 +160,20 @@ S_VIM=""; [[ -n $vim ]] && S_VIM="${C_YEL}${B}${vim}${R}"
 
 join() { local out="" s; for s in "$@"; do [[ -n $s ]] || continue; out+="${out:+$sep}$s"; done; printf '%s' "$out"; }
 
-LINE1=("$S_DIR" "$git_seg" "$SEC_MAIN" "$SEC_USAGE" "$SEC_CLOCK")
+LINE1=("$S_DIR" "$git_seg" "$SEC_MAIN" "$SEC_CLOCK")
 LINE2=("$S_SESS" "$S_WT" "$S_AGENT" "$S_HERDR" "$S_STYLE" "$S_VIM")
+
+# ---------- delegate meter rows (ticket 23) ----------
+# One row per catalog meter from the installed skill: remaining 5h and weekly
+# windows, the tier each harness wins now, and running agents. Reads caches
+# only, never probes. Absent python3 or script, or a non-zero exit, adds nothing.
+# Switch: `report.py statusline off|on|toggle` (flag file
+# ~/.cache/delegate/statusline.off); the next refresh, 30 s at most, follows it.
+extra_rows=""
+script="$HOME/.claude/skills/delegate/scripts/report.py"
+if command -v python3 >/dev/null 2>&1 && [[ -f $script ]]; then
+  extra_rows=$(python3 "$script" statusline 2>/dev/null) || extra_rows=""
+fi
 
 case $style in
   one)
@@ -172,3 +182,7 @@ case $style in
     join "${LINE1[@]}"; echo
     join "${LINE2[@]}"; echo ;;
 esac
+
+if [[ -n $extra_rows ]]; then
+  printf '%s\n' "$extra_rows"
+fi

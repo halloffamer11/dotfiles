@@ -1,13 +1,28 @@
 {
   "version": "delegate-routing.v1",
-  "classTier": {
-    "scout": 1,
-    "mechanical": 1,
-    "impl": 2,
-    "review": 2,
-    "hard-impl": 3
+  "classes": {
+    "scout": {
+      "floor": 2,
+      "ceiling": 3
+    },
+    "mechanical": {
+      "floor": 1,
+      "ceiling": 2
+    },
+    "impl": {
+      "floor": 2,
+      "ceiling": 3
+    },
+    "review": {
+      "floor": 3,
+      "ceiling": 3
+    },
+    "hard-impl": {
+      "floor": 3,
+      "ceiling": 3
+    }
   },
   "margin": 0.2,
   "gate": 0.1,
-  "note": "override per project: e.g. {\"classTier\": {\"review\": 3}} sends reviews to sol"
+  "note": "floor is the default tier; ceiling is the maximum tier. override per project: e.g. {\"classes\": {\"scout\": {\"floor\": 3}}}"
 }

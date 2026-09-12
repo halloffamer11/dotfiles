@@ -52,6 +52,57 @@
         "Fable 5.1"
       ]
     },
+    "haiku-high@claude": {
+      "harness": "claude",
+      "model": "claude-haiku-4-5-20251001",
+      "effort": "high",
+      "meter": "claude-general",
+      "meter_weight": 1,
+      "timeout": "40m",
+      "price": {
+        "in": null,
+        "cache_read": null,
+        "cache_write": null,
+        "out": null
+      },
+      "tier": 1,
+      "basis": "Claude general pool; native lane (ticket 22)",
+      "note": "PROVISIONAL: tier set 2026-09-11 pending the wizard; meter_weight and timeout are placeholders; price not sourced. Haiku 4.5 does not accept effort; high is a label only."
+    },
+    "sonnet-high@claude": {
+      "harness": "claude",
+      "model": "claude-sonnet-5",
+      "effort": "high",
+      "meter": "claude-general",
+      "meter_weight": 3,
+      "timeout": "40m",
+      "price": {
+        "in": null,
+        "cache_read": null,
+        "cache_write": null,
+        "out": null
+      },
+      "tier": 2,
+      "basis": "Claude general pool; native lane (ticket 22)",
+      "note": "PROVISIONAL: tier set 2026-09-11 pending the wizard; meter_weight and timeout are placeholders; price not sourced."
+    },
+    "opus-high@claude": {
+      "harness": "claude",
+      "model": "claude-opus-5",
+      "effort": "high",
+      "meter": "claude-general",
+      "meter_weight": 5,
+      "timeout": "40m",
+      "price": {
+        "in": null,
+        "cache_read": null,
+        "cache_write": null,
+        "out": null
+      },
+      "tier": 3,
+      "basis": "Claude general pool; native lane (ticket 22)",
+      "note": "PROVISIONAL: tier set 2026-09-11 pending the wizard; meter_weight and timeout are placeholders; price not sourced."
+    },
     "astra-high@codex": {
       "harness": "codex",
       "model": "gpt-6-astra",

@@ -46,7 +46,7 @@ def run(cmd, timeout=60, stdin_data=None):
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return None
 
-def lane(harness, meter, five_h=None, weekly=None, reset_5h=None, reset_wk=None, note=None):
+def lane(harness, meter, five_h=None, weekly=None, reset_5h=None, reset_wk=None, note=None, remaining_weekly_model=None):
     """five_h/weekly are REMAINING fractions (0..1) or None; resets are epoch seconds or None."""
     known = [x for x in (five_h, weekly) if x is not None]
     r = min(known) if known else None
@@ -62,7 +62,9 @@ def lane(harness, meter, five_h=None, weekly=None, reset_5h=None, reset_wk=None,
         pace = round(weekly / cycle_left, 3)
     score = pace if pace is not None else r
     return {"lane": f"{harness}-{meter}" if meter else harness, "harness": harness, "meter": meter,
-            "remaining_5h": five_h, "remaining_weekly": weekly, "r": r, "binding": binding,
+            "remaining_5h": five_h, "remaining_weekly": weekly,
+            "remaining_weekly_model": remaining_weekly_model,
+            "r": r, "binding": binding,
             "reset_5h": reset_5h, "reset_weekly": reset_wk, "reset_binding": reset,
             "cycle_left": cycle_left, "pace": pace, "score": score,
             "status": status, "rollover_soon": rollover, "note": note}
@@ -163,7 +165,8 @@ def probe_claude():
         fm = 1 - int(m.group(2)) / 100.0
         wk = min(fw, fm) if fw is not None else fm
         lanes.append(lane("claude", name.lower(), f5, wk, claude_reset(r5), claude_reset(m.group(3) or rw),
-                          note=f"model-meter weekly {m.group(2)}% used; resets '{m.group(3)}'"))
+                          note=f"model-meter weekly {m.group(2)}% used; resets '{m.group(3)}'",
+                          remaining_weekly_model=fm))
     return lanes
 
 # ---------------------------------------------------------------- grok
