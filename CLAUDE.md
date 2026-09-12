@@ -48,11 +48,12 @@ only after `main` fast-forwards to this branch.
    wrote nothing. 25 is the wizard and its page: tier marks start empty (the
    placeholder tiers pre-marked lanes), tier pages hide off and taken lanes, a
    review page after T1, a routing description panel, a facts-only start page, and
-   board descriptions and zoom on the benchmark page. 19 is lanes and data: every
-   effort a harness offers is a lane (Claude models have one each today), every
-   Claude model reaches its rows (Terminal-Bench `Opus 5` is unmatched; Haiku has
-   no AA rows), and the report reads the per-effort AA rows instead of the free
-   API. 20 and 21 are closed into them. Orin's wizard run (item 2) waits on both.
+   board descriptions and zoom on the benchmark page. 19 is lanes and data, and is
+   implemented on branch `t19-efforts-and-rows` (2026-09-12), pending Orin's review:
+   Fable, Opus and Sonnet are lanes at all five claude efforts and Gemini 3.8 Flash
+   at all three agy efforts (Haiku takes none; grok is high only until a paid probe),
+   every Claude lane model reaches its rows, and the report reads the per-effort AA
+   rows. 20 and 21 are closed into them. Orin's wizard run (item 2) waits on both.
 
 **Waiting on Orin** (nothing else blocks on these):
 
@@ -101,21 +102,19 @@ Coverage is uneven and the three sources are not interchangeable: swerb reaches 
 Terminal-Bench are wider but publish display names (ticket 16). Cost is per-task on
 swerb and on Artificial Analysis, but Terminal-Bench's `display_cost` is a whole-run
 figure. Even the two per-task numbers measure different task sets, so never compare
-costs across sources. The AA key is at `~/.config/delegate/aa-key`, mode 600, outside
-the repo and in `.gitignore` — never stow it; this repo is public. Where a note says
-AA covers a model, it means the `/models/<slug>` page payload that `effort.py aa`
-reads, not the free API that `bench.py` calls (`AA_URL`). AA's cost per task is the
-Intelligence Index's, one figure per variant, repeated on each component row.
+costs across sources. Where a note says AA covers a model, it means the
+`/models/<slug>` page payload that `effort.py aa` reads. AA's cost per task is the
+Intelligence Index's, one figure per variant, repeated on each component row. AA does
+not measure Haiku at a lane's effort (`sources.json` says why).
 
-`flash-high@agy` has no rows in any approved source, so its tier is a judgement from
-its `basis` note rather than from numbers. The AA figures for `gpt-5.6-sol`,
-`gpt-5.6-terra` and `grok-4.6` were measured at low/medium/medium against lanes that
-run high; the report prints that caveat per model.
-
-The report still reads AA through the free API and the key; ticket 21 moves it onto
-the per-effort rows `effort.py aa` writes and retires both. Ticket 18's Landed note
-carries the measurements; llm-cost-frontier's `update.py` (catalystneuro, BSD-3)
-was the reference for where the dataset sits in the page.
+Since ticket 19 the report, the tier pages and the benchmark page read AA only from
+those accepted rows (`bench.py --effort-rows`, `setup.py --effort-rows`), one figure
+per lane at the lane's own effort. The free API, `AA_URL`, `load_key` and the
+key-file argument are gone, and nothing reads `~/.config/delegate/aa-key` any more;
+if the file is still there it is unused, and it must still never be stowed or
+committed, since this repo is public. Ticket 18's Landed note carries the
+measurements; llm-cost-frontier's `update.py` (catalystneuro, BSD-3) was the
+reference for where the dataset sits in the page.
 
 ## Settled, do not re-raise
 
