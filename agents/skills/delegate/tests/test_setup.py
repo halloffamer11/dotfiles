@@ -350,7 +350,45 @@ def case_plain_prints_the_start_facts():
         return ok, f"facts={facts} positions={positions} stdout={result.stdout[:500]!r}"
 
 
+def case_tiers_from_applies_the_page_lines():
+    """--tiers-from applies the benchmark page's lines with the review page's
+    parser: a tier line becomes the lane's tier, an off line writes it off, and
+    the summary line is printed before the first prompt (ticket 27)."""
+    with tempfile.TemporaryDirectory() as td:
+        cfg = os.path.join(td, "config")
+        discover_path = os.path.join(td, "discover.json")
+        write_discover(discover_path, catalog.HARNESSES)
+        lines = os.path.join(td, "tiers.txt")
+        with open(lines, "w", encoding="utf-8") as f:
+            f.write("terra-high@codex 4\n\nluna-low@codex off\nnobody@codex 2\n")
+        result = run_setup(cfg, discover_path, default_answers(len(lanes_sample["lanes"])),
+                           "--no-bench", "--plain", "--tiers-from", lines)
+        lanes, _routing = load_written(cfg)
+        summary = "Lines: 1 took a tier; 1 went off; 4 not named; unknown, ignored: nobody@codex."
+        ok = (result.returncode == 0
+              and 0 <= result.stdout.find(summary) < result.stdout.find("tier [")
+              and lanes["lanes"]["terra-high@codex"]["tier"] == 4
+              and "enabled" not in lanes["lanes"]["terra-high@codex"]
+              and lanes["lanes"]["luna-low@codex"]["enabled"] is False
+              and lanes["lanes"]["sol-high@codex"]["tier"] == lanes_sample["lanes"]["sol-high@codex"]["tier"])
+        return ok, f"code={result.returncode} stdout={result.stdout[:600]!r} stderr={result.stderr!r}"
+
+
+def case_tiers_from_unreadable_file_writes_nothing():
+    with tempfile.TemporaryDirectory() as td:
+        cfg = os.path.join(td, "config")
+        discover_path = os.path.join(td, "discover.json")
+        write_discover(discover_path, catalog.HARNESSES)
+        result = run_setup(cfg, discover_path, default_answers(len(lanes_sample["lanes"])),
+                           "--no-bench", "--plain", "--tiers-from", os.path.join(td, "absent.txt"))
+        ok = (result.returncode == 1 and "tiers-from" in result.stderr
+              and not os.path.exists(os.path.join(cfg, "lanes.json")))
+        return ok, f"code={result.returncode} stderr={result.stderr!r}"
+
+
 for name, case in (
+    ("tiers-from applies the page lines", case_tiers_from_applies_the_page_lines),
+    ("tiers-from with an unreadable file writes nothing", case_tiers_from_unreadable_file_writes_nothing),
     ("plain prints the start facts", case_plain_prints_the_start_facts),
     ("effort rows from several files combine", case_effort_rows_from_several_files_combine),
     ("all harnesses write canonical samples", case_all_harnesses_write_canonical_samples),

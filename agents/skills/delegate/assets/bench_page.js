@@ -6,7 +6,10 @@
 // made in Python; this file only filters what is shown, finds the frontier of
 // it, lays it out, and holds the page's own tier choices, which live in this
 // browser's localStorage under the catalog's key and are written nowhere else
-// (ticket 26). The pure functions have no DOM, so tests/test_bench_page.py
+// (ticket 26). A lane may also be turned off here, and "Copy as lines" gives
+// every decision as `<lane> <1-4|off>` for the wizard's review page to paste;
+// the sensitivity table and "beaten by" are display aids drawn from the page's
+// own tiers (ticket 27). The pure functions have no DOM, so tests/test_bench_page.py
 // runs them under node. Text from a benchmark page is set with textContent
 // only, never as markup.
 (function () {
@@ -19,6 +22,11 @@
   const NO_HARNESS = "none";
   const SVG_NS = "http://www.w3.org/2000/svg";
   const TIERS = [4, 3, 2, 1];
+  // what a lane turned off on this page holds in place of a tier
+  const OFF = "off";
+  // meter name -> { name, harness, shade }, from the page's data; set at boot
+  let SHADES = new Map();
+  function setShades(meters) { SHADES = new Map((meters || []).map((m) => [m.name, m])); }
 
   // --- numbers and axes ------------------------------------------------------
 
@@ -241,12 +249,18 @@
   function boardKey(board) { return JSON.stringify([board.source, board.benchmark]); }
 
   // The tier this page gives a point: its lanes' tier when they have one.
+  // An off lane has no tier.
   function pointTier(p, tiers) {
     for (const lane of p.lanes || []) {
       const t = (tiers || {})[lane.name];
-      if (t) return t;
+      if (TIERS.includes(t)) return t;
     }
     return null;
+  }
+
+  // Whether every lane of a point is turned off on this page.
+  function pointOff(p, tiers) {
+    return !!(p.lanes && p.lanes.length) && p.lanes.every((lane) => (tiers || {})[lane.name] === OFF);
   }
 
   // `ordered` regrouped by model: each group sits where its first lane sat,
@@ -272,8 +286,113 @@
     return groupLanes(ordered);
   }
 
+  // One line per decided lane, `<lane> <1-4|off>`: the placed lanes in the
+  // review page's order, then the off lanes, which the review page does not
+  // list, in benchmark order grouped by model. A lane not placed is not written.
+  // setup_tui.parse_tier_lines reads exactly this.
   function tierLinesText(lanes, tiers) {
-    return reviewOrder(lanes.filter((l) => tiers[l.name]), tiers).map((l) => `${l.name} ${tiers[l.name]}`).join("\n");
+    const placed = lanes.filter((l) => TIERS.includes(tiers[l.name]));
+    const off = lanes.filter((l) => tiers[l.name] === OFF).sort((a, b) => a.rank - b.rank);
+    return reviewOrder(placed, tiers).map((l) => `${l.name} ${tiers[l.name]}`)
+      .concat(groupLanes(off).map((l) => `${l.name} ${OFF}`)).join("\n");
+  }
+
+  // The lanes still carried on this page: carried in the catalog, not off here.
+  function carriedNames(lanes, tiers) {
+    return new Set(lanes.filter((l) => l.carried && (tiers || {})[l.name] !== OFF).map((l) => l.name));
+  }
+
+  // At least the score for no more money, and strictly better in one of the
+  // two: the pre-screen's comparison (setup_tui._beats), here across models.
+  function beats(o, q) {
+    return o.score >= q.score && o.cost <= q.cost && (o.score > q.score || o.cost < q.cost);
+  }
+
+  // {lane: the carried lane that beats it on this one board}. A display aid
+  // like the frontier (ticket 27, item 5): any model may beat any other, costs
+  // are compared only inside the board, and the carry rule is not this. When
+  // several beat a lane, the one named scores most, then costs least.
+  function beatenByLane(board, carried) {
+    const carriedOf = (p) => p.lanes.filter((l) => carried.has(l.name)).map((l) => l.name);
+    const pts = board.points.filter((p) => p.plotted && carriedOf(p).length);
+    const out = {};
+    for (const q of pts) {
+      const own = carriedOf(q);
+      let best = null;
+      for (const o of pts) {
+        if (o === q || carriedOf(o).some((n) => own.includes(n)) || !beats(o, q)) continue;
+        if (!best || o.score > best.score || (o.score === best.score
+            && (o.cost < best.cost || (o.cost === best.cost && carriedOf(o)[0] < carriedOf(best)[0])))) best = o;
+      }
+      if (best) for (const name of own) out[name] = carriedOf(best)[0];
+    }
+    return out;
+  }
+
+  // The tier panel's grouping, which the sensitivity table follows: tiers 4
+  // to 1, then off, then not placed; inside each, one group per meter in the
+  // page's meter order; inside that, benchmark order grouped by model.
+  function panelGroups(lanes, tiers, meters) {
+    const order = (meters || []).map((m) => m.name);
+    return TIERS.concat([OFF, null]).map((tier) => {
+      const mine = lanes.filter((l) => l.carried && ((tiers || {})[l.name] || null) === tier);
+      const names = order.concat([...new Set(mine.map((l) => l.meter))].filter((m) => !order.includes(m)));
+      const groups = [];
+      for (const meter of names) {
+        const ms = mine.filter((l) => l.meter === meter).sort((a, b) => a.rank - b.rank);
+        if (ms.length) groups.push({ meter, lanes: groupLanes(ms) });
+      }
+      return { tier, count: mine.length, meters: groups };
+    });
+  }
+
+  // The tier each board alone would give each placed lane (ticket 27, item 4):
+  // the board ranks the placed lanes it measured by score (a lane on two points
+  // takes its best) and cuts that ranking in the proportions of the page's tier
+  // counts, tier 4 first. Lanes that tie on score take the better tier. A
+  // board's composite index is shown and never counted in `agree`.
+  function sensitivity(boards, lanes, tiers, meters) {
+    const groups = panelGroups(lanes, tiers, meters).filter((g) => TIERS.includes(g.tier));
+    const counts = {};
+    for (const g of groups) counts[g.tier] = g.count;
+    const placed = groups.flatMap((g) => g.meters.flatMap((m) => m.lanes));
+    const names = new Set(placed.map((l) => l.name));
+    const given = {};
+    for (const b of boards) {
+      const best = new Map();
+      for (const p of b.points) {
+        if (!p.plotted) continue;
+        for (const l of p.lanes) {
+          if (names.has(l.name) && (!best.has(l.name) || p.score > best.get(l.name))) best.set(l.name, p.score);
+        }
+      }
+      const ranked = [...best.entries()].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1));
+      const ends = [];
+      let cum = 0;
+      for (const t of TIERS) {
+        cum += counts[t] || 0;
+        ends.push([t, Math.round(ranked.length * cum / placed.length)]);
+      }
+      const mine = given[b.id] = {};
+      let tieStart = 0;
+      ranked.forEach(([name, score], i) => {
+        if (i > 0 && score !== ranked[i - 1][1]) tieStart = i;
+        mine[name] = (ends.find(([, end]) => tieStart < end) || ends[ends.length - 1])[0];
+      });
+    }
+    const row = (l) => {
+      const tier = tiers[l.name];
+      const cells = boards.map((b) => {
+        const t = given[b.id][l.name];
+        return t === undefined ? null : { tier: t, differs: t !== tier };
+      });
+      const counted = cells.filter((c, i) => c && !boards[i].composite);
+      return { name: l.name, meter: l.meter, tier, cells,
+               agree: counted.filter((c) => !c.differs).length, measured: counted.length };
+    };
+    return { counts,
+             columns: boards.map((b) => ({ id: b.id, benchmark: b.benchmark, source: b.source, composite: !!b.composite })),
+             groups: groups.map((g) => ({ tier: g.tier, count: g.count, rows: g.meters.flatMap((m) => m.lanes.map(row)) })) };
   }
 
   // The zoom that shows one tier: its band between the tier lines when there
@@ -367,7 +486,7 @@
     out.points = inFrame
       .map((p) => {
         const tier = pointTier(p, tiers);
-        return { p, x: X(p.cost), y: Y(p.score), frontier: onFrontier.has(p), tier,
+        return { p, x: X(p.cost), y: Y(p.score), frontier: onFrontier.has(p), tier, off: pointOff(p, tiers),
                  band: bandTier(p.score, tierLines), dim: !!st.focusTier && tier !== st.focusTier };
       })
       .sort((a, b) => KIND_RANK[a.p.kind] - KIND_RANK[b.p.kind] || a.frontier - b.frontier);
@@ -420,15 +539,25 @@
     return `var(--h-${harness}, var(--accent))`;
   }
 
+  // Colour is the meter (ticket 27): a meter takes its harness's colour, and a
+  // second meter on one harness a shade of it (`--h-claude-1`). A shade the
+  // style does not define falls back to the harness colour.
+  function meterColour(meter) {
+    const m = SHADES.get(meter);
+    if (!m) return "var(--accent)";
+    return m.shade ? `var(--h-${m.harness}-${m.shade}, var(--h-${m.harness}, var(--accent)))` : harnessColour(m.harness);
+  }
+
   function pointColour(p) {
     if (p.kind === "comparator") return "var(--muted)";
+    if (p.meter && p.meter.length && SHADES.has(p.meter[0])) return meterColour(p.meter[0]);
     return harnessColour(harnessKeys(p)[0]);
   }
 
   // Shape and fill carry the kind, a dashed outline weak provenance, colour
-  // the harness, and in the tier view the digit inside a lane's dot is the
-  // tier this page gives it; a hollow dot there has none yet. Never colour
-  // alone.
+  // the meter, and in the tier view the digit inside a lane's dot is the
+  // tier this page gives it; a hollow dot there has none yet, and a struck one
+  // is off. Never colour alone.
   function marker(g, p, cx, cy, view) {
     const colour = pointColour(p);
     const dash = p.weak ? { "stroke-dasharray": "2.5 2" } : {};
@@ -445,6 +574,10 @@
       if (tier) {
         svg("circle", { cx, cy, r: 8.5, fill: colour, stroke: "var(--surface)", "stroke-width": 1.5, class: "mk" }, g);
         svg("text", { x: cx, y: cy + 3.8, class: "digit" }, g).textContent = String(tier);
+      } else if (view.off) {
+        svg("circle", { cx, cy, r: 6.5, fill: "var(--surface)", stroke: colour, "stroke-width": 1.5, class: "mk" }, g);
+        svg("path", { d: `M${cx - 8},${cy} L${cx + 8},${cy}`, stroke: "var(--off)", "stroke-width": 2.2,
+                      "stroke-linecap": "round" }, g);
       } else {
         svg("circle", { cx, cy, r: 7.5, fill: "var(--surface)", stroke: colour, "stroke-width": 2, class: "mk" }, g);
       }
@@ -465,14 +598,17 @@
     return s;
   }
 
-  function tipLines(p, board, decimals, page, tierLines) {
+  function tipLines(p, board, decimals, page, tierLines, beaten) {
     const lines = [[`${p.name} ${p.effort}`, "tip-head"],
                    [`${fmtScore(p.score, board.unit, decimals)} for ${fmtMoney(p.cost)}`, ""]];
     if (p.lanes.length) {
       for (const lane of p.lanes) {
         const here = page.tiers[lane.name];
-        lines.push([`${lane.name}: ${here ? `tier ${here} here` : "no tier here yet"}, `
+        lines.push([`${lane.name}: ${here === OFF ? "off here" : here ? `tier ${here} here` : "no tier here yet"}, `
                     + `${lane.tier ?? "—"} in the catalog`, "mono"]);
+      }
+      for (const lane of p.lanes) {
+        if (beaten && beaten[lane.name]) lines.push([`beaten by ${beaten[lane.name]} on this board`, "beaten"]);
       }
       const band = bandTier(p.score, tierLines);
       if (band) lines.push([`the band proposes tier ${band}`, "quiet"]);
@@ -488,14 +624,14 @@
     return lines;
   }
 
-  // Four boxes, one per tier, exactly one pressed when the lane has a tier:
-  // the review page's marker, on the page.
+  // Four boxes, one per tier, and off beside them, at most one pressed: the
+  // review page's marker, on the page, with the carry decision after it.
   function tierBoxes(parent, names, page, size) {
-    const boxes = el("span", { class: "boxes", role: "group", "aria-label": "Tier" }, null, parent);
+    const boxes = el("span", { class: "boxes", role: "group", "aria-label": "Tier or off" }, null, parent);
     const current = page.tiers[names[0]] || null;
-    for (const t of TIERS) {
-      const b = el("button", { type: "button", class: "box", "aria-pressed": String(current === t),
-                               "aria-label": `tier ${t}` }, String(t), boxes);
+    for (const t of TIERS.concat([OFF])) {
+      const b = el("button", { type: "button", class: t === OFF ? "box off-box" : "box", "aria-pressed": String(current === t),
+                               "aria-label": t === OFF ? "off" : `tier ${t}` }, String(t), boxes);
       b.addEventListener("click", (e) => {
         e.stopPropagation();
         page.setTier(names, current === t ? null : t);
@@ -699,13 +835,16 @@
     function drawLegend(board) {
       legend.textContent = "";
       const items = [];
-      const sample = (kind, extra) => Object.assign({ kind, weak: false, harness: [], tier: null, lanes: [] }, extra);
+      const sample = (kind, extra) => Object.assign({ kind, weak: false, harness: [], meter: [], tier: null, lanes: [] }, extra);
       const view = { tierView: page.tierView, tier: page.tierView ? 2 : null };
       const one = data.harnesses.length ? [data.harnesses[0]] : [];
-      for (const h of data.harnesses) items.push([sample("lane", { harness: [h] }), `a ${h} lane`, view]);
+      const meters = data.meters || [];
+      for (const m of meters) items.push([sample("lane", { harness: [m.harness], meter: [m.name] }), `a ${m.name} lane`, view]);
+      if (!meters.length) for (const h of data.harnesses) items.push([sample("lane", { harness: [h] }), `a ${h} lane`, view]);
       if (page.tierView) {
         items.push([sample("lane", { harness: one }), "the digit is the tier drawn here", view],
-                   [sample("lane", { harness: one }), "hollow: no tier here yet", { tierView: true, tier: null }]);
+                   [sample("lane", { harness: one }), "hollow: no tier here yet", { tierView: true, tier: null }],
+                   [sample("lane", { harness: one }), "struck: off here", { tierView: true, tier: null, off: true }]);
       }
       items.push([sample("lane_off", { harness: one }), "a lane the pre-screen proposes off", view],
                  [sample("own_other", { harness: one }), "your model at an effort no lane runs", view],
@@ -835,7 +974,7 @@
         if (q.frontier) svg("circle", { cx: q.x, cy: q.y, r: 10, class: "halo" }, g);
         if (selected && pointKey(q.p) === selected) svg("circle", { cx: q.x, cy: q.y, r: 14, class: "sel" }, g);
         svg("circle", { cx: q.x, cy: q.y, r: 11, fill: "transparent", class: "hit" }, g);
-        marker(g, q.p, q.x, q.y, { tierView: page.tierView, tier: q.tier });
+        marker(g, q.p, q.x, q.y, { tierView: page.tierView, tier: q.tier, off: q.off });
         g.addEventListener("pointerenter", () => showTip(q, board, decimals));
         g.addEventListener("pointerleave", () => { tip.hidden = true; focus(null); });
         g.addEventListener("pointerdown", (e) => { if (e.button === 0) downOnPoint = q; });
@@ -880,7 +1019,8 @@
     function showTip(q, board, decimals) {
       if (pickerOpen && selectedKey() === pointKey(q.p)) return;
       tip.textContent = "";
-      for (const [text, cls] of tipLines(q.p, board, decimals, page, page.lines[boardKey(board)])) {
+      const beaten = beatenByLane(board, carriedNames(data.lanes, page.tiers));
+      for (const [text, cls] of tipLines(q.p, board, decimals, page, page.lines[boardKey(board)], beaten)) {
         el("div", cls ? { class: cls } : {}, text, tip);
       }
       tip.hidden = false;
@@ -904,7 +1044,8 @@
       const none = el("button", { type: "button", class: "quiet-button" }, "none", row);
       none.addEventListener("click", (e) => { e.stopPropagation(); page.setTier(q.p.lanes.map((l) => l.name), null); });
       const band = bandTier(q.p.score, page.lines[boardKey(board)]);
-      el("p", { class: "quiet" }, band ? `Press 1 to 4. The band proposes tier ${band}.` : "Press 1 to 4.", picker);
+      el("p", { class: "quiet" }, band ? `Press 1 to 4, or o for off. The band proposes tier ${band}.`
+                                       : "Press 1 to 4, or o for off.", picker);
       picker.hidden = false;
       placeNear(picker, q);
       tip.hidden = true;
@@ -1088,6 +1229,8 @@
       st.zoom = null;
       st.pinned = null;
       draw();
+      // the panel's "beaten by" is judged on the boards shown
+      if (page.boardChanged) page.boardChanged();
     });
 
     function highlightLane() {
@@ -1141,12 +1284,13 @@
 
   // --- the tier panel beside the plots -------------------------------------------
 
-  function makeTierPanel(data, page, host) {
+  function makeTierPanel(data, page, host, sensHost) {
     host.hidden = false;
     const lanes = data.lanes.filter((l) => l.carried);
+    const meters = (data.meters || []).filter((m) => lanes.some((l) => l.meter === m.name));
     el("h2", {}, "Tiers drawn here", host);
     const note = el("p", { class: "note" }, null, host);
-    const counts = el("table", { class: "counts", "aria-label": "Lanes per tier and harness" }, null, host);
+    const counts = el("table", { class: "counts", "aria-label": "Lanes per tier and meter" }, null, host);
     const tools = el("div", { class: "tier-tools" }, null, host);
     const viewButton = el("button", { type: "button", class: "reset", "aria-pressed": "false" }, "Show tiers on the plots", tools);
     viewButton.addEventListener("click", () => {
@@ -1155,7 +1299,7 @@
       page.redraw();
     });
     const copyButton = el("button", { type: "button", class: "reset" }, "Copy as lines", tools);
-    const copyBox = el("textarea", { rows: 6, readonly: "", "aria-label": "Tiers as lines, lane then tier" }, null, host);
+    const copyBox = el("textarea", { rows: 6, readonly: "", "aria-label": "Decisions as lines, lane then tier or off" }, null, host);
     copyBox.hidden = true;
     const copyNote = el("p", { class: "empty" }, null, host);
     copyNote.hidden = true;
@@ -1166,8 +1310,15 @@
       copyNote.hidden = false;
       copyBox.focus();
       copyBox.select();
-      const lineCount = text ? text.split("\n").length : 0;
-      const said = (how) => { copyNote.textContent = lineCount ? `${lineCount} lines, in the review page's order, ${how}.` : "No lane has a tier yet."; };
+      const lines = text ? text.split("\n") : [];
+      const lineCount = lines.length;
+      const offCount = lines.filter((line) => line.endsWith(` ${OFF}`)).length;
+      const said = (how) => {
+        copyNote.textContent = lineCount
+          ? `${lineCount} lines, ${lineCount - offCount} with a tier and ${offCount} off, in the review page's order, ${how}. `
+            + "On the wizard's review page, press v to apply them; or save them to a file for setup.py --tiers-from."
+          : "No lane has a tier or is off yet.";
+      };
       if (lineCount && navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(text).then(() => said("copied"), () => said("selected: copy them"));
       } else {
@@ -1176,24 +1327,25 @@
     });
     const sections = el("div", {}, null, host);
 
-    // One row per harness, one column per tier, best first, the way the
-    // boxes run: how many lanes each harness has at each tier, and how many
-    // are not placed yet. Counts, not judgements.
+    // One row per meter, one column per tier, best first, the way the boxes
+    // run, then off: how many lanes each meter has at each tier, how many are
+    // off, and how many are not placed yet. Counts, not judgements.
     function countsTable() {
       counts.textContent = "";
       const hr = el("tr", {}, null, el("thead", {}, null, counts));
       el("th", {}, "", hr);
       for (const tier of TIERS) el("th", { class: "h" }, `T${tier}`, hr);
+      el("th", { class: "h" }, "off", hr);
       el("th", { class: "h unset" }, "none", hr);
       el("th", { class: "h" }, "all", hr);
       const tb = el("tbody", {}, null, counts);
-      const rows = data.harnesses.map((h) => [h, lanes.filter((l) => l.harness === h)]).concat([["all", lanes]]);
+      const rows = meters.map((m) => [m.name, lanes.filter((l) => l.meter === m.name)]).concat([["all", lanes]]);
       for (const [label, mine] of rows) {
         const tr = el("tr", { class: label === "all" ? "tot" : "" }, null, tb);
         const th = el("th", {}, null, tr);
-        if (label !== "all") el("span", { class: "swatch", style: `background:${harnessColour(label)}` }, null, th);
+        if (label !== "all") el("span", { class: "swatch", style: `background:${meterColour(label)}` }, null, th);
         th.appendChild(document.createTextNode(label));
-        for (const tier of TIERS.concat([null])) {
+        for (const tier of TIERS.concat([OFF, null])) {
           const n = mine.filter((l) => (page.tiers[l.name] || null) === tier).length;
           el("td", { class: (n ? "" : "zero") + (tier ? "" : " unset") }, String(n), tr);
         }
@@ -1201,8 +1353,21 @@
       }
     }
 
-    function laneRow(lane, parent) {
-      const row = el("div", { class: "lane-row", "data-lane": lane.name }, null, parent);
+    // {lane: [{by, benchmark}]} over the boards the plots show, each board once
+    function beatenOnShown() {
+      const carried = carriedNames(data.lanes, page.tiers);
+      const out = {};
+      for (const board of page.shownBoards ? page.shownBoards() : []) {
+        for (const [name, by] of Object.entries(beatenByLane(board, carried))) {
+          (out[name] = out[name] || []).push({ by, benchmark: board.benchmark });
+        }
+      }
+      return out;
+    }
+
+    function laneRow(lane, parent, beaten) {
+      const isOff = page.tiers[lane.name] === OFF;
+      const row = el("div", { class: "lane-row" + (isOff ? " is-off" : ""), "data-lane": lane.name }, null, parent);
       tierBoxes(row, [lane.name], page);
       const name = el("button", { type: "button", class: "nm", title: `${lane.model} ${lane.effort}` }, lane.name, row);
       name.addEventListener("click", () => {
@@ -1210,32 +1375,93 @@
       });
       if (!lane.rows) el("span", { class: "tag" }, "no rows", row);
       if (lane.off) el("span", { class: "tag off", title: lane.off }, "proposed off", row);
+      const by = beaten[lane.name];
+      if (by) {
+        el("span", { class: "tag beaten", title: by.map((b) => `on ${b.benchmark}: beaten by ${b.by}`).join("\n") },
+           `beaten by ${[...new Set(by.map((b) => b.by))].join(", ")}`, row);
+      }
     }
 
-    function section(tier) {
-      const mine = lanes.filter((l) => (page.tiers[l.name] || null) === tier);
+    function section(group, beaten) {
+      const tier = group.tier;
       const sec = el("section", { class: "tier" }, null, sections);
       const h = el("h3", {}, null, sec);
-      h.appendChild(document.createTextNode(tier ? `Tier ${tier}` : "Not placed"));
-      el("span", { class: "n" }, `${mine.length} lane${mine.length === 1 ? "" : "s"}`, h);
-      if (tier) {
+      h.appendChild(document.createTextNode(tier === OFF ? "Off" : tier ? `Tier ${tier}` : "Not placed"));
+      el("span", { class: "n" }, `${group.count} lane${group.count === 1 ? "" : "s"}`, h);
+      if (TIERS.includes(tier)) {
         const focusButton = el("button", { type: "button", class: "quiet-button focus",
                                            "aria-pressed": String(page.focusTier === tier) }, "Focus", h);
         focusButton.addEventListener("click", () => page.focus(page.focusTier === tier ? null : tier));
         if (page.focusTier === tier) focusButton.textContent = "Focused";
       }
-      if (!mine.length) {
-        el("p", { class: "empty" }, tier ? "No lane yet. Click a dot and press " + tier + ", or press a box here." : "Every carried lane has a tier.", sec);
+      if (!group.count) {
+        el("p", { class: "empty" }, tier === OFF ? "No lane is off. Press off on a lane's line, or click a dot and press o."
+          : tier ? "No lane yet. Click a dot and press " + tier + ", or press a box here."
+          : "Every carried lane has a tier or is off.", sec);
         return;
       }
-      for (const harness of data.harnesses) {
-        const ordered = mine.filter((l) => l.harness === harness).sort((a, b) => a.rank - b.rank);
-        if (!ordered.length) continue;
+      for (const m of group.meters) {
         const h4 = el("h4", {}, null, sec);
-        el("span", { class: "swatch", style: `background:${harnessColour(harness)}` }, null, h4);
-        h4.appendChild(document.createTextNode(harness));
-        el("span", { class: "n" }, String(ordered.length), h4);
-        for (const lane of groupLanes(ordered)) laneRow(lane, sec);
+        el("span", { class: "swatch", style: `background:${meterColour(m.meter)}` }, null, h4);
+        h4.appendChild(document.createTextNode(m.meter));
+        el("span", { class: "n" }, String(m.lanes.length), h4);
+        for (const lane of m.lanes) laneRow(lane, sec, beaten);
+      }
+    }
+
+    // The sensitivity table under the plots: what each board alone would give.
+    function drawSensitivity() {
+      if (!sensHost) return;
+      sensHost.hidden = false;
+      sensHost.textContent = "";
+      el("h2", {}, "What each board alone would give", sensHost);
+      const s = sensitivity(data.boards, lanes, page.tiers, data.meters);
+      if (!s.groups.some((g) => g.count)) {
+        el("p", { class: "lede" }, "Give lanes a tier and this table shows, for each board, the tier its "
+          + "ranking alone would give each of them in the proportions you chose.", sensHost);
+        return;
+      }
+      const shares = TIERS.map((t) => `${s.counts[t] || 0} on tier ${t}`).join(", ");
+      el("p", { class: "lede" }, "Each board ranks the placed lanes it measured by score and cuts them in "
+        + `the proportions you gave: ${shares}. A marked cell differs from your tier; a dash is a board `
+        + "that did not measure the lane. The last column counts the boards that agree out of the boards "
+        + "that measured the lane; a shaded column is a composite index, shown and never counted.", sensHost);
+      const scroll = el("div", { class: "scroll" }, null, sensHost);
+      const t = el("table", { class: "sens" }, null, scroll);
+      const hr = el("tr", {}, null, el("thead", {}, null, t));
+      el("th", { class: "lane" }, "Lane", hr);
+      el("th", { class: "cell" }, "Yours", hr);
+      for (const c of s.columns) {
+        const th = el("th", { class: "cell" + (c.composite ? " composite" : ""), title: `${c.benchmark}, ${c.source}` },
+                      c.benchmark, hr);
+        el("span", { class: "sub" }, c.composite ? `${c.source}, not counted` : c.source, th);
+      }
+      el("th", { class: "cell" }, "Agree", hr);
+      const tb = el("tbody", {}, null, t);
+      for (const g of s.groups) {
+        if (!g.rows.length) continue;
+        const gh = el("th", { colspan: String(s.columns.length + 3) }, `Tier ${g.tier}`, el("tr", { class: "grp" }, null, tb));
+        el("span", { class: "n" }, `${g.count} lane${g.count === 1 ? "" : "s"}`, gh);
+        for (const r of g.rows) {
+          const tr = el("tr", { "data-lane": r.name }, null, tb);
+          const td = el("td", { class: "lane" }, null, tr);
+          el("span", { class: "swatch", style: `background:${meterColour(r.meter)}` }, null, td);
+          td.appendChild(document.createTextNode(r.name));
+          el("td", { class: "mine" }, String(r.tier), tr);
+          r.cells.forEach((cell, i) => {
+            const comp = s.columns[i].composite ? " composite" : "";
+            if (!cell) {
+              el("td", { class: "cell none" + comp }, "—", tr);
+              return;
+            }
+            const attrs = { class: "cell" + (cell.differs ? " diff" : "") + comp };
+            if (cell.differs) attrs.title = `${s.columns[i].benchmark} alone: tier ${cell.tier}; yours: tier ${r.tier}`;
+            el("span", {}, String(cell.tier), el("td", attrs, null, tr));
+          });
+          el("td", { class: "agree" }, r.measured ? `${r.agree}/${r.measured}` : "—", tr);
+          tr.addEventListener("mouseenter", () => page.highlight(r.name));
+          tr.addEventListener("mouseleave", () => page.highlight(null));
+        }
       }
     }
 
@@ -1243,13 +1469,14 @@
       note.textContent = page.storage === "unavailable"
         ? "This browser keeps nothing for a file page, so these tiers last until the tab closes. "
           + "The wizard is where tiers are written."
-        : "Kept in this browser for this catalog until you set them in the wizard, which is where "
-          + "tiers are written. Counts are counts; they judge nothing.";
+        : "Kept in this browser for this catalog until you paste them into the wizard, which is where "
+          + "tiers are written. Counts are per meter, and judge nothing.";
       viewButton.setAttribute("aria-pressed", String(page.tierView));
       countsTable();
       sections.textContent = "";
-      for (const tier of TIERS) section(tier);
-      section(null);
+      const beaten = beatenOnShown();
+      for (const group of panelGroups(lanes, page.tiers, data.meters)) section(group, beaten);
+      drawSensitivity();
       page.highlight(page.hovered);
       for (const row of sections.querySelectorAll(".lane-row")) {
         row.addEventListener("mouseenter", () => page.highlight(row.getAttribute("data-lane")));
@@ -1272,7 +1499,7 @@
     const known = new Set(data.lanes.map((l) => l.name));
     const tiers = {};
     for (const [name, t] of Object.entries(saved.tiers || {})) {
-      if (known.has(name) && TIERS.includes(t)) tiers[name] = t;
+      if (known.has(name) && (TIERS.includes(t) || t === OFF)) tiers[name] = t;
     }
     const manual = {};
     for (const name of Object.keys(tiers)) {
@@ -1303,12 +1530,18 @@
     const data = JSON.parse(source.textContent);
     if (!data.boards.length) return;
     data.lanes = (data.lanes || []).map((l, rank) => Object.assign({ rank }, l));
+    setShades(data.meters);
     const page = makeStore(data);
     const panels = [];
     let count = 0;
     const every = (fn) => panels.forEach(fn);
     const tierHost = document.getElementById("tiers");
-    const tierPanel = tierHost ? makeTierPanel(data, page, tierHost) : null;
+    const tierPanel = tierHost ? makeTierPanel(data, page, tierHost, document.getElementById("sensitivity")) : null;
+    page.shownBoards = () => {
+      const ids = new Set(panels.map((p) => p.board()));
+      return data.boards.filter((b) => ids.has(b.id));
+    };
+    page.boardChanged = () => { if (tierPanel) tierPanel.draw(); };
 
     page.redraw = (onlySource) => {
       every((p) => { if (!onlySource || p.source() === onlySource) p.draw(); });
@@ -1355,6 +1588,7 @@
       panels.splice(panels.indexOf(panel), 1);
       panel.root.remove();
       every((p) => p.draw());
+      page.boardChanged();
     };
     const add = (boardId) => {
       const panel = makePanel(data, host, count++, boardId, remove, every, page);
@@ -1372,15 +1606,19 @@
         const next = data.boards.find((b) => !used.has(b.id)) || data.boards[0];
         const still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
         add(next.id).root.scrollIntoView({ behavior: still ? "auto" : "smooth", block: "start" });
+        page.boardChanged();
       });
     }
-    // 1 to 4 set the selected lane's tier, 0 clears it, Escape lets go
+    // 1 to 4 set the selected lane's tier, o turns it off, 0 clears it, Escape lets go
     document.addEventListener("keydown", (e) => {
       const tag = e.target && e.target.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || e.metaKey || e.ctrlKey || e.altKey) return;
       if (!page.selected) return;
       if (/^[1-4]$/.test(e.key)) {
         page.setTier(page.selected.lanes, Number(e.key));
+        e.preventDefault();
+      } else if (e.key === "o" || e.key === "O") {
+        page.setTier(page.selected.lanes, OFF);
         e.preventDefault();
       } else if (e.key === "0" || e.key === "Backspace" || e.key === "Delete") {
         page.setTier(page.selected.lanes, null);
@@ -1394,7 +1632,8 @@
   if (typeof module !== "undefined" && module.exports) {
     module.exports = { layout, frontier, logTicks, logDomain, niceLinear, fmtMoney, fmtTickMoney, place,
                        zoomAbout, covers, panBy, bandTier, defaultLines, pointTier, groupLanes, reviewOrder,
-                       tierLinesText, focusDomain, applyBands, makeStore, boardKey, W, H, PAD };
+                       tierLinesText, focusDomain, applyBands, makeStore, boardKey, pointOff, carriedNames,
+                       beatenByLane, panelGroups, sensitivity, meterColour, setShades, OFF, W, H, PAD };
   } else if (typeof document !== "undefined") {
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
     else boot();

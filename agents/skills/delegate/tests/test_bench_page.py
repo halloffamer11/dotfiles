@@ -733,7 +733,8 @@ try:
            and by_name["fable-xhigh@claude"]["carried"] is True
            and by_name["astra-high@codex"]["harness"] == "codex"
            and by_name["astra-high@codex"]["tier"] == doc["lanes"]["astra-high@codex"]["tier"]
-           and set(lanes[0]) == {"name", "harness", "model", "group", "effort", "tier", "carried", "off", "rows"},
+           # ticket 27 added the lane's meter, which colour is now drawn from
+           and set(lanes[0]) == {"name", "harness", "meter", "model", "group", "effort", "tier", "carried", "off", "rows"},
            repr(lanes[:3]))
     key = data["catalogKey"]
     other = copy.deepcopy(doc)
@@ -899,5 +900,180 @@ assert.strictEqual(store.manual.a,true);
            result.returncode == 0, result.stderr)
 except Exception as e:
     record("score bands preserve overrides, clear releases them, and reload migrates cost lines safely", False, repr(e))
+
+
+# --- ticket 27: the page is the first input ---------------------------------------------
+def meter_doc():
+    """The sample catalog plus two lanes on a second claude meter, so claude has
+    two meters and the one most of its lanes use is not claude-fable."""
+    doc = copy.deepcopy(LANES)
+    for name, effort in (("opus-high@claude", "high"), ("opus-low@claude", "low")):
+        doc["lanes"][name] = dict(LANES["lanes"]["fable-xhigh@claude"], model="claude-opus-5", effort=effort,
+                                  meter="claude-general", published_as=["Opus 5"])
+    doc["meters"]["claude-general"] = dict(doc["meters"]["claude-fable"])
+    return doc
+
+
+try:
+    doc = meter_doc()
+    shades = bench_page.meter_shades(doc)
+    rows = [dict(SWEEP[6], effort="high"), dict(SWEEP[6], effort="low", score=40.0, cost_usd=900.0)]
+    data = bench_page.plot_data(rows, doc)
+    by_name = {l["name"]: l for l in data["lanes"]}
+    points = data["boards"][0]["points"]
+    record("27.6 colour is the meter: each meter carries its harness and a shade, the meter most of the "
+           "harness's lanes use taking the harness colour, and every lane and point names its meter",
+           {m["name"]: (m["harness"], m["shade"]) for m in shades}
+           == {"claude-general": ("claude", 0), "claude-fable": ("claude", 1), "codex": ("codex", 0),
+               "agy-gemini": ("agy", 0), "grok": ("grok", 0)}
+           and [m["harness"] for m in shades] == sorted(m["harness"] for m in shades)
+           and data["meters"] == shades
+           and by_name["fable-xhigh@claude"]["meter"] == "claude-fable"
+           and by_name["opus-high@claude"]["meter"] == "claude-general"
+           and all(p["meter"] == ["claude-general"] for p in points)
+           and all(p["lanes"][0]["meter"] == "claude-general" for p in points)
+           # the shade has a colour in the light, the system-dark and the toggled-dark palette
+           and bench_page.STYLE.count("--h-claude-1:") == 3,
+           repr((shades, points[:1])))
+except Exception as e:
+    record("27.6 colour is the meter", False, repr(e))
+
+
+T27_DRIVER = r"""
+const assert = require("assert");
+const P = require(process.argv[1]);
+const c = JSON.parse(require("fs").readFileSync(0, "utf8"));
+const out = {};
+const lanes = c.lanes.map((l, rank) => Object.assign({ rank }, l));
+
+// 1: off is a choice the page keeps, and a line drag never overwrites it
+let saved = { version: 2, tiers: { "a@x": "off", "b@x": 3, "c@x": 5, "ghost@x": 2 }, manual: { "a@x": true, "b@x": true } };
+global.localStorage = { getItem: () => JSON.stringify(saved), setItem: (k, v) => { saved = JSON.parse(v); } };
+const store = P.makeStore({ catalogKey: "k", lanes, boards: [] });
+out.store = store.tiers;
+const board = { source: "s", benchmark: "toy", points: c.points };
+const tiers = { "a@x": "off", "b@x": 1 }, manual = { "a@x": true };
+P.applyBands(board, [10, 20, 25], lanes, tiers, manual);
+out.banded = tiers;
+out.pointTier = c.points.map((p) => P.pointTier(p, { "a@x": "off", "b@x": 2 }));
+out.pointOff = c.points.map((p) => P.pointOff(p, { "a@x": "off", "b@x": 2 }));
+
+// 2: the copy writes tiers in the review page's order, then the off lanes
+out.text = P.tierLinesText(lanes, c.tiers);
+out.empty = P.tierLinesText(lanes, {});
+
+// 4: sensitivity
+const s = P.sensitivity(c.boards, lanes, c.sensTiers, c.meters);
+out.sens = { counts: s.counts, columns: s.columns.map((col) => [col.id, col.composite]),
+             groups: s.groups.map((g) => [g.tier, g.count, g.rows.map((r) => [r.name, r.tier, r.cells.map((x) => x && [x.tier, x.differs]), r.agree, r.measured])]) };
+out.groups = P.panelGroups(lanes, c.sensTiers, c.meters).map((g) => [g.tier, g.count, g.meters.map((m) => [m.meter, m.lanes.map((l) => l.name)])]);
+
+// 5: beaten by another carried lane, on one board
+const carried = P.carriedNames(lanes, c.beatTiers);
+out.carried = [...carried].sort();
+out.beaten = P.beatenByLane({ points: c.beatPoints }, carried);
+out.beatenAll = P.beatenByLane({ points: c.beatPoints }, P.carriedNames(lanes, {}));
+
+// 6: colour by meter
+P.setShades(c.meters);
+out.colours = c.meters.map((m) => P.meterColour(m.name)).concat([P.meterColour("nobody")]);
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+def pt(lanes, score, cost, plotted=True):
+    return {"plotted": plotted, "score": score, "cost": cost,
+            "lanes": [{"name": n} for n in lanes], "kind": "lane" if lanes else "comparator"}
+
+
+try:
+    if not NODE:
+        record("27 the page's off, copy, sensitivity, beaten-by and meter colour, under node", True,
+               "(node not on PATH; skipped)")
+    else:
+        names = ["a@x", "b@x", "c@x", "d@x", "e@x", "f@x", "g@x", "h@x"]
+        meters = [{"name": "m1", "harness": "claude", "shade": 0}, {"name": "m2", "harness": "claude", "shade": 1},
+                  {"name": "m3", "harness": "codex", "shade": 0}]
+        lane_meter = {"a@x": "m2", "b@x": "m1", "c@x": "m3", "d@x": "m1", "e@x": "m3", "f@x": "m1",
+                      "g@x": "m2", "h@x": "m3"}
+        lanes = [{"name": n, "group": n[0], "effort": "high", "meter": lane_meter[n], "carried": n != "h@x"}
+                 for n in names]
+        case = {
+            "lanes": lanes, "meters": meters,
+            "points": [pt(["a@x"], 30, 1), pt(["b@x"], 30, 1), pt([], 30, 1)],
+            "tiers": {"c@x": 1, "a@x": "off", "b@x": 4, "e@x": "off", "d@x": 2},
+            # six placed: T4 a, T3 b, T2 c d, T1 e f; g is off, h not carried
+            "sensTiers": {"a@x": 4, "b@x": 3, "c@x": 2, "d@x": 2, "e@x": 1, "f@x": 1, "g@x": "off"},
+            "boards": [
+                # ranks b, a, c=d (tied), e is not measured, g is off and not counted
+                {"id": "b0", "points": [pt(["a@x"], 50, 1), pt(["b@x"], 60, 1), pt(["c@x"], 20, 1),
+                                        pt(["d@x"], 20, 2), pt(["g@x"], 99, 1), pt(["f@x"], 5, 1, plotted=False)]},
+                # a composite: the same ranking as the lanes' own tiers, never counted
+                {"id": "b1", "composite": True, "points": [pt(["a@x"], 9, 1), pt(["b@x"], 8, 1), pt(["c@x"], 7, 1),
+                                                            pt(["d@x"], 6, 1), pt(["e@x"], 5, 1), pt(["f@x"], 4, 1)]},
+            ],
+            "beatTiers": {"f@x": "off"},
+            "beatPoints": [pt(["a@x"], 10, 1), pt(["b@x"], 20, 2), pt(["c@x"], 15, 3), pt(["d@x"], 20, 4),
+                           pt([], 30, 1), pt(["f@x"], 25, 2.5), pt(["h@x"], 40, 0.5),
+                           # the same lane on a second point never beats itself
+                           pt(["g@x"], 12, 1), pt(["g@x"], 11, 1)],
+        }
+        result = subprocess.run([NODE, "-e", T27_DRIVER, os.path.abspath(bench_page.SCRIPT_PATH)],
+                                input=json.dumps(case), capture_output=True, text=True, timeout=60)
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr[-800:])
+        out = json.loads(result.stdout)
+        record("27.1 off is kept like a tier, survives a reload and a line drag, and is no tier on a point",
+               out["store"] == {"a@x": "off", "b@x": 3}
+               and out["banded"] == {"a@x": "off", "b@x": 4}
+               and out["pointTier"] == [None, 2, None] and out["pointOff"] == [True, False, False],
+               repr((out["store"], out["banded"], out["pointTier"], out["pointOff"])))
+        doc = {"lanes": {n: {"model": n, "effort": "high"} for n in names}}
+        parsed = setup_tui.parse_tier_lines(out["text"], doc)
+        record("27.2 the copy writes one line per decided lane, tiers in the review page's order then off, "
+               "and the wizard's parser reads back exactly the page's decisions",
+               out["text"].splitlines() == ["b@x 4", "d@x 2", "c@x 1", "a@x off", "e@x off"]
+               and out["empty"] == ""
+               and parsed["decided"] == case["tiers"] and not any(parsed[k] for k in ("unknown", "bad", "repeated", "refused")),
+               repr((out["text"], parsed)))
+        sens = out["sens"]
+        # b0 ranks b 60, a 50, c 20 = d 20 over four measured; the cuts for 1:1:2:2 of six are
+        # round(4/6)=1, round(8/6)=1, round(16/6)=3, 4: b takes 4, a 2, c and d tie at 2
+        record("27.4 each board cuts its ranking in the proportions of the page's tiers, ties take the better "
+               "tier, a differing cell is marked, and agree counts only boards that are not composite",
+               sens["counts"] == {"4": 1, "3": 1, "2": 2, "1": 2}
+               and sens["columns"] == [["b0", False], ["b1", True]]
+               and sens["groups"] == [
+                   [4, 1, [["a@x", 4, [[2, True], [4, False]], 0, 1]]],
+                   [3, 1, [["b@x", 3, [[4, True], [3, False]], 0, 1]]],
+                   [2, 2, [["d@x", 2, [[2, False], [2, False]], 1, 1], ["c@x", 2, [[2, False], [2, False]], 1, 1]]],
+                   [1, 2, [["f@x", 1, [None, [1, False]], 0, 0], ["e@x", 1, [None, [1, False]], 0, 0]]]]
+               and out["groups"] == [
+                   [4, 1, [["m2", ["a@x"]]]], [3, 1, [["m1", ["b@x"]]]],
+                   [2, 2, [["m1", ["d@x"]], ["m3", ["c@x"]]]], [1, 2, [["m1", ["f@x"]], ["m3", ["e@x"]]]],
+                   ["off", 1, [["m2", ["g@x"]]]], [None, 0, []]],
+               repr((sens, out["groups"])))
+        record("27.5 a carried lane that another carried lane of any model beats for no more cost is named, "
+               "an off or uncarried lane beats nothing, and a lane never beats itself",
+               out["carried"] == ["a@x", "b@x", "c@x", "d@x", "e@x", "g@x"]
+               # a is beaten by g's better point, never g beaten by its own; b at $2 is beaten by
+               # nothing, since f costs $2.5; with f off, b is the best that beats c and d
+               and out["beaten"] == {"a@x": "g@x", "c@x": "b@x", "d@x": "b@x"}
+               and out["beatenAll"] == {"a@x": "g@x", "c@x": "f@x", "d@x": "f@x"},
+               repr((out["carried"], out["beaten"], out["beatenAll"])))
+        record("27.6 a meter's colour is its harness's, and a second meter's a shade of it with the harness as fallback",
+               out["colours"] == ["var(--h-claude, var(--accent))",
+                                  "var(--h-claude-1, var(--h-claude, var(--accent)))",
+                                  "var(--h-codex, var(--accent))", "var(--accent)"],
+               repr(out["colours"]))
+        page = bench_page.render(None, ASTRA, SWEEP)
+        script = open(bench_page.SCRIPT_PATH, encoding="utf-8").read()
+        record("27 the page has a place for the sensitivity table under the plots, says off is a choice, and "
+               "still writes nowhere",
+               page.find('id="plots"') < page.find('id="sensitivity"') < page.find('id="tiers"')
+               and "or o to turn it off" in page and "fetch(" not in script and "lanes.json" not in script,
+               page[page.find('id="plots"'):][:400])
+except Exception as e:
+    record("27 the page's off, copy, sensitivity, beaten-by and meter colour, under node", False, repr(e))
 
 sys.exit(1 if fails else 0)

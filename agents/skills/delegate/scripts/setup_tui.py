@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Selectable terminal setup UI for delegate catalogs."""
 import copy
+import subprocess
 import textwrap
 
 from bench import EPOCH_BENCHMARKS, fmt_aa_value, fmt_cost
@@ -18,7 +19,7 @@ CLASSES_LEGEND = "classes: each class has a floor and ceiling tier (1-4)."
 # key that moves it never changes.
 FLIP_KEYS = "space/x: flip"
 TIER_FOOTER = f"↑/↓/j/k: move  {FLIP_KEYS}  enter: next  b: back  o: bench  q: quit"
-REVIEW_FOOTER = "↑/↓/j/k: move  1-4: set tier  enter: next  b: back  o: bench  q: quit"
+REVIEW_FOOTER = "↑/↓/j/k: move  1-4: set tier  v: paste  enter: next  b: back  o: bench  q: quit"
 ROUTING_FOOTER = "↑/↓ or j/k: move  +/-: adjust  enter: confirm  b: back  q: quit"
 # The review page's one box per tier, best first, the way the tier pages ran.
 REVIEW_COLUMNS = ("T4", "T3", "T2", "T1")
@@ -53,6 +54,96 @@ def hidden_legend(taken, off):
     if off:
         parts.append(f"{off} not carried")
     return f"Not listed: {', '.join(parts)}." if parts else ""
+
+
+# --- tier lines: the benchmark page's decisions, pasted (ticket 27) -------------
+
+TIER_LINE_VALUES = {"1": 1, "2": 2, "3": 3, "4": 4, "off": "off"}
+
+
+class ClipboardError(Exception):
+    """The clipboard could not be read; the wizard says so and changes nothing."""
+
+
+def read_clipboard():
+    """The macOS clipboard as text, through `pbpaste`. Called only on `v`."""
+    try:
+        result = subprocess.run(["pbpaste"], capture_output=True, text=True, timeout=5, check=False)
+    except FileNotFoundError as e:
+        raise ClipboardError("pbpaste not found") from e
+    except (OSError, subprocess.SubprocessError) as e:
+        raise ClipboardError(f"pbpaste failed: {e}") from e
+    if result.returncode != 0:
+        raise ClipboardError(f"pbpaste failed (exit {result.returncode})")
+    return result.stdout
+
+
+def parse_tier_lines(text, lanes_doc):
+    """Read `<lane> <1-4|off>` lines, as the benchmark page's "Copy as lines"
+    writes them. The one parser for the review page's `v` and for
+    `setup.py --tiers-from`.
+
+    Returns a dict: `decided` {lane: tier or "off"} in the order first named,
+    where the last line for a lane wins; `repeated`, the lanes named more than
+    once; `unknown`, names that are no lane in this catalog; `bad`, the line
+    numbers that are not a name and one of 1-4 or off; and `refused`, ultra
+    lanes a line tried to carry, since an ultra lane is never carried
+    (ticket 15). Blank lines are skipped.
+    """
+    lanes = (lanes_doc or {}).get("lanes") or {}
+    out = {"decided": {}, "repeated": [], "unknown": [], "bad": [], "refused": []}
+    for number, raw in enumerate((text or "").splitlines(), 1):
+        parts = raw.split()
+        if not parts:
+            continue
+        if len(parts) != 2 or parts[1].lower() not in TIER_LINE_VALUES:
+            out["bad"].append(number)
+            continue
+        name, value = parts[0], TIER_LINE_VALUES[parts[1].lower()]
+        if name not in lanes:
+            if name not in out["unknown"]:
+                out["unknown"].append(name)
+            continue
+        if value != "off" and (lanes[name] or {}).get("effort") == "ultra":
+            if name not in out["refused"]:
+                out["refused"].append(name)
+            continue
+        if name in out["decided"] and name not in out["repeated"]:
+            out["repeated"].append(name)
+        out["decided"][name] = value
+    return out
+
+
+def tier_lines_summary(parsed, lanes_doc):
+    """The one line that says what a set of tier lines did: how many lanes took
+    a tier, how many went off, how many the lines did not name, then any lane
+    named twice, any name the catalog does not know, and any line not read."""
+    lanes = (lanes_doc or {}).get("lanes") or {}
+    decided = parsed["decided"]
+    tiers = sum(1 for value in decided.values() if value != "off")
+    parts = [f"{tiers} took a tier", f"{len(decided) - tiers} went off",
+             f"{sum(1 for name in lanes if name not in decided)} not named"]
+    if parsed["repeated"]:
+        parts.append("named twice, last line kept: " + ", ".join(parsed["repeated"]))
+    if parsed["unknown"]:
+        parts.append("unknown, ignored: " + ", ".join(parsed["unknown"]))
+    if parsed["refused"]:
+        parts.append("ultra, never carried, ignored: " + ", ".join(parsed["refused"]))
+    if parsed["bad"]:
+        parts.append("not <lane> <1-4|off>, ignored: line " + ", ".join(str(n) for n in parsed["bad"]))
+    return "Lines: " + "; ".join(parts) + "."
+
+
+def apply_tier_lines_to_doc(lanes_doc, parsed):
+    """The prompt-driven interface's form of the same lines: a tier line sets
+    the lane's tier and carries it, an off line records it off."""
+    for name, value in parsed["decided"].items():
+        lane = lanes_doc["lanes"][name]
+        if value == "off":
+            lane["enabled"] = False
+        else:
+            lane["tier"] = value
+            lane.pop("enabled", None)
 
 
 def fit_line(line, width=80):
@@ -417,7 +508,9 @@ class Wizard:
 
     def __init__(self, lanes_doc, routing_doc, bench, discovered,
                  lanes_path, routing_path, initial_message="",
-                 bench_page_path=None, effort_rows=None, discovery=None):
+                 bench_page_path=None, effort_rows=None, discovery=None, clipboard=None):
+        # read only when `v` is pressed on the review page (ticket 27)
+        self._clipboard = clipboard or read_clipboard
         self._original_lanes = copy.deepcopy(lanes_doc)
         self._original_routing = copy.deepcopy(routing_doc)
         self.lanes_doc = copy.deepcopy(lanes_doc)
@@ -507,6 +600,45 @@ class Wizard:
             (name for name in self._carried() if name in self._assigned),
             key=lambda name: (-self._assigned[name], *self._bench_order(name)))
         self._review_order = group_lanes(by_tier, self.lanes_doc)
+
+    def apply_tier_lines(self, text):
+        """Apply `<lane> <1-4|off>` lines and say what they did, on one line.
+
+        A tier line carries the lane and gives it that tier; an off line sets it
+        not carried; a lane with no line keeps what it has. On the review page
+        the order is taken again, since a lane may have joined or left it, and
+        the cursor stays on the lane it was on when that lane is still listed.
+        Returns the summary line."""
+        parsed = parse_tier_lines(text, self.lanes_doc)
+        for name, value in parsed["decided"].items():
+            if value == "off":
+                self._enabled[name] = False
+                self._assigned.pop(name, None)
+            else:
+                self._enabled[name] = True
+                self._assigned[name] = value
+        summary = tier_lines_summary(parsed, self.lanes_doc)
+        if self.screen == "review":
+            order = self._review_order
+            here = order[min(self.cursor, len(order) - 1)] if order else None
+            self._enter_review()
+            if here in self._review_order:
+                self.cursor = self._review_order.index(here)
+        self.message = summary
+        return summary
+
+    def _paste_tier_lines(self):
+        """`v` on the review page: the clipboard's lines, or a message saying
+        why nothing changed."""
+        try:
+            text = self._clipboard()
+        except ClipboardError as e:
+            self.message = f"v: {e}; nothing changed"
+            return
+        if not (text or "").strip():
+            self.message = "v: the clipboard holds no lines; nothing changed"
+            return
+        self.apply_tier_lines(text)
 
     def _undo_tier(self, tier):
         for name in list(self._assigned):
@@ -619,6 +751,8 @@ class Wizard:
                 self.cursor = (self.cursor + 1) % len(names)
             elif key in ("1", "2", "3", "4") and names:
                 self._assigned[names[min(self.cursor, len(names) - 1)]] = int(key)
+            elif key == "v":
+                self._paste_tier_lines()
             elif key == "enter":
                 self.screen = "routing"
                 self.cursor = 0
@@ -1332,7 +1466,7 @@ def run_curses(wizard):
                        10: "enter", 13: "enter", curses.KEY_ENTER: "enter",
                        ord("b"): "b", ord("q"): "q", ord("y"): "y", ord("n"): "n",
                        ord("+"): "plus", ord("="): "plus", ord("-"): "minus",
-                       ord("o"): "o", ord("O"): "o",
+                       ord("o"): "o", ord("O"): "o", ord("v"): "v", ord("V"): "v",
                        ord("x"): "x", ord("X"): "x"}
             if ord("1") <= code <= ord("5"):
                 key = chr(code)

@@ -406,10 +406,14 @@ def _board_facts(source, benchmark, items, source_meta):
 
 def _point(r, lanes):
     """One row as the script draws it."""
-    at = [{"name": n, "harness": lanes[n].get("harness"), "tier": lanes[n].get("tier")}
+    at = [{"name": n, "harness": lanes[n].get("harness"), "meter": lanes[n].get("meter"),
+           "tier": lanes[n].get("tier")}
           for n in r["_lanes"]]
     harness = sorted({lane["harness"] for lane in at if lane["harness"]}) or \
         sorted({lanes[n].get("harness") for n in r["_model_lanes"] if lanes[n].get("harness")})
+    # colour is the meter (ticket 27): the lanes' own, else the model's lanes'
+    meter = sorted({lane["meter"] for lane in at if lane["meter"]}) or \
+        sorted({lanes[n].get("meter") for n in r["_model_lanes"] if lanes[n].get("meter")})
     tiers = [lane["tier"] for lane in at if isinstance(lane["tier"], int)]
     if r.get("uncertain"):
         provenance = "uncertain"
@@ -419,7 +423,7 @@ def _point(r, lanes):
             "published": r.get("model"), "ours": bool(r["_lane_model"]),
             "effort": r.get("effort") or "?", "score": r["_score"], "cost": r["_cost"],
             "plotted": _plotted(r), "kind": r["_kind"], "weak": r["_weak"], "lanes": at,
-            "harness": harness, "tier": min(tiers) if tiers else None,
+            "harness": harness, "meter": meter, "tier": min(tiers) if tiers else None,
             "off": r["_off_reason"], "beatenBy": r["_dominated_by"],
             "provenance": provenance, "observed": r.get("observed")}
 
@@ -441,10 +445,29 @@ def _lane_list(lanes_doc, bench, items, proposals):
     out = []
     for name in lane_order({"lanes": lanes}, bench):
         lane = lanes[name]
-        out.append({"name": name, "harness": lane.get("harness"), "model": lane.get("model"),
+        out.append({"name": name, "harness": lane.get("harness"), "meter": lane.get("meter"),
+                    "model": lane.get("model"),
                     "group": model_group(lane), "effort": lane.get("effort"),
                     "tier": lane.get("tier") if isinstance(lane.get("tier"), int) else None,
                     "carried": _carried(lane), "off": off.get(name), "rows": name in drawn})
+    return out
+
+
+def meter_shades(lanes_doc):
+    """Every meter the catalog's lanes use, with its harness and a shade of that
+    harness's colour: the meter most of the harness's lanes use takes the
+    harness colour itself (shade 0), the next shade 1, and so on, ties by name.
+    Load balance is across quotas, so colour is the meter (ticket 27), and two
+    meters on one harness (`claude-general`, `claude-fable`) read as kin. Listed
+    harness by harness, each harness's meters by shade."""
+    counts = defaultdict(lambda: defaultdict(int))
+    for lane in _lanes(lanes_doc).values():
+        if lane.get("harness") and lane.get("meter"):
+            counts[lane["harness"]][lane["meter"]] += 1
+    out = []
+    for harness in sorted(counts):
+        ranked = sorted(counts[harness], key=lambda m: (-counts[harness][m], m))
+        out += [{"name": m, "harness": harness, "shade": i} for i, m in enumerate(ranked)]
     return out
 
 
@@ -485,6 +508,7 @@ def plot_data(effort_rows, lanes_doc, proposals=None, bench=None):
     efforts = {r.get("effort") for r in items if r.get("effort")}
     return {"boards": boards, "defaults": defaults,
             "harnesses": sorted({lane.get("harness") for lane in lanes.values() if lane.get("harness")}),
+            "meters": meter_shades(lanes_doc),
             "efforts": sorted(efforts, key=_effort_key),
             "lanes": _lane_list(lanes_doc, bench, items, proposals),
             "catalogKey": catalog_key(lanes_doc)}
@@ -514,13 +538,15 @@ def _plots_section(effort_rows, lanes_doc, proposals, bench=None):
         return out + ["<p>No per-effort rows.</p>", "</section>"]
     out += ['<p class="lede">Up is better and left is cheaper. The amber line is the best score '
             "the money buys, and everything in the shade under it is beaten by a point on the "
-            "line. Colour is the harness. Each plot is one benchmark from one source, because a "
-            "dollar on one board is not a dollar on another. Drag a tier line to move it; click a "
-            "dot and press 1 to 4 to give its lane a tier.</p>",
+            "line. Colour is the meter, the quota a lane spends. Each plot is one benchmark from "
+            "one source, because a dollar on one board is not a dollar on another. Drag a tier "
+            "line to move it; click a dot and press 1 to 4 to give its lane a tier, or o to turn "
+            "it off.</p>",
             '<div class="board">',
             '<div class="plot-column">',
             '<div id="plots"></div>',
             '<button id="add-plot" type="button" class="add" hidden>Add a plot</button>',
+            '<section id="sensitivity" class="sensitivity" aria-label="Tiers each board alone would give" hidden></section>',
             "</div>",
             '<aside id="tiers" class="tiers" aria-label="Tiers drawn on this page" hidden></aside>',
             "</div>",
@@ -888,8 +914,8 @@ def _header(lanes_doc, effort_rows, proposals):
     off = _proposed_off(proposals)
     carried = sum(1 for name, lane in lanes.items() if lane.get("enabled", True) and lane.get("effort") != "ultra")
     out = ["<header>", "<h1>Benchmark evidence for the lane catalog</h1>",
-           "<p>Read-only for the catalog: a tier drawn here stays in this browser, keyed to "
-           "this catalog, until you set it in the wizard, which is the only thing that writes. "
+           "<p>Read-only for the catalog: a tier or an off drawn here stays in this browser, keyed to "
+           "this catalog, until you paste it into the wizard, which is the only thing that writes. "
            f"{len(lanes)} lanes in the catalog, {carried} carried."
            + (f" {len(effort_rows)} per-effort rows." if effort_rows else "")
            + "</p>"]
@@ -913,6 +939,7 @@ STYLE = """
   --accent: #2b5fc4; --off: #c63d33; --off-ink: #a3291f;
   --frontier: #c27806; --frontier-ink: #7f4d00; --flag: #f6ecd2; --flag-ink: #6b4d00;
   --h-codex: #2b5fc4; --h-claude: #7a4cc2; --h-agy: #13866a; --h-grok: #b3306f;
+  --h-codex-1: #173a82; --h-claude-1: #43207e; --h-agy-1: #0a5443; --h-grok-1: #6e1a43;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace; }
 @media (prefers-color-scheme: dark) {
@@ -921,13 +948,15 @@ STYLE = """
     --muted: #848c87; --grid: #272c28; --rule: #363c37; --head: #20241f;
     --accent: #6b95f0; --off: #e2574c; --off-ink: #f39a90;
     --frontier: #f0a53a; --frontier-ink: #f6c47a; --flag: #3a2f12; --flag-ink: #e9c36a;
-    --h-codex: #6b95f0; --h-claude: #a784e6; --h-agy: #3cbf98; --h-grok: #e0679f; } }
+    --h-codex: #6b95f0; --h-claude: #a784e6; --h-agy: #3cbf98; --h-grok: #e0679f;
+    --h-codex-1: #b7cdfa; --h-claude-1: #dccafb; --h-agy-1: #a3e8d2; --h-grok-1: #f4b8d3; } }
 :root[data-theme="dark"] { color-scheme: dark;
   --page: #121513; --surface: #1a1e1b; --ink: #edf0ec; --ink-2: #b3bbb5;
   --muted: #848c87; --grid: #272c28; --rule: #363c37; --head: #20241f;
   --accent: #6b95f0; --off: #e2574c; --off-ink: #f39a90;
   --frontier: #f0a53a; --frontier-ink: #f6c47a; --flag: #3a2f12; --flag-ink: #e9c36a;
-  --h-codex: #6b95f0; --h-claude: #a784e6; --h-agy: #3cbf98; --h-grok: #e0679f; }
+  --h-codex: #6b95f0; --h-claude: #a784e6; --h-agy: #3cbf98; --h-grok: #e0679f;
+  --h-codex-1: #b7cdfa; --h-claude-1: #dccafb; --h-agy-1: #a3e8d2; --h-grok-1: #f4b8d3; }
 * { box-sizing: border-box; }
 body { font-family: var(--sans); font-size: 14px; line-height: 1.5; color: var(--ink);
   background: var(--page); margin: 0; padding-block: 2rem 4rem; padding-inline: 1.25rem; }
@@ -1081,6 +1110,35 @@ table.counts tr.tot th, table.counts tr.tot td { border-bottom: 0; border-top: 1
   color: var(--muted); background: var(--surface); border: 1px solid var(--rule); border-radius: 3px; }
 .box:hover { border-color: var(--ink-2); color: var(--ink); }
 .box[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--surface); }
+.box.off-box { width: auto; padding: 0 0.3rem; margin-left: 3px; }
+.box.off-box[aria-pressed="true"] { background: var(--off); border-color: var(--off); color: var(--surface); }
+.lane-row.is-off .nm { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--off); }
+.lane-row { flex-wrap: wrap; }
+.lane-row .tag.beaten { color: var(--frontier-ink); flex-basis: 100%; padding-left: 8.6rem; margin-top: -0.1rem;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tip .beaten { color: var(--frontier-ink); }
+.sensitivity { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px;
+  padding: 0.9rem 1.1rem 1rem; margin-top: 1.1rem; }
+.sensitivity h2 { margin: 0 0 0.2rem; }
+.sensitivity .lede { font-size: 13px; max-width: 60rem; }
+table.sens { width: auto; min-width: 100%; font-size: 12.5px; }
+table.sens th, table.sens td { padding: 0.2rem 0.45rem; }
+table.sens thead th { vertical-align: bottom; white-space: normal; min-width: 4.2rem; max-width: 7.5rem;
+  font-weight: 600; line-height: 1.25; }
+table.sens thead th .sub { font-weight: 400; }
+table.sens thead th.lane { min-width: 12rem; }
+table.sens th.composite, table.sens td.composite { background: var(--head); }
+table.sens td.cell, table.sens th.cell, table.sens td.agree { text-align: center; font-variant-numeric: tabular-nums; }
+table.sens td.cell.none { color: var(--muted); }
+table.sens td.cell.diff span { display: inline-block; min-width: 1.35rem; border-radius: 3px;
+  background: var(--flag); color: var(--flag-ink); box-shadow: inset 0 0 0 1px var(--flag-ink); font-weight: 650; }
+table.sens td.mine { font-weight: 650; text-align: center; }
+table.sens tr.grp th { background: transparent; color: var(--ink); font-size: 13px; padding-top: 0.6rem;
+  border-bottom: 1px solid var(--rule); }
+table.sens tr.grp th .n { font-weight: 400; color: var(--muted); margin-left: 0.4rem; }
+table.sens td.lane { font: 12px var(--mono); white-space: nowrap; }
+table.sens td.lane .swatch { margin-right: 0.4rem; vertical-align: 0; }
+table.sens td.agree.low { color: var(--off-ink); font-weight: 650; }
 .picker { position: absolute; z-index: 3; background: var(--surface); color: var(--ink); border: 1px solid var(--ink);
   border-radius: 4px; box-shadow: 0 3px 10px rgba(0, 0, 0, 0.16); font-size: 12.5px; padding: 0.4rem 0.55rem; max-width: 18rem; }
 .picker .who { font: 12.5px var(--mono); margin-bottom: 0.3rem; }

@@ -233,6 +233,17 @@ def load_effort_rows(paths):
     return rows, ""
 
 
+def read_tier_lines(path):
+    """The text of a `--tiers-from` file. A file that cannot be read stops the
+    run before anything is shown: a flag that reads as accepted while nothing
+    acts on it is worse than one that is refused."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+    except (OSError, UnicodeDecodeError) as e:
+        raise CatalogError(f"tiers-from: {e}") from e
+
+
 def confirm_and_write(lanes_doc, routing_doc, lanes_path, routing_path):
     print(lanes_path)
     print(routing_path)
@@ -263,12 +274,16 @@ def main(argv=None):
     parser.add_argument("--effort-rows", action="append", default=None,
                         help="effort.py accepted rows for the pre-screen, the benchmark page and "
                              "the Artificial Analysis columns; repeat to put several sources on one page")
+    parser.add_argument("--tiers-from", default=None, metavar="FILE",
+                        help="apply `<lane> <1-4|off>` lines, as the benchmark page copies them, "
+                             "at start; the review page's v key reads the same lines from the clipboard")
     parser.add_argument("--no-discover", action="store_true", help="skip model discovery")
     parser.add_argument("--fixture-dir", default=None, help="fixture directory for harness discovery")
     args = parser.parse_args(argv)
 
     try:
         config_dir = os.path.abspath(os.path.expanduser(args.config_dir))
+        tier_lines = read_tier_lines(args.tiers_from) if args.tiers_from else None
         discovered = read_discovery(args)
         lanes_doc, routing_doc, lanes_path, routing_path = load_or_propose(config_dir, discovered)
         plain = args.plain or not sys.stdin.isatty() or not sys.stdout.isatty()
@@ -289,6 +304,12 @@ def main(argv=None):
             for line in setup_tui.start_facts(lanes_path, routing_path, None, discovery_data,
                                               width=10_000):
                 print(line)
+            if tier_lines is not None:
+                # the same parser and summary as the review page's `v`; the
+                # tiers become the prompts' defaults, and an off line is written off
+                parsed = setup_tui.parse_tier_lines(tier_lines, lanes_doc)
+                setup_tui.apply_tier_lines_to_doc(lanes_doc, parsed)
+                print(setup_tui.tier_lines_summary(parsed, lanes_doc))
             if args.effort_rows:
                 # The pre-screen is a selectable screen; there is no prompt-driven
                 # form of it yet. Saying so is the point: the instruction a human
@@ -333,6 +354,9 @@ def main(argv=None):
                 effort_rows=effort_rows,
                 discovery=discovery_data,
             )
+            if tier_lines is not None:
+                summary = wizard.apply_tier_lines(tier_lines)
+                wizard.message = f"{initial_message}; {summary}" if initial_message else summary
             result = setup_tui.run_curses(wizard)
             if result is None:
                 print("nothing written")

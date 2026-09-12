@@ -1699,4 +1699,153 @@ try:
 except Exception as e:
     record("46 groups without Epoch use their best AA rank and keep efforts descending", False, repr(e))
 
+
+# --- ticket 27: the page's lines, pasted into the review page ---------------------------
+try:
+    doc = sweep_lanes()
+    text = ("\n"
+            "sol-high@codex 4\n"
+            "   \n"
+            "terra-high@codex 2\n"
+            "nobody@codex 3\n"
+            "luna-low@codex 5\n"          # a tier out of range
+            "flash-high@agy\n"            # no tier
+            "grok46-high@grok 1 2\n"      # a field too many
+            "fable-low@claude x\n"        # not a tier
+            "terra-high@codex OFF\n"      # named again: the last line wins
+            "sol-ultra@codex 3\n"         # an ultra lane is never carried
+            "nobody@codex off\n"
+            "fable-max@claude 1\n")
+    parsed = setup_tui.parse_tier_lines(text, doc)
+    summary = setup_tui.tier_lines_summary(parsed, doc)
+    record("47 one parser reads tier lines: blank lines skipped, the last line for a lane wins, unknown "
+           "lanes, bad tiers and ultra lanes ignored, and one summary line says each",
+           parsed["decided"] == {"sol-high@codex": 4, "terra-high@codex": "off", "fable-max@claude": 1}
+           and list(parsed["decided"]) == ["sol-high@codex", "terra-high@codex", "fable-max@claude"]
+           and parsed["repeated"] == ["terra-high@codex"]
+           and parsed["unknown"] == ["nobody@codex"]
+           and parsed["bad"] == [6, 7, 8, 9]
+           and parsed["refused"] == ["sol-ultra@codex"]
+           and summary == (f"Lines: 2 took a tier; 1 went off; {len(doc['lanes']) - 3} not named; "
+                           "named twice, last line kept: terra-high@codex; unknown, ignored: nobody@codex; "
+                           "ultra, never carried, ignored: sol-ultra@codex; "
+                           "not <lane> <1-4|off>, ignored: line 6, 7, 8, 9.")
+           and setup_tui.parse_tier_lines("", doc)["decided"] == {},
+           repr((parsed, summary)))
+except Exception as e:
+    record("47 one parser reads tier lines", False, repr(e))
+
+
+def at_review(clipboard, lanes=None):
+    w = Wizard(copy.deepcopy(lanes or LANES), copy.deepcopy(ROUTING), data(), DISCOVERED,
+               "/tmp/lanes.json", "/tmp/routing.json", clipboard=clipboard)
+    start(w)
+    while w.screen == "tier":
+        w.handle("enter")
+    assert w.screen == "review", w.screen
+    return w
+
+
+try:
+    calls = []
+
+    def clipboard():
+        calls.append(1)
+        return "fable-xhigh@claude 4\nsol-high@codex off\nterra-high@codex 3\nnobody@x 2\n"
+
+    w = at_review(clipboard)
+    move_to_review = [r["cells"][4] for r in w.view()["rows"]]
+    # the cursor on luna-low, which no line names
+    w.cursor = move_to_review.index("luna-low@codex")
+    for key in ("up", "down", "1", "o", "x", "space"):
+        w.handle(key)
+    before = len(calls)
+    w.handle("v")
+    view = w.view(200)
+    rows = {r["cells"][4]: r["cells"][:4] for r in view["rows"]}
+    cursor = next(r["cells"][4] for r in view["rows"] if r["cursor"])
+    grid = overlay(layout_lines(view, 200, 50), 200, 50)
+    finish(w)
+    lanes, _routing = w.result()
+    record("48 v on the review page applies the clipboard's lines: a tier line carries and tiers, off sets "
+           "not carried, a lane with no line keeps its tier, and one line says so",
+           before == 0 and len(calls) == 1
+           and rows["fable-xhigh@claude"] == ["[x]", "[ ]", "[ ]", "[ ]"]
+           and rows["terra-high@codex"] == ["[ ]", "[x]", "[ ]", "[ ]"]
+           and rows["luna-low@codex"] == ["[ ]", "[ ]", "[ ]", "[x]"]
+           and "sol-high@codex" not in rows
+           and cursor == "luna-low@codex"
+           and view["message"] == "Lines: 2 took a tier; 1 went off; 3 not named; unknown, ignored: nobody@x."
+           and view["message"] in grid
+           and any(line.startswith("Not carried, keeps its catalog tier: sol-high@codex") for line in grid)
+           and "v: paste" in view["footer"]
+           and lanes["lanes"]["fable-xhigh@claude"]["tier"] == 4 and "enabled" not in lanes["lanes"]["fable-xhigh@claude"]
+           and lanes["lanes"]["terra-high@codex"]["tier"] == 3
+           and lanes["lanes"]["sol-high@codex"]["enabled"] is False
+           and lanes["lanes"]["sol-high@codex"]["tier"] == LANES["lanes"]["sol-high@codex"]["tier"]
+           and lanes["lanes"]["luna-low@codex"]["tier"] == 1,
+           repr((calls, rows, cursor, view["message"])))
+except Exception as e:
+    record("48 v on the review page applies the clipboard's lines", False, repr(e))
+
+
+try:
+    def missing():
+        raise setup_tui.ClipboardError("pbpaste not found")
+
+    outcomes = []
+    for reader, said in ((missing, "v: pbpaste not found; nothing changed"),
+                         (lambda: "  \n\n", "v: the clipboard holds no lines; nothing changed")):
+        w = at_review(reader)
+        state = (dict(w._assigned), dict(w._enabled), list(w._review_order))
+        w.handle("v")
+        outcomes.append(w.message == said and state == (dict(w._assigned), dict(w._enabled), list(w._review_order)))
+    # the real reader with no pbpaste on PATH raises, never runs anything else
+    saved_path = os.environ.get("PATH", "")
+    with tempfile.TemporaryDirectory() as empty:
+        os.environ["PATH"] = empty
+        try:
+            setup_tui.read_clipboard()
+            outcomes.append(False)
+        except setup_tui.ClipboardError as e:
+            outcomes.append("pbpaste" in str(e))
+        finally:
+            os.environ["PATH"] = saved_path
+    # pbpaste that fails says its exit status
+    with tempfile.TemporaryDirectory() as fake:
+        script = os.path.join(fake, "pbpaste")
+        with open(script, "w", encoding="utf-8") as f:
+            f.write("#!/bin/sh\nexit 3\n")
+        os.chmod(script, 0o755)
+        os.environ["PATH"] = fake + os.pathsep + saved_path
+        try:
+            setup_tui.read_clipboard()
+            outcomes.append(False)
+        except setup_tui.ClipboardError as e:
+            outcomes.append("exit 3" in str(e))
+        finally:
+            os.environ["PATH"] = saved_path
+    record("49 where pbpaste is missing, fails or the clipboard is empty, v says so and changes nothing",
+           outcomes == [True, True, True, True], repr(outcomes))
+except Exception as e:
+    record("49 where pbpaste is missing, fails or the clipboard is empty, v says so and changes nothing", False, repr(e))
+
+
+try:
+    # --tiers-from applies the lines at start: the tier pages list only what no line named
+    w = wizard()
+    summary = w.apply_tier_lines("fable-xhigh@claude 4\nsol-high@codex off\n")
+    start_message = w.view()["message"]
+    start(w)
+    t4 = [r["cells"][1] for r in w.view()["rows"]]
+    legend = w.view()["legend"]
+    record("50 lines applied at start hide what they decided from the tier pages and say so on the start page",
+           start_message == summary == "Lines: 1 took a tier; 1 went off; 4 not named."
+           and "fable-xhigh@claude" not in t4 and "sol-high@codex" not in t4
+           and set(t4) == {"terra-high@codex", "grok46-high@grok", "luna-low@codex", "flash-high@agy"}
+           and legend[0] == "Not listed: 1 taken at a higher tier, 1 not carried.",
+           repr((start_message, t4, legend)))
+except Exception as e:
+    record("50 lines applied at start hide what they decided from the tier pages", False, repr(e))
+
 sys.exit(1 if fails else 0)
