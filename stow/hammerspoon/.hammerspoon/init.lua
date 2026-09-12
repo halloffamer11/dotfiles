@@ -57,4 +57,24 @@ local function toggleRecording()
 end
 
 hs.hotkey.bind({ "cmd", "alt" }, "r", toggleRecording)
+
+-- delegate rows in the Claude Code status line: ⌥⌘D toggles them (ticket 23).
+-- Terminal-agnostic on purpose: Ghostty keybinds cannot run a program. The
+-- status line follows the flag file at its next refresh, 30 s at most.
+local DELEGATE_REPORT = os.getenv("HOME") .. "/.claude/skills/delegate/scripts/report.py"
+
+local function toggleDelegateRows()
+	hs.task
+		.new("/usr/bin/env", function(exitCode, stdOut, stdErr)
+			if exitCode == 0 then
+				hs.alert.show((stdOut or ""):gsub("%s+$", ""))
+			else
+				hs.alert.show("delegate rows toggle FAILED — open Hammerspoon console")
+				print("report.py statusline toggle stderr: " .. (stdErr or ""))
+			end
+		end, { "python3", DELEGATE_REPORT, "statusline", "toggle" })
+		:start()
+end
+
+hs.hotkey.bind({ "cmd", "alt" }, "d", toggleDelegateRows)
 hs.alert.show("Hammerspoon config loaded")

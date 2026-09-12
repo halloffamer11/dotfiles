@@ -34,7 +34,8 @@ something collapsible"). Prototyped the same day; Orin chose variant H. Branch
 - [x] Orin sees the rows in a live session (his): seen 2026-09-11 23:14, which showed the unbadged rows pulled to column 0
 - [x] Every row starts with a non-space glyph, so Claude Code's per-row trim cannot shift the columns: an unbadged row carries a dim `·` in the badge column
 - [x] `report.py statusline off|on|toggle|status` switches the rows through the flag file `~/.cache/delegate/statusline.off` (`DELEGATE_STATUSLINE_SWITCH` in tests); while it exists `statusline` prints nothing and exits 0. Covered in `test_report.py`
-- [ ] Orin picks the WezTerm chord that runs the toggle (his; the snippet is in the 2026-09-11 tweaks section)
+- [x] A keyboard shortcut runs the toggle from any terminal: ⌥⌘D in `stow/hammerspoon/.hammerspoon/init.lua`, next to the ⌥⌘R recorder
+- [ ] Orin starts Hammerspoon and presses ⌥⌘D once in each direction (his; Hammerspoon was installed but not running on 2026-09-11, and `~/.hammerspoon/init.lua` is a plain copy of the repo file, not a stow link)
 
 ## The row
 
@@ -144,9 +145,12 @@ python3 ~/.claude/skills/delegate/scripts/report.py statusline off|on|toggle|sta
 ```
 
 Typed at the Claude prompt as `! python3 … statusline toggle` it costs no
-model turn. A WezTerm key can run the same command through
-`wezterm.action_callback` and `wezterm.run_child_process`; the chord is Orin's
-to pick within his tier map, so `wezterm.lua` is untouched here.
+model turn. Orin is moving from WezTerm to Ghostty, and Ghostty keybinds send
+text or escape sequences only (checked against the Ghostty keybind reference
+the same day: `text:`, `csi:`, `esc:`, no action runs a program), so the
+shortcut lives in Hammerspoon, which already runs a shell task on ⌥⌘R:
+⌥⌘D runs `report.py statusline toggle` and shows the result as an alert.
+`wezterm.lua` is untouched.
 
 Verified: `test_report.py` 87 PASS (was 79), the other five files unchanged
 and green; live render shows every row starting with a glyph; `off` printed

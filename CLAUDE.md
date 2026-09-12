@@ -59,7 +59,8 @@ first wizard run, plus its own rewrite of this section. It must merge `main` bef
   `git -C ~/dotfiles merge --ff-only worktree/quiet-forest-811d`. The stowed
   `statusline.sh` calls the installed skill, which is `main`'s, so the fix shows
   only after that. Ticket 23 holds the row format and the decisions; its last
-  open box is the WezTerm chord for the switch.
+  open box is pressing the ⌥⌘D Hammerspoon shortcut for the switch, which needs
+  Hammerspoon running and `~/.hammerspoon` stowed.
 - Run the wizard against the repo catalog, then link the live folder to it. From
   `~/dotfiles`:
   `python3 agents/skills/delegate/scripts/setup.py --config-dir stow/delegate/.config/delegate --effort-rows .scratch/delegate-redesign/_data/tbench-accepted.json`
