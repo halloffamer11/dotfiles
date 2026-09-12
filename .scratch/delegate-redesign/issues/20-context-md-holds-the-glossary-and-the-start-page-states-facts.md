@@ -19,7 +19,8 @@ lane, class, tier (a ceiling), meter, meter weight, pace, margin, gate, carry
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** closed 2026-09-12. The glossary half landed as `CONTEXT.md` with ticket
+22; the start-page half folded into ticket 25. The boxes below are tracked there.
 
 - [ ] `CONTEXT.md` exists at the repo root, one definition per term, in the vocabulary `catalog.py`, `rank.py` and the wizard already use; `CLAUDE.md`'s domain-docs line points at it
 - [ ] The start page shows the two output paths, the benchmark page path and the discovery notices, and no definition of a term; it fits an 80 by 24 window with room to spare

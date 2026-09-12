@@ -44,11 +44,15 @@ only after `main` fast-forwards to this branch.
    makes one decision per line. The tiers on the 19 generated codex lanes and the
    three native Claude lanes are provisional by construction: `meter_weight`,
    `timeout` and `tier` are not measurements. Each such lane says so in its `note`.
-3. **Tickets 19-21**, in that order: 19 gives claude, agy and grok the per-effort
-   lanes only codex has today, and each Claude lane it makes also needs a `lane-*`
-   agent file (ticket 22); 20's glossary half is done by `CONTEXT.md`, and its
-   start-page half is not; 21 makes the report and the tier pages read the
-   per-effort AA rows instead of the free API's one entry per model.
+3. **Tickets 25 and 19**, from Orin's first full wizard run (2026-09-12), which
+   wrote nothing. 25 is the wizard and its page: tier marks start empty (the
+   placeholder tiers pre-marked lanes), tier pages hide off and taken lanes, a
+   review page after T1, a routing description panel, a facts-only start page, and
+   board descriptions and zoom on the benchmark page. 19 is lanes and data: every
+   effort a harness offers is a lane (Claude models have one each today), every
+   Claude model reaches its rows (Terminal-Bench `Opus 5` is unmatched; Haiku has
+   no AA rows), and the report reads the per-effort AA rows instead of the free
+   API. 20 and 21 are closed into them. Orin's wizard run (item 2) waits on both.
 
 **Waiting on Orin** (nothing else blocks on these):
 

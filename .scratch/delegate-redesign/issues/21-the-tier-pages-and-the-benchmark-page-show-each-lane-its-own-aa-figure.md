@@ -24,7 +24,7 @@ component scores, as the sources file asks.
 **Blocked by:** 18 Artificial Analysis rows come from the page's own JSON, not
 from a worker.
 
-**Status:** ready-for-agent
+**Status:** closed 2026-09-12, folded into ticket 19. The boxes below are tracked there.
 
 - [ ] `bench.py collect` takes the AA rows file and fills the `lanes` view with one figure per lane per AA column, measured at that lane's effort; the `models` view keeps one figure per model per column for comparison against models nobody runs
 - [ ] The AA columns in the report, the tier pages and the HTML page are component scores, with cost per task beside them; the composite index is not a column
