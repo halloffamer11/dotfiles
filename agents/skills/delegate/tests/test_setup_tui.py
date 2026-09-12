@@ -1551,6 +1551,122 @@ except Exception as e:
     record("41 the routing page describes the highlighted setting beside the table", False, repr(e))
 
 
+# --- ticket 26: lanes are grouped by model, efforts most to least, on every page ----
+def sweep_lanes():
+    """fable at five efforts, sol at two, flash on agy as a slug family of
+    two, and an ultra sol that is never carried."""
+    doc = copy.deepcopy(LANES)
+    for effort in ("low", "medium", "high", "max"):
+        lane = copy.deepcopy(LANES["lanes"]["fable-xhigh@claude"])
+        lane["effort"] = effort
+        doc["lanes"][f"fable-{effort}@claude"] = lane
+    low = copy.deepcopy(LANES["lanes"]["sol-high@codex"])
+    low["effort"] = "low"
+    doc["lanes"]["sol-low@codex"] = low
+    ultra = copy.deepcopy(LANES["lanes"]["sol-high@codex"])
+    ultra["effort"] = "ultra"
+    doc["lanes"]["sol-ultra@codex"] = ultra
+    flash_low = copy.deepcopy(LANES["lanes"]["flash-high@agy"])
+    flash_low["model"] = "gemini-3.8-flash-low"
+    flash_low["effort"] = "low"
+    doc["lanes"]["flash-low@agy"] = flash_low
+    return doc
+
+
+def groups_of(names, doc):
+    """The model groups in the order they appear, each with its efforts."""
+    out = []
+    for name in names:
+        group = setup_tui.model_group(doc["lanes"][name])
+        if not out or out[-1][0] != group:
+            out.append((group, []))
+        out[-1][1].append(doc["lanes"][name]["effort"])
+    return out
+
+
+try:
+    doc = sweep_lanes()
+    names = ["fable-low@claude", "sol-high@codex", "fable-max@claude", "flash-high@agy",
+             "flash-low@agy", "sol-low@codex"]
+    grouped = setup_tui.group_lanes(names, doc)
+    record("43 group_lanes places a group where its first lane sat and runs its efforts most to least",
+           grouped == ["fable-max@claude", "fable-low@claude", "sol-high@codex", "sol-low@codex",
+                       "flash-high@agy", "flash-low@agy"]
+           # an agy slug family is one model
+           and setup_tui.model_group(doc["lanes"]["flash-low@agy"]) == setup_tui.model_group(doc["lanes"]["flash-high@agy"])
+           and setup_tui.model_group(doc["lanes"]["sol-low@codex"]) != setup_tui.model_group(doc["lanes"]["luna-low@codex"])
+           and [setup_tui.effort_rank(e) for e in ("ultra", "max", "xhigh", "high", "medium", "low")]
+           == sorted(setup_tui.effort_rank(e) for e in ("ultra", "max", "xhigh", "high", "medium", "low")),
+           repr(grouped))
+except Exception as e:
+    record("43 group_lanes places a group where its first lane sat and runs its efforts most to least",
+           False, repr(e))
+
+
+try:
+    doc = sweep_lanes()
+    w = wizard(lanes=doc)
+    w.handle("enter")
+    w.handle("enter")
+    carry = [r["cells"][1] for r in w.view()["rows"]]
+    carry_groups = groups_of(carry, doc)
+    w.handle("enter")
+    t4 = [r["cells"][1] for r in w.view()["rows"]]
+    t4_groups = groups_of(t4, doc)
+    # sol-high leads the benchmark order and fable's measured lane is fable-max,
+    # so the sol group comes first and every group is whole, most effort first
+    sol, flash, fable = (setup_tui.model_group(doc["lanes"][n])
+                         for n in ("sol-high@codex", "flash-high@agy", "fable-max@claude"))
+    record("44 the carry page and the tier pages group by model, efforts most to least",
+           carry[:3] == ["fable-max@claude", "fable-xhigh@claude", "fable-high@claude"]
+           and len({g for g, _ in carry_groups}) == len(carry_groups)
+           and dict(carry_groups)[sol] == ["ultra", "high", "low"]
+           and dict(carry_groups)[flash] == ["high", "low"]
+           and t4[:2] == ["sol-high@codex", "sol-low@codex"]
+           and len({g for g, _ in t4_groups}) == len(t4_groups)
+           and dict(t4_groups)[fable] == ["max", "xhigh", "high", "medium", "low"]
+           and "sol-ultra@codex" not in t4
+           and all(eff == sorted(eff, key=setup_tui.effort_rank) for _g, eff in t4_groups),
+           repr((carry, t4)))
+    # the review page: a group sits where its best-tiered lane sits
+    move_to(w, "sol-high@codex")
+    w.handle("space")
+    w.handle("enter")            # sol-high takes tier 4
+    move_to(w, "fable-low@claude")
+    w.handle("space")
+    w.handle("enter")            # fable-low takes tier 3
+    w.handle("enter")
+    w.handle("enter")            # the rest take tier 1
+    review = [r["cells"][4] for r in w.view()["rows"]]
+    review_groups = groups_of(review, doc)
+    record("44b the review page groups by model where the group's best tier sits, efforts most to least",
+           w.screen == "review"
+           and review[:2] == ["sol-high@codex", "sol-low@codex"]
+           and review[2:7] == ["fable-max@claude", "fable-xhigh@claude", "fable-high@claude",
+                               "fable-medium@claude", "fable-low@claude"]
+           and len({g for g, _ in review_groups}) == len(review_groups),
+           repr(review))
+except Exception as e:
+    record("44 the carry page and the tier pages group by model, efforts most to least", False, repr(e))
+
+
+try:
+    # bench_order_key and lane_order are what the benchmark page lists lanes
+    # by, so they must agree with the tier page
+    doc = sweep_lanes()
+    w = wizard(lanes=doc)
+    start(w)
+    t4 = [r["cells"][1] for r in w.view()["rows"]]
+    listed = [n for n in setup_tui.lane_order(doc, w.bench) if w._enabled[n]]
+    record("45 lane_order is the tier page's order over the whole catalog",
+           listed == t4 and setup_tui.bench_order_key(None, "x") == (True, 0, "x")
+           # with no benchmark, the order is by name, still grouped
+           and setup_tui.lane_order(doc, None)[:3] == ["fable-max@claude", "fable-xhigh@claude", "fable-high@claude"],
+           repr((listed, t4)))
+except Exception as e:
+    record("45 lane_order is the tier page's order over the whole catalog", False, repr(e))
+
+
 try:
     # a wide terminal shows what 80 places cut: the whole path on the start page
     w = wizard()

@@ -15,6 +15,7 @@ kind of each point, what the pre-screen proposes off, which effort beats
 which) is made here, from `setup_tui` and `bench`; the script only filters
 what is shown, finds the frontier of it, and lays it out.
 """
+import hashlib
 import html
 import json
 import math
@@ -24,7 +25,8 @@ from collections import defaultdict
 import bench
 from bench import AA_COST_COLUMN, fmt_aa_value, fmt_cost
 from catalog import EFFORTS, resolve_published_model
-from setup_tui import certain_effort_rows, dominating_row, is_dominated_reason, propose_enabled
+from setup_tui import (certain_effort_rows, dominating_row, group_lanes, is_dominated_reason,
+                       lane_order, model_group, propose_enabled)
 
 # A published sweep runs the API's own enum, which starts below the lowest
 # effort a lane can be set to. `none` is a real row and the cheapest one, so a
@@ -126,6 +128,15 @@ def _effort_key(effort):
         return (EFFORT_ORDER.index(effort), effort)
     except ValueError:
         return (len(EFFORT_ORDER), str(effort))
+
+
+def _effort_desc(effort):
+    """Most effort first, a stranger last: the order every table lists a
+    model's efforts in (ticket 26)."""
+    try:
+        return (0, -EFFORT_ORDER.index(effort), "")
+    except ValueError:
+        return (1, 0, str(effort))
 
 
 def _short_model(published, lane_model):
@@ -267,7 +278,7 @@ def _group_by_model(items):
     for item in items:
         groups[_model_key(item)].append(item)
     for rows in groups.values():
-        rows.sort(key=lambda r: _effort_key(r.get("effort")))
+        rows.sort(key=lambda r: _effort_desc(r.get("effort")))
     return groups
 
 
@@ -413,10 +424,41 @@ def _point(r, lanes):
             "provenance": provenance, "observed": r.get("observed")}
 
 
-def plot_data(effort_rows, lanes_doc, proposals=None):
+def _carried(lane):
+    return lane.get("enabled", True) is not False and lane.get("effort") != "ultra"
+
+
+def _lane_list(lanes_doc, bench, items, proposals):
+    """Every lane the tier panel lists, in the tier pages' order (benchmark
+    order, grouped by model, efforts most to least), with what the panel says
+    of each: its harness, its group, whether the catalog carries it, the
+    pre-screen's reason if it proposes it off, and whether any board draws it
+    as a dot. A carried lane with no rows is still a lane that takes a tier,
+    so it is listed rather than dropped (ticket 26)."""
+    lanes = _lanes(lanes_doc)
+    drawn = {name for r in items if _plotted(r) for name in r["_lanes"]}
+    off = _proposed_off(proposals)
+    out = []
+    for name in lane_order({"lanes": lanes}, bench):
+        lane = lanes[name]
+        out.append({"name": name, "harness": lane.get("harness"), "model": lane.get("model"),
+                    "group": model_group(lane), "effort": lane.get("effort"),
+                    "tier": lane.get("tier") if isinstance(lane.get("tier"), int) else None,
+                    "carried": _carried(lane), "off": off.get(name), "rows": name in drawn})
+    return out
+
+
+def catalog_key(lanes_doc):
+    """A short key for this catalog's lane names, so the page's own tiers are
+    kept apart from another catalog's in the same browser (ticket 26)."""
+    names = "\n".join(sorted(_lanes(lanes_doc)))
+    return hashlib.sha1(names.encode("utf-8")).hexdigest()[:12]
+
+
+def plot_data(effort_rows, lanes_doc, proposals=None, bench=None):
     """Everything the plots draw, as one JSON-ready dict: every board with its
-    points, the two boards the page opens on, and the harnesses, efforts and
-    tiers the settings offer."""
+    points, the two boards the page opens on, the harnesses and efforts the
+    settings offer, and the lanes the tier panel lists."""
     if proposals is None:
         proposals = _proposals(lanes_doc, effort_rows)
     items = _annotate(effort_rows, lanes_doc, proposals)
@@ -444,7 +486,8 @@ def plot_data(effort_rows, lanes_doc, proposals=None):
     return {"boards": boards, "defaults": defaults,
             "harnesses": sorted({lane.get("harness") for lane in lanes.values() if lane.get("harness")}),
             "efforts": sorted(efforts, key=_effort_key),
-            "tiers": sorted({lane.get("tier") for lane in lanes.values() if isinstance(lane.get("tier"), int)})}
+            "lanes": _lane_list(lanes_doc, bench, items, proposals),
+            "catalogKey": catalog_key(lanes_doc)}
 
 
 def _json_for_script(data):
@@ -462,19 +505,25 @@ def _script():
     return text
 
 
-def _plots_section(effort_rows, lanes_doc, proposals):
+def _plots_section(effort_rows, lanes_doc, proposals, bench=None):
     out = ['<section class="plots">', "<h2>Score against cost</h2>"]
     if effort_rows is None:
         return out + [_missing("Per-effort"), "</section>"]
-    data = plot_data(effort_rows, lanes_doc, proposals)
+    data = plot_data(effort_rows, lanes_doc, proposals, bench)
     if not data["boards"]:
         return out + ["<p>No per-effort rows.</p>", "</section>"]
     out += ['<p class="lede">Up is better and left is cheaper. The amber line is the best score '
             "the money buys, and everything in the shade under it is beaten by a point on the "
-            "line. Each plot is one benchmark from one source, because a dollar on one board is "
-            "not a dollar on another. Hover a point for its lane and tier.</p>",
+            "line. Colour is the harness. Each plot is one benchmark from one source, because a "
+            "dollar on one board is not a dollar on another. Drag a tier line to move it; click a "
+            "dot and press 1 to 4 to give its lane a tier.</p>",
+            '<div class="board">',
+            '<div class="plot-column">',
             '<div id="plots"></div>',
             '<button id="add-plot" type="button" class="add" hidden>Add a plot</button>',
+            "</div>",
+            '<aside id="tiers" class="tiers" aria-label="Tiers drawn on this page" hidden></aside>',
+            "</div>",
             '<noscript><p class="missing">The plots need JavaScript. Every number is in the '
             "tables under “The numbers”.</p></noscript>",
             f'<script type="application/json" id="bench-data">{_json_for_script(data)}</script>',
@@ -515,8 +564,9 @@ def _comparison_section(data):
 # --- the evidence: every table, collapsed ---------------------------------------
 
 def _sweep_table(items, unit):
-    """The plot as a table: each model's efforts in order, with the step
-    from the previous effort, so 'is xhigh worth 44 percent more' is a number."""
+    """The plot as a table: each model's efforts from most to least, with
+    the step up from the effort below, so 'is xhigh worth 44 percent more' is
+    a number on xhigh's own line."""
     groups = _group_by_model(items)
     order = _ordered_models(groups)
     head = ["model", "effort", "lane", "score", "Δ score", "cost", "Δ cost", "beaten by", "provenance"]
@@ -526,8 +576,9 @@ def _sweep_table(items, unit):
                for h in head) + "</tr></thead><tbody>"]
     for model in order:
         rows = groups[model]
-        prev = None
         for i, r in enumerate(rows):
+            # the step is what this effort buys over the one below it
+            prev = rows[i + 1] if i + 1 < len(rows) else None
             kind, weak = r["_kind"], r["_weak"]
             classes = [kind] + (["weak"] if weak else []) + (["first"] if i == 0 else [])
             if i == 0:
@@ -576,7 +627,6 @@ def _sweep_table(items, unit):
                        + f"<td>{_esc(r['_dominated_by']) if r['_dominated_by'] else ''}</td>"
                        + f'<td class="{"flag" if weak else "quiet"}">{_esc(", ".join(prov))}</td>'
                        + "</tr>")
-            prev = r
     out.append("</tbody></table></div>")
     return "\n".join(out)
 
@@ -596,8 +646,9 @@ def _boards_block(effort_rows, lanes_doc, proposals):
     if not items:
         return []
     sources = _load_sources()
-    body = ["<p>Each model's efforts in order, with what each step up costs and buys. A "
-            "lane's efforts sit in full ink; a comparator is nobody's lane.</p>"]
+    body = ["<p>Each model's efforts from most to least, with what each step up from the "
+            "effort below costs and buys. A lane's efforts sit in full ink; a comparator is "
+            "nobody's lane.</p>"]
     boards = _boards(items)
     for (source, benchmark), rows in boards:
         facts = _board_facts(source, benchmark, rows, sources.get(source) or {})
@@ -621,7 +672,7 @@ def _rows_block(effort_rows, lanes_doc, proposals):
     if not items:
         return []
     items.sort(key=lambda r: (r.get("source") or "", r.get("benchmark") or "",
-                              r["_lane_model"] is None, _model_key(r), _effort_key(r.get("effort"))))
+                              r["_lane_model"] is None, _model_key(r), _effort_desc(r.get("effort"))))
     head = ["source", "benchmark", "published as", "lane model", "effort", "score", "cost",
             "observed", "provenance", "note"]
     body = ["<p>Where each number came from. A row that names no lane model is the "
@@ -666,7 +717,7 @@ def _catalog_block(lanes_doc, proposals):
             "proposal for each lane; the wizard is where it is accepted or overruled.</p>",
             '<div class="scroll"><table class="catalog"><thead><tr>'
             + "".join(f"<th>{_esc(h)}</th>" for h in head) + "</tr></thead><tbody>"]
-    for name in lanes:
+    for name in group_lanes(list(lanes), lanes_doc):
         lane = lanes[name]
         meter = meters.get(lane.get("meter")) or {}
         plan = meter.get("plan")
@@ -713,7 +764,8 @@ def _cell_figures(cell):
         return [(_effort_of(cell.get("effort")), _num(cell.get("performance")))]
     figures = [(_effort_of(effort), _num(fig.get("performance")))
                for effort, fig in cell.items() if isinstance(fig, dict)]
-    return sorted(figures, key=lambda f: _effort_key(f[0]) if f[0] else (len(EFFORT_ORDER) + 1, ""))
+    # most effort first, an unstated effort last
+    return sorted(figures, key=lambda f: _effort_desc(f[0]) if f[0] else (2, 0, ""))
 
 
 def _figure_cell(entries, model_lanes, model, column_max):
@@ -836,7 +888,8 @@ def _header(lanes_doc, effort_rows, proposals):
     off = _proposed_off(proposals)
     carried = sum(1 for name, lane in lanes.items() if lane.get("enabled", True) and lane.get("effort") != "ultra")
     out = ["<header>", "<h1>Benchmark evidence for the lane catalog</h1>",
-           "<p>Read-only. Tiers are set in the wizard; nothing is entered here. "
+           "<p>Read-only for the catalog: a tier drawn here stays in this browser, keyed to "
+           "this catalog, until you set it in the wizard, which is the only thing that writes. "
            f"{len(lanes)} lanes in the catalog, {carried} carried."
            + (f" {len(effort_rows)} per-effort rows." if effort_rows else "")
            + "</p>"]
@@ -860,7 +913,6 @@ STYLE = """
   --accent: #2b5fc4; --off: #c63d33; --off-ink: #a3291f;
   --frontier: #c27806; --frontier-ink: #7f4d00; --flag: #f6ecd2; --flag-ink: #6b4d00;
   --h-codex: #2b5fc4; --h-claude: #7a4cc2; --h-agy: #13866a; --h-grok: #b3306f;
-  --tier-1: #a9c2ea; --tier-2: #6d98dc; --tier-3: #3566c0; --tier-4: #163a80;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace; }
 @media (prefers-color-scheme: dark) {
@@ -869,19 +921,17 @@ STYLE = """
     --muted: #848c87; --grid: #272c28; --rule: #363c37; --head: #20241f;
     --accent: #6b95f0; --off: #e2574c; --off-ink: #f39a90;
     --frontier: #f0a53a; --frontier-ink: #f6c47a; --flag: #3a2f12; --flag-ink: #e9c36a;
-    --h-codex: #6b95f0; --h-claude: #a784e6; --h-agy: #3cbf98; --h-grok: #e0679f;
-    --tier-1: #2c4470; --tier-2: #3f67ad; --tier-3: #6f98e6; --tier-4: #b4cdf7; } }
+    --h-codex: #6b95f0; --h-claude: #a784e6; --h-agy: #3cbf98; --h-grok: #e0679f; } }
 :root[data-theme="dark"] { color-scheme: dark;
   --page: #121513; --surface: #1a1e1b; --ink: #edf0ec; --ink-2: #b3bbb5;
   --muted: #848c87; --grid: #272c28; --rule: #363c37; --head: #20241f;
   --accent: #6b95f0; --off: #e2574c; --off-ink: #f39a90;
   --frontier: #f0a53a; --frontier-ink: #f6c47a; --flag: #3a2f12; --flag-ink: #e9c36a;
-  --h-codex: #6b95f0; --h-claude: #a784e6; --h-agy: #3cbf98; --h-grok: #e0679f;
-  --tier-1: #2c4470; --tier-2: #3f67ad; --tier-3: #6f98e6; --tier-4: #b4cdf7; }
+  --h-codex: #6b95f0; --h-claude: #a784e6; --h-agy: #3cbf98; --h-grok: #e0679f; }
 * { box-sizing: border-box; }
 body { font-family: var(--sans); font-size: 14px; line-height: 1.5; color: var(--ink);
   background: var(--page); margin: 0; padding-block: 2rem 4rem; padding-inline: 1.25rem; }
-main { max-width: 84rem; margin: 0 auto; }
+main { max-width: 104rem; margin: 0 auto; }
 h1 { font-size: 1.55rem; font-weight: 650; letter-spacing: -0.02em; margin: 0 0 0.35rem; }
 h2 { font-size: 1.15rem; font-weight: 650; letter-spacing: -0.01em; margin: 2.4rem 0 0.3rem; }
 h3 { font-size: 1rem; font-weight: 650; margin: 1.1rem 0 0.15rem; }
@@ -979,6 +1029,64 @@ svg .band { fill: var(--accent); fill-opacity: 0.08; stroke: var(--accent); stro
 svg.focusing .pt, svg.focusing text.label, svg.focusing .sweep { opacity: 0.16; }
 svg.focusing .hot { opacity: 1 !important; }
 svg.focusing .sweep.hot { stroke-width: 2.2; }
+svg .pt.dim, svg text.label.dim { opacity: 0.16; }
+svg.panning { cursor: grabbing; }
+svg .tier-line { stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: 5 4; }
+svg .tier-grip { stroke: transparent; stroke-width: 14; cursor: ew-resize; }
+svg .tier-grip:hover + .tier-line, svg .tier-line.held { stroke: var(--ink); stroke-width: 1.6; stroke-dasharray: none; }
+svg text.band-name { font-size: 11px; fill: var(--ink-2); paint-order: stroke; stroke: var(--surface); stroke-width: 3px; }
+svg .sel { fill: none; stroke: var(--ink); stroke-width: 1.5; }
+svg text.digit { font-size: 10.5px; font-weight: 700; fill: var(--surface); text-anchor: middle;
+  pointer-events: none; font-variant-numeric: tabular-nums; }
+.board { display: grid; grid-template-columns: minmax(0, 1fr) 21.5rem; gap: 1.25rem; align-items: start; }
+.plot-column { min-width: 0; }
+.tiers { position: sticky; top: 0.75rem; max-height: calc(100vh - 1.5rem); overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 0.8rem 0.95rem 0.9rem;
+  margin-top: 1.1rem; font-size: 13px; }
+.tiers h2 { font-size: 1rem; margin: 0 0 0.15rem; }
+.tiers h3 { display: flex; align-items: baseline; gap: 0.5rem; font-size: 13.5px; margin: 0.9rem 0 0.1rem;
+  padding-top: 0.55rem; border-top: 1px solid var(--grid); }
+.tiers h3 .n { font-weight: 400; color: var(--muted); }
+.tiers h3 .focus { margin-left: auto; }
+.tiers h4 { display: flex; align-items: center; gap: 0.35rem; font-size: 12px; font-weight: 600; color: var(--ink-2);
+  margin: 0.45rem 0 0.1rem; }
+.tiers h4 .n { font-weight: 400; color: var(--muted); }
+.tiers .note { color: var(--muted); font-size: 12.5px; margin: 0.15rem 0 0.5rem; }
+.tiers .empty { color: var(--muted); font-size: 12.5px; margin: 0.1rem 0; }
+.swatch { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex: none; }
+table.counts { width: 100%; font-size: 12.5px; margin: 0.45rem 0 0.35rem; background: transparent; }
+table.counts th, table.counts td { padding: 0.15rem 0.3rem; border-bottom: 1px solid var(--grid); background: transparent; }
+table.counts th { font-weight: 500; color: var(--ink-2); white-space: nowrap; text-align: left; }
+table.counts th .swatch { vertical-align: 0; margin-right: 0.3rem; }
+table.counts th.h { text-align: center; color: var(--muted); }
+table.counts td { text-align: center; font-variant-numeric: tabular-nums; }
+table.counts td.tot, table.counts tr.tot td, table.counts tr.tot th { font-weight: 650; color: var(--ink); }
+table.counts td.zero { color: var(--muted); }
+table.counts .unset { color: var(--muted); }
+table.counts tr.tot th, table.counts tr.tot td { border-bottom: 0; border-top: 1px solid var(--rule); }
+.tier-tools { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0.3rem 0 0.2rem; }
+.tier-tools .reset[aria-pressed="true"] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.tiers textarea { width: 100%; font: 12px var(--mono); color: var(--ink); background: var(--page);
+  border: 1px solid var(--rule); border-radius: 4px; padding: 0.35rem 0.45rem; margin-top: 0.35rem; resize: vertical; }
+.lane-row { display: flex; align-items: center; gap: 0.45rem; padding: 0.08rem 0; }
+.lane-row:hover { background: var(--head); }
+.lane-row .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font: 12.5px var(--mono); color: var(--ink); background: none; border: 0; padding: 0; text-align: left; cursor: pointer; }
+.lane-row .nm:hover { text-decoration: underline; text-decoration-color: var(--muted); }
+.lane-row .tag { font-size: 11px; color: var(--muted); flex: none; }
+.lane-row .tag.off { color: var(--off-ink); }
+.boxes { display: inline-flex; gap: 2px; flex: none; }
+.box { width: 1.25rem; height: 1.25rem; padding: 0; font: 11px var(--mono); line-height: 1; cursor: pointer;
+  color: var(--muted); background: var(--surface); border: 1px solid var(--rule); border-radius: 3px; }
+.box:hover { border-color: var(--ink-2); color: var(--ink); }
+.box[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--surface); }
+.picker { position: absolute; z-index: 3; background: var(--surface); color: var(--ink); border: 1px solid var(--ink);
+  border-radius: 4px; box-shadow: 0 3px 10px rgba(0, 0, 0, 0.16); font-size: 12.5px; padding: 0.4rem 0.55rem; max-width: 18rem; }
+.picker .who { font: 12.5px var(--mono); margin-bottom: 0.3rem; }
+.picker .row { display: flex; align-items: center; gap: 0.4rem; }
+.picker .box { width: 1.6rem; height: 1.6rem; font-size: 12.5px; }
+.picker .quiet { font-size: 12px; margin-top: 0.3rem; }
+.bands-button[disabled] { color: var(--muted); cursor: default; text-decoration: none; }
 .frontier-table .quiet { font-size: 13px; }
 table.frontier tr.hot td { background: var(--head); }
 table.frontier tr.off-row td { color: var(--off-ink); }
@@ -1019,7 +1127,8 @@ td.model { border-right: 1px solid var(--grid); }
 .rows tr.nolane td { color: var(--ink-2); }
 .notes { font-size: 12.5px; padding-left: 1.2rem; }
 footer { margin-top: 3rem; color: var(--muted); font-size: 12.5px; }
-@media (max-width: 62rem) { .plot-body { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 62rem) { .plot-body, .board { grid-template-columns: minmax(0, 1fr); }
+  .tiers { position: static; max-height: none; } }
 @media (max-width: 40rem) { body { padding-inline: 1rem; } .plot { padding-inline: 0.7rem; } .finding { font-size: 14px; } }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
 """.strip()
@@ -1043,7 +1152,7 @@ def render(bench, lanes_doc, effort_rows=None):
         "<main>",
     ]
     chunks.extend(_header(lanes_doc, effort_rows, proposals))
-    chunks.extend(_plots_section(effort_rows, lanes_doc, proposals))
+    chunks.extend(_plots_section(effort_rows, lanes_doc, proposals, bench))
     chunks += ['<section class="evidence">', "<h2>The numbers</h2>",
                "<p>Every figure behind the plots and the pre-screen, closed until you open one.</p>"]
     chunks.extend(_boards_block(effort_rows, lanes_doc, proposals))

@@ -4,7 +4,8 @@ import copy
 import textwrap
 
 from bench import EPOCH_BENCHMARKS, fmt_aa_value, fmt_cost
-from catalog import CLASSES, EFFORTS, HARNESSES, resolve_published_model
+from catalog import (CLASSES, EFFORTS, HARNESSES, normalize_name, resolve_published_model,
+                     strip_effort_suffix)
 
 # These render as single lines in an 80-column terminal, where anything past
 # column 79 is clipped. Keep each one under that; a legend cut mid-sentence
@@ -124,6 +125,56 @@ def start_facts(lanes_path, routing_path, page_path, discovery, width=80):
         fit_line(f"Benchmark page: {page_path or '(not written)'}", width),
         *discovery_notices(discovery, width),
     ]
+
+
+def model_group(lane):
+    """The model a lane is grouped under. An agy slug family
+    (`gemini-3.8-flash-high`, `-low`) is one model at several efforts, so the
+    effort suffix comes off first (ticket 26)."""
+    return strip_effort_suffix(normalize_name((lane or {}).get("model")))[0]
+
+
+def effort_rank(effort):
+    """Most effort first: ultra, max, xhigh, high, medium, low; a stranger last."""
+    try:
+        return -EFFORTS.index(effort)
+    except ValueError:
+        return 1
+
+
+def group_lanes(names, lanes_doc):
+    """`names` regrouped by model: each group sits where its first lane sat,
+    and lists its efforts from most to least (ticket 26, item 1).
+
+    The order `names` arrives in is the page's own (benchmark order on a tier
+    page, tier on the review page, the catalog on the carry page), and it
+    decides only where each group goes. Inside a group the effort decides, so
+    `fable-max` is read before `fable-low` on every page and every table.
+    """
+    lanes = (lanes_doc or {}).get("lanes") or {}
+    groups = {}
+    for name in names:
+        groups.setdefault(model_group(lanes.get(name)), []).append(name)
+    out = []
+    for members in groups.values():
+        out.extend(sorted(members, key=lambda n: effort_rank((lanes.get(n) or {}).get("effort"))))
+    return out
+
+
+def bench_order_key(bench, name):
+    """A lane's place in benchmark order: by its own mean rank, measured
+    lanes first, then by name. This is the order the tier pages open in and
+    the order the benchmark page lists lanes in, so it lives in one place."""
+    rec = ((bench or {}).get("lanes") or {}).get(name) if bench else None
+    mean = rec["mean"] if rec else None
+    return (mean is None, mean if mean is not None else 0, name)
+
+
+def lane_order(lanes_doc, bench):
+    """Every lane in the order a tier page lists them: benchmark order, then
+    grouped by model with efforts most to least."""
+    names = sorted((lanes_doc or {}).get("lanes") or {}, key=lambda n: bench_order_key(bench, n))
+    return group_lanes(names, lanes_doc)
 
 
 def dominated_reason(effort, source):
@@ -404,8 +455,7 @@ class Wizard:
         return rec["mean"] if rec else None
 
     def _bench_order(self, name):
-        mean = self._mean(name)
-        return (mean is None, mean if mean is not None else 0, name)
+        return bench_order_key(self.bench, name)
 
     def _carried(self):
         return [name for name in self.lanes_doc["lanes"] if self._enabled[name]]
@@ -413,10 +463,12 @@ class Wizard:
     def _tier_names(self):
         """The lanes still open on a tier page: carried, and not taken by a
         higher tier. A lane that is not is hidden, not dimmed (ticket 25): a
-        grey row that space still toggled was a decision offered twice."""
+        grey row that space still toggled was a decision offered twice.
+        Benchmark order places each model's group; inside it the efforts run
+        from most to least (ticket 26)."""
         active = [name for name in self._carried() if name not in self._assigned]
         active.sort(key=self._bench_order)
-        return active
+        return group_lanes(active, self.lanes_doc)
 
     def _final_tier(self, name):
         """The tier written for a lane. A lane not carried is never asked about,
@@ -441,10 +493,12 @@ class Wizard:
         self.cursor = 0
         self.message = ""
         # The order is fixed on arrival, best tier first: re-sorting as a digit
-        # moves a lane would carry the line out from under the cursor.
-        self._review_order = sorted(
+        # moves a lane would carry the line out from under the cursor. A
+        # model's group sits where its best-tiered lane sits (ticket 26).
+        by_tier = sorted(
             (name for name in self._carried() if name in self._assigned),
             key=lambda name: (-self._assigned[name], *self._bench_order(name)))
+        self._review_order = group_lanes(by_tier, self.lanes_doc)
 
     def _undo_tier(self, tier):
         for name in list(self._assigned):
@@ -462,7 +516,9 @@ class Wizard:
         self.message = "" if self.effort_rows else NO_DATA_MESSAGE
 
     def _lane_names(self):
-        return list(self.lanes_doc["lanes"])
+        """The carry page's lanes: the catalog's order places each model's
+        group, and its efforts run from most to least (ticket 26)."""
+        return group_lanes(list(self.lanes_doc["lanes"]), self.lanes_doc)
 
     def _toggle_enabled(self, name):
         if name:

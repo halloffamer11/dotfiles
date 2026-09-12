@@ -314,7 +314,9 @@ try:
            and "scores the same as high" in finding and "$81.1 more (+4%)" in finding
            and f'<p class="finding">{finding}</p>' in page
            and "off: high wins on tbench" in body
-           and order[:5] == ["low", "medium", "high", "xhigh", "max"]
+           # efforts most to least, and each step is still what the effort
+           # buys over the one below it (ticket 26 replaced the ascending order)
+           and order[:5] == ["max", "xhigh", "high", "medium", "low"]
            and "GPT-6 Astra" in page and "gpt-6-astra" in page,
            f"off={off} struck={struck} verdict={verdict[:120]!r} order={order[:6]}")
 except Exception as e:
@@ -478,11 +480,12 @@ try:
     row = table[table.rfind("<tr", 0, at):table.find("</tr>", at)]  # from <tr>, so td 0 is the model
     tds = re.findall(r"<td[^>]*>.*?</td>", row, re.S)
     deepswe, frontier, aa_cell = tds[2], tds[3], tds[-1]
-    record("the post-fix cell shape reads: every effort's figure shown, in effort order, "
+    record("the post-fix cell shape reads: every effort's figure shown, most effort first, "
            "each attributed on its own, and the AA effort attributed too",
            deepswe.count('<span class="fig') == 3
+           # most to least, an unstated effort last (ticket 26 replaced the ascending order)
            and re.findall(r'<span class="at">([^<]*)</span>', deepswe)
-           == ["at high", "at max, not carried", "effort not stated"]
+           == ["at max, not carried", "at high", "effort not stated"]
            and deepswe.count('class="fig attributed"') == 1 and 'title="sol-high@codex"' in deepswe
            and frontier.count('class="fig unattributed"') == 1 and "at xhigh, not carried" in frontier
            and 'class="fig attributed" title="sol-high@codex">61<span class="at">at high' in aa_cell
@@ -694,6 +697,172 @@ try:
                and not out["coversIn"] and out["coversOut"], repr(out))
 except Exception as e:
     record("the wheel zooms about the pointer, and zooming out past the full view is the full view", False, repr(e))
+
+
+# --- ticket 26: the page is where tiers are drawn ------------------------------------
+try:
+    collected = bench.collect(copy.deepcopy(ASTRA), epoch_csv=FIXTURE)
+    doc = copy.deepcopy(ASTRA)
+    doc["lanes"]["astra-ultra@codex"] = dict(doc["lanes"]["astra-max@codex"], effort="ultra", enabled=False)
+    page = bench_page.render(collected, doc, SWEEP)
+    data = data_of(page)
+    lanes = data["lanes"]
+    by_name = {l["name"]: l for l in lanes}
+    astra = [l["name"] for l in lanes if l["group"] == "gpt-6-astra"]
+    groups = []
+    for l in lanes:
+        if not groups or groups[-1] != l["group"]:
+            groups.append(l["group"])
+    wizard = setup_tui.Wizard(copy.deepcopy(doc), {"classes": {}, "margin": 0, "gate": 0}, collected,
+                              set(catalog.HARNESSES), "/tmp/l", "/tmp/r", effort_rows=SWEEP)
+    record("the page lists every lane in the tier page's order, grouped by model, efforts most to least, "
+           "and says which are carried, proposed off, or drawn nowhere",
+           [l["name"] for l in lanes] == setup_tui.lane_order(doc, collected)
+           and [l["name"] for l in lanes if l["carried"]] == [n for n in setup_tui.lane_order(doc, collected)
+                                                                if wizard._enabled[n] or n == "astra-xhigh@codex"]
+           and astra == ["astra-ultra@codex", "astra-max@codex", "astra-xhigh@codex", "astra-high@codex",
+                         "astra-medium@codex", "astra-low@codex"]
+           and len(groups) == len(set(groups))
+           and by_name["astra-ultra@codex"]["carried"] is False
+           and by_name["astra-xhigh@codex"]["carried"] is True
+           and by_name["astra-xhigh@codex"]["off"] == "high wins on tbench"
+           and by_name["astra-high@codex"]["off"] is None
+           and by_name["astra-high@codex"]["rows"] is True
+           # fable is on no board of this sweep, so it can be no dot
+           and by_name["fable-xhigh@claude"]["rows"] is False
+           and by_name["fable-xhigh@claude"]["carried"] is True
+           and by_name["astra-high@codex"]["harness"] == "codex"
+           and by_name["astra-high@codex"]["tier"] == doc["lanes"]["astra-high@codex"]["tier"]
+           and set(lanes[0]) == {"name", "harness", "model", "group", "effort", "tier", "carried", "off", "rows"},
+           repr(lanes[:3]))
+    key = data["catalogKey"]
+    other = copy.deepcopy(doc)
+    other["lanes"]["extra-high@codex"] = copy.deepcopy(doc["lanes"]["astra-high@codex"])
+    record("the page's tiers are keyed by the catalog, and the page says where they live",
+           re.fullmatch(r"[0-9a-f]{12}", key) and bench_page.catalog_key(doc) == key
+           and bench_page.catalog_key(other) != key
+           and 'id="tiers"' in page and "stays in this browser" in page and "Read-only" in page
+           and "Tiers are set in the wizard; nothing is entered here" not in page,
+           repr(key))
+    # every table: a model's efforts most to least
+    cat = page[page.find('<table class="catalog">'):]
+    cat = cat[:cat.find("</table>")]
+    cat_names = re.findall(r'<td><span class="mono">([^<]*@[^<]*)</span></td>', cat)
+    rows_block = page[page.find('<table class="rows">'):]
+    rows_block = rows_block[:rows_block.find("</table>")]
+    astra_rows = re.findall(r"<td><span class=mono>gpt-6-astra</span></td><td>(\w+)</td>", rows_block)
+    record("the catalog and rows tables group by model with efforts most to least",
+           [n for n in cat_names if n.startswith("astra-")] == astra
+           and astra_rows == ["max", "xhigh", "high", "medium", "low"],
+           repr((cat_names, astra_rows)))
+except Exception as e:
+    record("the page lists every lane in the tier page's order, grouped by model, efforts most to least, "
+           "and says which are carried, proposed off, or drawn nowhere", False, repr(e))
+
+
+TIER_DRIVER = r"""
+const fs = require("fs"), vm = require("vm");
+const mod = { exports: {} };
+vm.runInNewContext(fs.readFileSync(process.argv[2], "utf8"), { module: mod });
+const P = mod.exports;
+const c = JSON.parse(fs.readFileSync(0, "utf8"));
+const out = {};
+// pan: the content follows the pointer, in log space on the cost axis
+const d = { xlo: 1, xhi: 1000, ylo: 0, yhi: 100 };
+const p = { x0: P.PAD.l, x1: P.W - P.PAD.r, y0: P.PAD.t, y1: P.H - P.PAD.b };
+const half = (p.x1 - p.x0) / 2, quarter = (p.y1 - p.y0) / 4;
+out.pan = P.panBy(d, p, half, quarter);
+out.bands = [0.5, 1, 2, 4, 5].map((cost) => P.bandTier(cost, [1, 2, 4]));
+out.noLines = P.bandTier(3, null);
+out.defaults = P.defaultLines([0.1, 0.2, 5, 10]);
+out.flat = P.defaultLines([2, 2, 2]);
+const lanes = c.lanes.map((l, rank) => Object.assign({ rank }, l));
+out.grouped = P.groupLanes(c.ordered.map((name) => lanes.find((l) => l.name === name))).map((l) => l.name);
+out.review = P.reviewOrder(lanes, c.tiers).map((l) => l.name);
+out.text = P.tierLinesText(lanes, c.tiers);
+// layout: the lines, the bands, the page's tiers and the focus
+const st = { frontier: "lanes", labels: "lanes", lines: true, zoom: null, hiddenModels: new Set(),
+             hiddenHarness: new Set(), hiddenEfforts: new Set(), tiers: c.pointTiers, tierLines: [1.5, 2.5, 3.5], focusTier: null };
+const lay = P.layout(c.board, st);
+out.lines = lay.lines.map((l) => [l.cost, l.inside, Math.round(l.x)]);
+out.bandNames = lay.bands.map((b) => b.tier);
+out.pointTiers = lay.points.map((q) => [q.p.name, q.tier, q.band, q.dim]);
+const focused = P.layout(c.board, Object.assign({}, st, { focusTier: 2 }));
+out.dimmed = focused.points.map((q) => [q.p.name, q.dim]);
+const zoom = P.focusDomain(c.board, st, 2);
+out.focus = zoom && [zoom.c0 < 1.5, zoom.c1 > 2.5, zoom.c1 < 3.5, zoom.s0, zoom.s1];
+out.focusNothing = P.focusDomain(c.board, Object.assign({}, st, { tierLines: null, tiers: {} }), 3);
+process.stdout.write(JSON.stringify(out));
+"""
+
+try:
+    if not NODE:
+        record("the script pans, cuts bands, groups lanes as the wizard does, and focuses a tier", True,
+               "(node not on PATH; skipped)")
+    else:
+        doc = copy.deepcopy(LANES)
+        for effort in ("low", "medium", "high", "max"):
+            lane = copy.deepcopy(LANES["lanes"]["fable-xhigh@claude"])
+            lane["effort"] = effort
+            doc["lanes"][f"fable-{effort}@claude"] = lane
+        doc["lanes"]["flash-low@agy"] = dict(LANES["lanes"]["flash-high@agy"], model="gemini-3.8-flash-low", effort="low")
+        lanes = [{"name": n, "group": setup_tui.model_group(doc["lanes"][n]), "effort": doc["lanes"][n]["effort"]}
+                 for n in sorted(doc["lanes"])]
+        ordered = ["fable-low@claude", "sol-high@codex", "fable-max@claude", "flash-high@agy", "flash-low@agy"]
+        tiers = {"sol-high@codex": 4, "fable-low@claude": 3, "fable-max@claude": 1, "flash-low@agy": 1}
+        toy = {"id": "b0", "benchmark": "toy", "unit": None, "points": [
+            lane_point("a", "low", 10.0, 1.0), lane_point("b", "low", 20.0, 2.0),
+            lane_point("c", "low", 15.0, 3.0), lane_point("d", "max", 30.0, 4.0, lanes=False)]}
+        point_tiers = {"a-low@codex": 1, "b-low@codex": 2, "c-low@codex": 2}
+        with tempfile.TemporaryDirectory() as td:
+            driver = os.path.join(td, "tiers.js")
+            with open(driver, "w", encoding="utf-8") as f:
+                f.write(TIER_DRIVER)
+            case = json.dumps({"lanes": lanes, "ordered": ordered, "tiers": tiers, "board": toy, "pointTiers": point_tiers})
+            result = subprocess.run([NODE, driver, bench_page.SCRIPT_PATH], input=case, capture_output=True,
+                                    text=True, timeout=60)
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr[-800:])
+            out = json.loads(result.stdout)
+        pan = out["pan"]
+        # dragging right by half the width shows costs a half-decade and a half lower;
+        # dragging down by a quarter of the height shows scores 25 higher
+        record("a drag pans the content with the pointer, in log space on the cost axis",
+               abs(pan["c0"] - 10 ** -1.5) < 1e-9 and abs(pan["c1"] - 10 ** 1.5) < 1e-9
+               and abs(pan["s0"] - 25) < 1e-9 and abs(pan["s1"] - 125) < 1e-9, repr(pan))
+        record("a band proposes one more than the lines at or below the cost, and no lines propose nothing",
+               out["bands"] == [1, 2, 3, 4, 4] and out["noLines"] is None
+               and out["defaults"] == [0.32, 1, 3.2] and len(out["flat"]) == 3
+               and out["flat"][0] < out["flat"][1] < out["flat"][2], repr((out["bands"], out["defaults"], out["flat"])))
+        record("the script groups lanes exactly as setup_tui.group_lanes does, and the copy is in the review "
+               "page's order",
+               out["grouped"] == setup_tui.group_lanes(ordered, doc)
+               and out["review"][0] == "sol-high@codex"
+               and out["review"][1:6] == ["fable-max@claude", "fable-xhigh@claude", "fable-high@claude",
+                                          "fable-medium@claude", "fable-low@claude"]
+               and out["text"].splitlines() == ["sol-high@codex 4", "fable-max@claude 1", "fable-low@claude 3",
+                                                "flash-low@agy 1"],
+               repr((out["grouped"], out["review"], out["text"])))
+        record("the layout places the tier lines, names each band, carries the page's tier and the band per "
+               "point, and dims the points outside a focused tier",
+               [l[0] for l in out["lines"]] == [1.5, 2.5, 3.5] and all(l[1] for l in out["lines"])
+               and out["lines"][0][2] < out["lines"][1][2] < out["lines"][2][2]
+               and out["bandNames"] == [1, 2, 3, 4]
+               and sorted(out["pointTiers"]) == sorted([["d", None, 4, False], ["a", 1, 1, False],
+                                                        ["b", 2, 2, False], ["c", 2, 3, False]])
+               and sorted(out["dimmed"]) == sorted([["d", True], ["a", True], ["b", False], ["c", False]])
+               and out["focus"] and out["focus"][:3] == [True, True, True]
+               and out["focus"][3] <= 15.0 <= out["focus"][4] and out["focus"][3] <= 20.0 <= out["focus"][4]
+               and out["focusNothing"] is None,
+               repr((out["lines"], out["bandNames"], out["pointTiers"], out["dimmed"], out["focus"])))
+        script = open(bench_page.SCRIPT_PATH, encoding="utf-8").read()
+        record("the page's tiers live in localStorage under the catalog's key, are never sent anywhere, and "
+               "digits set the selected lane",
+               "localStorage" in script and "catalogKey" in script and "fetch(" not in script
+               and "XMLHttpRequest" not in script and "lanes.json" not in script
+               and "keydown" in script and "/^[1-4]$/" in script and "Copy as lines" in script)
+except Exception as e:
+    record("the script pans, cuts bands, groups lanes as the wizard does, and focuses a tier", False, repr(e))
 
 
 sys.exit(1 if fails else 0)
