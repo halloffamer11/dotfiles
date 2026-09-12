@@ -43,6 +43,13 @@ fs.mkdirSync(outDir, { recursive: true });
 // 1. write argv.json
 fs.writeFileSync(path.join(outDir, "argv.json"), JSON.stringify(argv, null, 2) + "\n");
 
+// 1b. write env.json. A codex run points CODEX_HOME at delegate's own home, and
+// the argv alone cannot show that, so record what the dispatcher handed us.
+fs.writeFileSync(
+  path.join(outDir, "env.json"),
+  JSON.stringify({ CODEX_HOME: process.env.CODEX_HOME ?? null }, null, 2) + "\n"
+);
+
 // 2. copy brief to brief.txt
 let briefContent = Buffer.alloc(0);
 if (briefPath && fs.existsSync(briefPath)) {

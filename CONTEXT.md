@@ -109,3 +109,12 @@ The task file the orchestrator writes for one job.
 
 **Run**:
 One dispatch of a brief and its directory, never reused.
+
+## Delegate: browsers
+
+**Disposable browser**:
+A fresh browser that Playwright starts for one run, with no logins and no saved state. A worker may read and write in it.
+
+**Agent profile**:
+A browser profile kept only for workers and signed in to a few chosen accounts, reached through the Playwright extension. Workers never reach the human's personal profile; the extension is installed only in the agent profile.
+_Avoid_: live browser, authenticated browser

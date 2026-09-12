@@ -1,0 +1,27 @@
+# delegate's own CODEX_HOME. `make delegate-codex-home` writes this file to
+# ~/.local/share/delegate/codex-home/config.toml with @HOME@ expanded, and
+# symlinks ~/.codex/auth.json beside it. Codex reads auth from CODEX_HOME, so
+# the worker signs in as Orin and drains the same ChatGPT meter.
+#
+# A codex worker reads this file instead of ~/.codex/config.toml. It therefore
+# reaches the disposable browser and nothing else: no plugins (Gmail, GitHub,
+# documents, browser, chrome, computer-use), no codex-cli, no node_repl, no
+# context7, no hooks, no notify, and not ~/.codex/AGENTS.md, which symlinks the
+# global CLAUDE.md and polluted the v1 grok probe.
+#
+# approvals_reviewer is load-bearing, not decoration. `codex exec` runs at
+# approval_policy "never", which auto-rejects every approval request, and an MCP
+# tool call raises one. auto_review routes that request to automatic review
+# instead. Proven on the Mac, 2026-09-12: without this key browser_navigate
+# comes back "MCP tool call requires approval, but approval policy is never";
+# with it the same call completes and Playwright writes its page snapshot.
+# `default_tools_approval_mode = "auto"` does not work in codex 0.154.0.
+approvals_reviewer = "auto_review"
+
+# --isolated keeps each worker's profile in memory, so parallel workers do not
+# share one browser profile. --output-dir sits outside any project, so session
+# files never trip a relay's read-only change check.
+[mcp_servers.playwright]
+command = "npx"
+args = ["-y", "@playwright/mcp@latest", "--isolated", "--headless", "--output-dir", "@HOME@/.cache/playwright-mcp"]
+startup_timeout_sec = 120
