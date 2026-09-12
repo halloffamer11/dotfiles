@@ -39,9 +39,9 @@ only after `main` fast-forwards to this branch.
 **Open, in priority order:**
 
 1. **Fast-forward `main` to this branch** once the suite is green here.
-2. **Orin's own wizard run.** Nothing in the workflow is known to be wrong now:
-   attribution is per lane (ticket 17), every codex effort is a lane, and each page
-   makes one decision per line. The tiers on the 19 generated codex lanes and the
+2. **Orin's own wizard run**, after tickets 25 and 19 below land: his first full run
+   (2026-09-12) found the tier pages pre-marked from placeholder tiers, so its tiers
+   would have been wrong. The tiers on the 19 generated codex lanes and the
    three native Claude lanes are provisional by construction: `meter_weight`,
    `timeout` and `tier` are not measurements. Each such lane says so in its `note`.
 3. **Tickets 25 and 19**, from Orin's first full wizard run (2026-09-12), which

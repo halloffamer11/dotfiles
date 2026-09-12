@@ -9,7 +9,7 @@ model at every effort with the figures measured at that effort:
    harness does not offer. The carry page then shows Fable, Opus 5, Sonnet 5,
    Haiku 4.5, Grok 4.6 and Gemini 3.8 Flash at every effort their CLIs accept
    (Orin, 2026-09-12: "Fable is only shown as extra high", "we only have Opus High").
-2. **Every Claude model reaches its rows** (was ticket 25). Terminal-Bench's
+2. **Every Claude model reaches its rows** (from a draft ticket, never committed). Terminal-Bench's
    `Opus 5` and `Sonnet 5` are dropped as unmatched, and Haiku has no rows at all.
 3. **The tier pages and the benchmark page read the per-effort AA rows** (was
    ticket 21), instead of the free API's one entry per model.
@@ -92,5 +92,5 @@ Report:
 ## Consolidated, 2026-09-12
 
 Orin asked for fewer, larger tickets. Ticket 21 (per-effort AA rows in the report)
-and the draft ticket 25 (never committed) (Claude rows) folded in here: all three change the lanes
-and the data the wizard reads, not the wizard's pages.
+and a draft ticket on Claude rows, never committed, folded in here: all three
+change the lanes and the data the wizard reads, not the wizard's pages.
