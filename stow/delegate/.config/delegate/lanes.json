@@ -50,7 +50,8 @@
       "basis": "frontier; protect: orchestrator meter",
       "published_as": [
         "Fable 5.1"
-      ]
+      ],
+      "order": 3
     },
     "fable-low@claude": {
       "harness": "claude",
@@ -70,7 +71,8 @@
       "published_as": [
         "Fable 5.1"
       ],
-      "note": "PROVISIONAL: tier, meter_weight and timeout are not measurements. meter_weight, timeout and price are copied from fable-xhigh@claude; every effort of one model has the same token rates. The tier is 1 because this effort is weaker than fable-xhigh@claude's and nothing has measured it. Confirm in the wizard."
+      "note": "PROVISIONAL: tier, meter_weight and timeout are not measurements. meter_weight, timeout and price are copied from fable-xhigh@claude; every effort of one model has the same token rates. The tier is 1 because this effort is weaker than fable-xhigh@claude's and nothing has measured it. Confirm in the wizard.",
+      "enabled": false
     },
     "fable-medium@claude": {
       "harness": "claude",
@@ -90,7 +92,8 @@
       "published_as": [
         "Fable 5.1"
       ],
-      "note": "PROVISIONAL: tier, meter_weight and timeout are not measurements. meter_weight, timeout and price are copied from fable-xhigh@claude; every effort of one model has the same token rates. The tier is 1 because this effort is weaker than fable-xhigh@claude's and nothing has measured it. Confirm in the wizard."
+      "note": "PROVISIONAL: tier, meter_weight and timeout are not measurements. meter_weight, timeout and price are copied from fable-xhigh@claude; every effort of one model has the same token rates. The tier is 1 because this effort is weaker than fable-xhigh@claude's and nothing has measured it. Confirm in the wizard.",
+      "enabled": false
     },
     "fable-high@claude": {
       "harness": "claude",
@@ -105,12 +108,13 @@
         "cache_write": 12.5,
         "out": 50
       },
-      "tier": 1,
+      "tier": 4,
       "basis": "same model as fable-xhigh@claude; effort 'high' offered by claude --help and code.claude.com/docs/en/model-config, 2026-09-12 (ticket 19)",
       "published_as": [
         "Fable 5.1"
       ],
-      "note": "PROVISIONAL: tier, meter_weight and timeout are not measurements. meter_weight, timeout and price are copied from fable-xhigh@claude; every effort of one model has the same token rates. The tier is 1 because this effort is weaker than fable-xhigh@claude's and nothing has measured it. Confirm in the wizard."
+      "note": "PROVISIONAL: tier, meter_weight and timeout are not measurements. meter_weight, timeout and price are copied from fable-xhigh@claude; every effort of one model has the same token rates. The tier is 1 because this effort is weaker than fable-xhigh@claude's and nothing has measured it. Confirm in the wizard.",
+      "order": 5
     },
     "fable-max@claude": {
       "harness": "claude",
@@ -130,7 +134,8 @@
       "published_as": [
         "Fable 5.1"
       ],
-      "note": "PROVISIONAL: tier, meter_weight and timeout are not measurements. meter_weight, timeout and price are copied from fable-xhigh@claude; every effort of one model has the same token rates. The tier is fable-xhigh@claude's: the same model reasoning harder is at least as capable, so it claims nothing new. Confirm in the wizard."
+      "note": "PROVISIONAL: tier, meter_weight and timeout are not measurements. meter_weight, timeout and price are copied from fable-xhigh@claude; every effort of one model has the same token rates. The tier is fable-xhigh@claude's: the same model reasoning harder is at least as capable, so it claims nothing new. Confirm in the wizard.",
+      "order": 1
     },
     "haiku-high@claude": {
       "harness": "claude",
@@ -150,7 +155,8 @@
       "note": "PROVISIONAL: tier set 2026-09-11 pending the wizard; tier, meter_weight and timeout are not measurements; price not sourced. Haiku 4.5 does not accept effort (code.claude.com/docs/en/model-config lists the models that take effort and says \"Models not listed here do not support effort\"; Haiku is not listed); high is a label only, so no other effort of it is a lane.",
       "published_as": [
         "Claude 4.5 Haiku"
-      ]
+      ],
+      "enabled": false
     },
     "sonnet-high@claude": {
       "harness": "claude",
@@ -170,7 +176,8 @@
       "note": "PROVISIONAL: tier set 2026-09-11 pending the wizard; tier, meter_weight and timeout are not measurements; price not sourced.",
       "published_as": [
         "Sonnet 5"
-      ]
+      ],
+      "enabled": false
     },
     "sonnet-low@claude": {
       "harness": "claude",
@@ -190,7 +197,8 @@
       "note": "PROVISIONAL: tier, meter_weight and timeout are not measurements. meter_weight, timeout and price are copied from sonnet-high@claude; every effort of one model has the same token rates. The tier is 1 because this effort is weaker than sonnet-high@claude's and nothing has measured it. Confirm in the wizard.",
       "published_as": [
         "Sonnet 5"
-      ]
+      ],
+      "enabled": false
     },
     "sonnet-medium@claude": {
       "harness": "claude",
@@ -210,7 +218,8 @@
       "note": "PROVISIONAL: tier, meter_weight and timeout are not measurements. meter_weight, timeout and price are copied from sonnet-high@claude; every effort of one model has the same token rates. The tier is 1 because this effort is weaker than sonnet-high@claude's and nothing has measured it. Confirm in the wizard.",
       "published_as": [
         "Sonnet 5"
-      ]
+      ],
+      "enabled": false
     },
     "sonnet-xhigh@claude": {
       "harness": "claude",
@@ -230,7 +239,8 @@
       "note": "PROVISIONAL: tier, meter_weight and timeout are not measurements. meter_weight, timeout and price are copied from sonnet-high@claude; every effort of one model has the same token rates. The tier is sonnet-high@claude's: the same model reasoning harder is at least as capable, so it claims nothing new. Confirm in the wizard.",
       "published_as": [
         "Sonnet 5"
-      ]
+      ],
+      "enabled": false
     },
     "sonnet-max@claude": {
       "harness": "claude",
@@ -250,7 +260,8 @@
       "note": "PROVISIONAL: tier, meter_weight and timeout are not measurements. meter_weight, timeout and price are copied from sonnet-high@claude; every effort of one model has the same token rates. The tier is sonnet-high@claude's: the same model reasoning harder is at least as capable, so it claims nothing new. Confirm in the wizard.",
       "published_as": [
         "Sonnet 5"
-      ]
+      ],
+      "enabled": false
     },
     "opus-high@claude": {
       "harness": "claude",
@@ -270,7 +281,8 @@
       "note": "PROVISIONAL: tier set 2026-09-11 pending the wizard; tier, meter_weight and timeout are not measurements; price not sourced.",
       "published_as": [
         "Opus 5"
-      ]
+      ],
+      "order": 1
     },
     "opus-low@claude": {
       "harness": "claude",
@@ -290,7 +302,8 @@
       "note": "PROVISIONAL: tier, meter_weight and timeout are not measurements. meter_weight, timeout and price are copied from opus-high@claude; every effort of one model has the same token rates. The tier is 1 because this effort is weaker than opus-high@claude's and nothing has measured it. Confirm in the wizard.",
       "published_as": [
         "Opus 5"
-      ]
+      ],
+      "enabled": false
     },
     "opus-medium@claude": {
       "harness": "claude",
@@ -310,7 +323,8 @@
       "note": "PROVISIONAL: tier, meter_weight and timeout are not measurements. meter_weight, timeout and price are copied from opus-high@claude; every effort of one model has the same token rates. The tier is 1 because this effort is weaker than opus-high@claude's and nothing has measured it. Confirm in the wizard.",
       "published_as": [
         "Opus 5"
-      ]
+      ],
+      "enabled": false
     },
     "opus-xhigh@claude": {
       "harness": "claude",
@@ -330,7 +344,8 @@
       "note": "PROVISIONAL: tier, meter_weight and timeout are not measurements. meter_weight, timeout and price are copied from opus-high@claude; every effort of one model has the same token rates. The tier is opus-high@claude's: the same model reasoning harder is at least as capable, so it claims nothing new. Confirm in the wizard.",
       "published_as": [
         "Opus 5"
-      ]
+      ],
+      "enabled": false
     },
     "opus-max@claude": {
       "harness": "claude",
@@ -350,7 +365,8 @@
       "note": "PROVISIONAL: tier, meter_weight and timeout are not measurements. meter_weight, timeout and price are copied from opus-high@claude; every effort of one model has the same token rates. The tier is opus-high@claude's: the same model reasoning harder is at least as capable, so it claims nothing new. Confirm in the wizard.",
       "published_as": [
         "Opus 5"
-      ]
+      ],
+      "enabled": false
     },
     "astra-high@codex": {
       "harness": "codex",
@@ -367,7 +383,8 @@
       },
       "tier": 4,
       "basis": "frontier codex model, priority 1 in the CLI; added 2026-09-09",
-      "note": "PROVISIONAL: meter_weight 40 is a placeholder set by the session, not measured. price is null because GPT-6-Astra token pricing was not sourced. Confirm both in the wizard."
+      "note": "PROVISIONAL: meter_weight 40 is a placeholder set by the session, not measured. price is null because GPT-6-Astra token pricing was not sourced. Confirm both in the wizard.",
+      "order": 6
     },
     "astra-low@codex": {
       "harness": "codex",
@@ -382,9 +399,10 @@
         "cache_write": null,
         "out": null
       },
-      "tier": 1,
+      "tier": 3,
       "basis": "same model as astra-high@codex; effort 'low' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "PROVISIONAL: meter_weight and timeout are copied from astra-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is 1 because this effort is weaker than astra-high@codex's and nothing has measured it: a ceiling too low leaves the lane unused, a ceiling too high sends it work it cannot do."
+      "note": "PROVISIONAL: meter_weight and timeout are copied from astra-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is 1 because this effort is weaker than astra-high@codex's and nothing has measured it: a ceiling too low leaves the lane unused, a ceiling too high sends it work it cannot do.",
+      "order": 2
     },
     "astra-medium@codex": {
       "harness": "codex",
@@ -399,9 +417,10 @@
         "cache_write": null,
         "out": null
       },
-      "tier": 1,
+      "tier": 4,
       "basis": "same model as astra-high@codex; effort 'medium' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "PROVISIONAL: meter_weight and timeout are copied from astra-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is 1 because this effort is weaker than astra-high@codex's and nothing has measured it: a ceiling too low leaves the lane unused, a ceiling too high sends it work it cannot do."
+      "note": "PROVISIONAL: meter_weight and timeout are copied from astra-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is 1 because this effort is weaker than astra-high@codex's and nothing has measured it: a ceiling too low leaves the lane unused, a ceiling too high sends it work it cannot do.",
+      "order": 7
     },
     "astra-xhigh@codex": {
       "harness": "codex",
@@ -418,7 +437,8 @@
       },
       "tier": 4,
       "basis": "same model as astra-high@codex; effort 'xhigh' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "PROVISIONAL: meter_weight and timeout are copied from astra-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is astra-high@codex's: the same model reasoning harder is at least as capable, so it claims nothing new."
+      "note": "PROVISIONAL: meter_weight and timeout are copied from astra-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is astra-high@codex's: the same model reasoning harder is at least as capable, so it claims nothing new.",
+      "order": 4
     },
     "astra-max@codex": {
       "harness": "codex",
@@ -435,7 +455,8 @@
       },
       "tier": 4,
       "basis": "same model as astra-high@codex; effort 'max' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "PROVISIONAL: meter_weight and timeout are copied from astra-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is astra-high@codex's: the same model reasoning harder is at least as capable, so it claims nothing new."
+      "note": "PROVISIONAL: meter_weight and timeout are copied from astra-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is astra-high@codex's: the same model reasoning harder is at least as capable, so it claims nothing new.",
+      "order": 2
     },
     "astra-ultra@codex": {
       "harness": "codex",
@@ -468,8 +489,9 @@
         "cache_write": null,
         "out": 20
       },
-      "tier": 4,
-      "basis": "hardest impl and adversarial review"
+      "tier": 3,
+      "basis": "hardest impl and adversarial review",
+      "order": 4
     },
     "sol-low@codex": {
       "harness": "codex",
@@ -486,7 +508,8 @@
       },
       "tier": 1,
       "basis": "same model as sol-high@codex; effort 'low' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "PROVISIONAL: meter_weight and timeout are copied from sol-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is 1 because this effort is weaker than sol-high@codex's and nothing has measured it: a ceiling too low leaves the lane unused, a ceiling too high sends it work it cannot do."
+      "note": "PROVISIONAL: meter_weight and timeout are copied from sol-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is 1 because this effort is weaker than sol-high@codex's and nothing has measured it: a ceiling too low leaves the lane unused, a ceiling too high sends it work it cannot do.",
+      "enabled": false
     },
     "sol-medium@codex": {
       "harness": "codex",
@@ -501,9 +524,10 @@
         "cache_write": null,
         "out": 20
       },
-      "tier": 1,
+      "tier": 3,
       "basis": "same model as sol-high@codex; effort 'medium' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "PROVISIONAL: meter_weight and timeout are copied from sol-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is 1 because this effort is weaker than sol-high@codex's and nothing has measured it: a ceiling too low leaves the lane unused, a ceiling too high sends it work it cannot do."
+      "note": "PROVISIONAL: meter_weight and timeout are copied from sol-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is 1 because this effort is weaker than sol-high@codex's and nothing has measured it: a ceiling too low leaves the lane unused, a ceiling too high sends it work it cannot do.",
+      "order": 7
     },
     "sol-xhigh@codex": {
       "harness": "codex",
@@ -520,7 +544,8 @@
       },
       "tier": 4,
       "basis": "same model as sol-high@codex; effort 'xhigh' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "PROVISIONAL: meter_weight and timeout are copied from sol-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is sol-high@codex's: the same model reasoning harder is at least as capable, so it claims nothing new."
+      "note": "PROVISIONAL: meter_weight and timeout are copied from sol-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is sol-high@codex's: the same model reasoning harder is at least as capable, so it claims nothing new.",
+      "enabled": false
     },
     "sol-max@codex": {
       "harness": "codex",
@@ -537,7 +562,8 @@
       },
       "tier": 4,
       "basis": "same model as sol-high@codex; effort 'max' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "PROVISIONAL: meter_weight and timeout are copied from sol-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is sol-high@codex's: the same model reasoning harder is at least as capable, so it claims nothing new."
+      "note": "PROVISIONAL: meter_weight and timeout are copied from sol-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is sol-high@codex's: the same model reasoning harder is at least as capable, so it claims nothing new.",
+      "enabled": false
     },
     "sol-ultra@codex": {
       "harness": "codex",
@@ -570,8 +596,9 @@
         "cache_write": null,
         "out": 12
       },
-      "tier": 3,
-      "basis": "preferred reviewer and implementor"
+      "tier": 2,
+      "basis": "preferred reviewer and implementor",
+      "order": 3
     },
     "terra-low@codex": {
       "harness": "codex",
@@ -588,7 +615,8 @@
       },
       "tier": 1,
       "basis": "same model as terra-high@codex; effort 'low' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "PROVISIONAL: meter_weight and timeout are copied from terra-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is 1 because this effort is weaker than terra-high@codex's and nothing has measured it: a ceiling too low leaves the lane unused, a ceiling too high sends it work it cannot do."
+      "note": "PROVISIONAL: meter_weight and timeout are copied from terra-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is 1 because this effort is weaker than terra-high@codex's and nothing has measured it: a ceiling too low leaves the lane unused, a ceiling too high sends it work it cannot do.",
+      "enabled": false
     },
     "terra-medium@codex": {
       "harness": "codex",
@@ -605,7 +633,8 @@
       },
       "tier": 1,
       "basis": "same model as terra-high@codex; effort 'medium' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "PROVISIONAL: meter_weight and timeout are copied from terra-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is 1 because this effort is weaker than terra-high@codex's and nothing has measured it: a ceiling too low leaves the lane unused, a ceiling too high sends it work it cannot do."
+      "note": "PROVISIONAL: meter_weight and timeout are copied from terra-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is 1 because this effort is weaker than terra-high@codex's and nothing has measured it: a ceiling too low leaves the lane unused, a ceiling too high sends it work it cannot do.",
+      "enabled": false
     },
     "terra-xhigh@codex": {
       "harness": "codex",
@@ -622,7 +651,8 @@
       },
       "tier": 3,
       "basis": "same model as terra-high@codex; effort 'xhigh' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "PROVISIONAL: meter_weight and timeout are copied from terra-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is terra-high@codex's: the same model reasoning harder is at least as capable, so it claims nothing new."
+      "note": "PROVISIONAL: meter_weight and timeout are copied from terra-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is terra-high@codex's: the same model reasoning harder is at least as capable, so it claims nothing new.",
+      "enabled": false
     },
     "terra-max@codex": {
       "harness": "codex",
@@ -639,7 +669,8 @@
       },
       "tier": 3,
       "basis": "same model as terra-high@codex; effort 'max' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "PROVISIONAL: meter_weight and timeout are copied from terra-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is terra-high@codex's: the same model reasoning harder is at least as capable, so it claims nothing new."
+      "note": "PROVISIONAL: meter_weight and timeout are copied from terra-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is terra-high@codex's: the same model reasoning harder is at least as capable, so it claims nothing new.",
+      "enabled": false
     },
     "terra-ultra@codex": {
       "harness": "codex",
@@ -673,7 +704,8 @@
         "out": 6
       },
       "tier": 3,
-      "basis": "sink for terra-grade work; not a lone reviewer"
+      "basis": "sink for terra-grade work; not a lone reviewer",
+      "order": 3
     },
     "luna-low@codex": {
       "harness": "codex",
@@ -689,7 +721,8 @@
         "out": 1.2
       },
       "tier": 1,
-      "basis": "benchmarks overstate it (Orin)"
+      "basis": "benchmarks overstate it (Orin)",
+      "enabled": false
     },
     "luna-medium@codex": {
       "harness": "codex",
@@ -706,7 +739,8 @@
       },
       "tier": 1,
       "basis": "same model as luna-low@codex; effort 'medium' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "PROVISIONAL: meter_weight and timeout are copied from luna-low@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is luna-low@codex's: the same model reasoning harder is at least as capable, so it claims nothing new."
+      "note": "PROVISIONAL: meter_weight and timeout are copied from luna-low@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is luna-low@codex's: the same model reasoning harder is at least as capable, so it claims nothing new.",
+      "enabled": false
     },
     "luna-high@codex": {
       "harness": "codex",
@@ -723,7 +757,8 @@
       },
       "tier": 1,
       "basis": "same model as luna-low@codex; effort 'high' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "PROVISIONAL: meter_weight and timeout are copied from luna-low@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is luna-low@codex's: the same model reasoning harder is at least as capable, so it claims nothing new."
+      "note": "PROVISIONAL: meter_weight and timeout are copied from luna-low@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is luna-low@codex's: the same model reasoning harder is at least as capable, so it claims nothing new.",
+      "order": 1
     },
     "luna-xhigh@codex": {
       "harness": "codex",
@@ -738,9 +773,10 @@
         "cache_write": null,
         "out": 1.2
       },
-      "tier": 1,
+      "tier": 2,
       "basis": "same model as luna-low@codex; effort 'xhigh' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "PROVISIONAL: meter_weight and timeout are copied from luna-low@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is luna-low@codex's: the same model reasoning harder is at least as capable, so it claims nothing new."
+      "note": "PROVISIONAL: meter_weight and timeout are copied from luna-low@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is luna-low@codex's: the same model reasoning harder is at least as capable, so it claims nothing new.",
+      "order": 2
     },
     "luna-max@codex": {
       "harness": "codex",
@@ -755,9 +791,10 @@
         "cache_write": null,
         "out": 1.2
       },
-      "tier": 1,
+      "tier": 2,
       "basis": "same model as luna-low@codex; effort 'max' offered by codex, discovered by discover.py --efforts 2026-09-10",
-      "note": "PROVISIONAL: meter_weight and timeout are copied from luna-low@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is luna-low@codex's: the same model reasoning harder is at least as capable, so it claims nothing new."
+      "note": "PROVISIONAL: meter_weight and timeout are copied from luna-low@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is luna-low@codex's: the same model reasoning harder is at least as capable, so it claims nothing new.",
+      "order": 1
     },
     "flash-high@agy": {
       "harness": "agy",
@@ -772,8 +809,9 @@
         "cache_write": null,
         "out": 3.75
       },
-      "tier": 2,
-      "basis": "cheap floor; fabricated citations in 3 impl briefs (ledger)"
+      "tier": 3,
+      "basis": "cheap floor; fabricated citations in 3 impl briefs (ledger)",
+      "order": 5
     },
     "flash-low@agy": {
       "harness": "agy",
@@ -790,7 +828,8 @@
       },
       "tier": 1,
       "basis": "same model as flash-high@agy; effort 'low' offered by agy models (slug suffix) and agy --help, 2026-09-12 (ticket 19)",
-      "note": "PROVISIONAL: tier, meter_weight and timeout are not measurements. meter_weight, timeout and price are copied from flash-high@agy; every effort of one model has the same token rates. The tier is 1 because this effort is weaker than flash-high@agy's and nothing has measured it. Confirm in the wizard."
+      "note": "PROVISIONAL: tier, meter_weight and timeout are not measurements. meter_weight, timeout and price are copied from flash-high@agy; every effort of one model has the same token rates. The tier is 1 because this effort is weaker than flash-high@agy's and nothing has measured it. Confirm in the wizard.",
+      "enabled": false
     },
     "flash-medium@agy": {
       "harness": "agy",
@@ -805,9 +844,10 @@
         "cache_write": null,
         "out": 3.75
       },
-      "tier": 1,
+      "tier": 3,
       "basis": "same model as flash-high@agy; effort 'medium' offered by agy models (slug suffix) and agy --help, 2026-09-12 (ticket 19)",
-      "note": "PROVISIONAL: tier, meter_weight and timeout are not measurements. meter_weight, timeout and price are copied from flash-high@agy; every effort of one model has the same token rates. The tier is 1 because this effort is weaker than flash-high@agy's and nothing has measured it. Confirm in the wizard."
+      "note": "PROVISIONAL: tier, meter_weight and timeout are not measurements. meter_weight, timeout and price are copied from flash-high@agy; every effort of one model has the same token rates. The tier is 1 because this effort is weaker than flash-high@agy's and nothing has measured it. Confirm in the wizard.",
+      "order": 6
     }
   }
 }

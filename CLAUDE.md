@@ -39,7 +39,10 @@ only after `main` fast-forwards to this branch.
 **Open, in priority order:**
 
 1. **Fast-forward `main` to this branch** once the suite is green here.
-2. **Orin's own wizard run**, after tickets 25 and 19 below land: his first full run
+2. **Orin's own wizard run is done** (2026-09-13, on branch `t28-tier-order`; ticket
+   28 holds the run note). The catalog under `stow/delegate` now carries his tiers
+   and order. What is left is the merge of `main` into `t28-tier-order`, the
+   fast-forward, and the stow steps below. Before that run: his first full run
    (2026-09-12) found the tier pages pre-marked from placeholder tiers, so its tiers
    would have been wrong. The tiers on the 19 generated codex lanes and the
    three native Claude lanes are provisional by construction: `meter_weight`,

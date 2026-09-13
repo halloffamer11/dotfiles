@@ -1,6 +1,6 @@
 # 28 — An order inside each tier
 
-**Status:** implemented 2026-09-12, pending Orin's review (the last box is his)
+**Status:** done 2026-09-13; Orin's wizard run wrote the catalog (see the run note)
 
 **What to build:** From Orin's review of ticket 27 (2026-09-12). The page places
 lanes in tiers; the wizard's review page, where j/k already works, becomes where he
@@ -63,7 +63,7 @@ first lane always wins and the rest never run. Work in `setup_tui.py`, `setup.py
 - [x] 5 `order` validated
 - [x] 6 rank sort with `order`; no-order catalogs unchanged
 - [x] 7 every statement of the rule agrees
-- [ ] Orin orders his tiers in the wizard
+- [x] Orin orders his tiers in the wizard (2026-09-13)
 
 ## Landed, 2026-09-12
 
@@ -156,3 +156,15 @@ Verification:
 - Not verified: the curses page under a real terminal. Whether a given terminal
   sends `KEY_SF`/`KEY_SR` for shift-down/up was not checked; J/K do not depend on it.
   Orin's own order is his box.
+
+## Orin's run, 2026-09-13
+
+`make delegate-wizard` on this branch (`5f22b61`), the page opened with `o`, tiers
+drawn there and pasted with `v`, tiers ordered on the review page, written at
+confirm. `catalog.py check` says `ok` for both files; the lanes diff is only `tier`,
+`order` and `enabled` (18 lanes on and ordered, 25 off), plus the commas the new
+key needs; `routing.json` moved `scout` from floor 2 / ceiling 3 to floor 1 /
+ceiling 2. The tiers and order are Orin's and are not restated here. The
+PROVISIONAL notes on the generated lanes still say "Confirm in the wizard"; the
+tiers are now confirmed, `meter_weight`, `timeout` and the `astra-high@codex`
+price are not. The suite is green after the write: 12 files, 517 PASS, 0 FAIL.

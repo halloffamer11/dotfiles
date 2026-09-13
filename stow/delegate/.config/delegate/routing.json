@@ -2,8 +2,8 @@
   "version": "delegate-routing.v1",
   "classes": {
     "scout": {
-      "floor": 2,
-      "ceiling": 3
+      "floor": 1,
+      "ceiling": 2
     },
     "mechanical": {
       "floor": 1,
