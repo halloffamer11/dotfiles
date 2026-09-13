@@ -9,7 +9,7 @@ The session plans, adjudicates, and synthesizes. Worker-shaped work goes out on 
 
 ## Terms
 
-Every term this skill uses (harness, lane, meter, class, tier, floor, ceiling, range, pace, gate, margin, native lane, and the rest) is defined once in `~/dotfiles/CONTEXT.md`. Read it before the first run in a session. The classes: `scout` (find, ground, summarize), `mechanical` (renames, transforms, extraction), `impl` (implementation with a spec), `review` (independent review of a diff; reviewer family differs from author), `hard-impl`.
+Every term this skill uses (harness, lane, meter, class, tier, floor, ceiling, range, pace, gate, margin, native lane, disposable browser, agent profile, and the rest) is defined once in `~/dotfiles/CONTEXT.md`. Read it before the first run in a session. The classes: `scout` (find, ground, summarize), `mechanical` (renames, transforms, extraction), `impl` (implementation with a spec), `review` (independent review of a diff; reviewer family differs from author), `hard-impl`.
 
 ## Files
 
@@ -53,4 +53,4 @@ A Workflow script has no shell primitive. The `courier` agent is an optional wra
 
 ## Health
 
-`python3 tests/test_catalog.py`, `tests/test_rank.py`, `tests/test_dispatch.py`, `tests/test_events.py`, `tests/test_report.py`, `tests/test_usage_reset.py`, `tests/test_bench.py`, `tests/test_setup.py`, `tests/test_setup_tui.py` after touching the matching file. `sh scripts/ads.sh check` confirms the pinned relays; `sh scripts/ads.sh install` restores them. A model slug that stops resolving is edited in `lanes.json`; `agy models`, `codex debug models`, `grok models` list the current ones.
+`python3 tests/test_catalog.py`, `tests/test_rank.py`, `tests/test_dispatch.py`, `tests/test_browser_probes.py`, `tests/test_events.py`, `tests/test_report.py`, `tests/test_usage_reset.py`, `tests/test_bench.py`, `tests/test_setup.py`, `tests/test_setup_tui.py` after touching the matching file. `python3 scripts/browser_probes.py` runs the disposable and agent-profile browser probes across all harnesses (`--dry-run` to preview commands); live runs send real workers and spend quota. A native lane's rows read `NATIVE`: dispatch that lane with the probe brief yourself and spawn the agent its native line names. A pass counts only with evidence the browser was used, such as Playwright's page snapshots in the probe's working directory; the nonce alone can be copied from the brief. `sh scripts/ads.sh check` confirms the pinned relays; `sh scripts/ads.sh install` restores them. A model slug that stops resolving is edited in `lanes.json`; `agy models`, `codex debug models`, `grok models` list the current ones.

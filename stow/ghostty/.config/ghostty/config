@@ -1,59 +1,94 @@
-# Dynamic theme colors
-config-file = ?"~/.local/state/omarchy/current/theme/ghostty.conf"
+# Ghostty — shared configuration for every machine (macOS and Omarchy).
+# Owned by the dotfiles repo. Omarchy contributes its live theme only, through
+# the optional include at the bottom. Omarchy's own default file is not read;
+# its updates are merged by hand by diffing against
+# /usr/share/omarchy/config/ghostty/config.
+#
+# Ticket 15 walkthrough, v2 (2026-09-10): closed decisions, the verification
+# checklist, and the wezterm/baseline options adopted in the walkthrough.
 
-# Font
-font-family = "MesloLGLDZ Nerd Font"
+# === Font ===
+# Installed on both machines. Size is per machine, in the include below.
+font-family = "CommitMono Nerd Font"
 font-style = Regular
-font-size = 11
 
-# Window
-window-theme = ghostty
-window-padding-x = 14
-window-padding-y = 14
-confirm-close-surface=false
-resize-overlay = never
-gtk-toolbar-style = flat
+# === Theme ===
+# Built-in. On Omarchy the live-theme include below loads afterwards and its
+# colours override this line.
+theme = "Rose Pine Moon"
 
-# --- Ported from wezterm.lua --- 
+# === Cursor ===
+# no-cursor keeps shell integration from overriding the block cursor.
+cursor-style = block
+cursor-style-blink = false
+shell-integration-features = no-cursor,ssh-env
+
+# === Selection and scrolling ===
 copy-on-select = clipboard
+# Bytes, not lines. Default is 10000000.
+scrollback-limit = 25000000
+
+# === Window ===
+# Frosted glass: terminal at 89% with the wallpaper blurred behind it.
+# Set background-opacity = 1 and background-blur = false to go solid.
+background-opacity = 1.0 
+background-blur = 50
 window-padding-x = 10
 window-padding-y = 10
+window-theme = ghostty
+# Fold the tab bar into the titlebar, so the window chrome is one row rather
+# than two. macOS only; inert on Linux. Applies to new windows only.
+macos-titlebar-style = hidden
+confirm-close-surface = false
+resize-overlay = never
+# Linux only; inert on macOS.
+gtk-toolbar-style = flat
+# Fixes general slowness on Hyprland
+# (https://github.com/ghostty-org/ghostty/discussions/3224).
+async-backend = epoll
+
+# === Keyboard ===
+# Left option is Alt, right option composes. Ignored on Linux.
+macos-option-as-alt = left
+
 keybind = shift+up=jump_to_prompt:-1
 keybind = shift+down=jump_to_prompt:1
 keybind = alt+left=esc:b
 keybind = alt+right=esc:f
-
-# Cursor styling
-cursor-style = "block"
-cursor-style-blink = false
-
-# Cursor styling + SSH session terminfo
-# (all shell integration options must be passed together)
-shell-integration-features = no-cursor,ssh-env
-
-# Keyboard bindings
 keybind = shift+insert=paste_from_clipboard
 keybind = control+insert=copy_to_clipboard
-# Send Shift+Enter as CSI-u so TUIs can distinguish it from Enter.
+# Send Shift+Enter as CSI-u so TUIs can tell it apart from Enter.
 keybind = shift+enter=csi:13;2u
-# Legacy encoding sends Alt+Shift+Enter the same as Alt+Enter; send CSI-u so tmux can match M-S-Enter.
+# Legacy encoding sends Alt+Shift+Enter the same as Alt+Enter; send CSI-u so
+# tmux can match M-S-Enter.
 keybind = alt+shift+enter=csi:13;4u
-keybind = super+control+shift+alt+arrow_down=resize_split:down,100
-keybind = super+control+shift+alt+arrow_up=resize_split:up,100
-keybind = super+control+shift+alt+arrow_left=resize_split:left,100
-keybind = super+control+shift+alt+arrow_right=resize_split:right,100
 
-# Slowdown mouse scrolling
-mouse-scroll-multiplier = 0.95
+# === Quick terminal (drop-down) ===
+# The global: prefix makes the chord work when Ghostty is not focused. On macOS
+# it needs Accessibility permission: System Settings > Privacy & Security.
+keybind = global:ctrl+space=toggle_quick_terminal
+quick-terminal-position = top
+quick-terminal-animation-duration = 0.15
+quick-terminal-screen = mouse
 
-# Fix general slowness on hyprland (https://github.com/ghostty-org/ghostty/discussions/3224)
-async-backend = epoll
+# Rename the current tab (iTerm2 muscle memory).
+keybind = super+shift+i=prompt_tab_title
 
-# Herdr owns super+ctrl+[ and super+ctrl+] for tab cycling (see
-# ~/.config/herdr/config.toml). Ghostty binds the same chord to
-# goto_split:previous/next by default. Today it passes through anyway, because
-# goto_split is performable and there are no Ghostty splits open -- but the
-# first ctrl+shift+o or ctrl+shift+e would start swallowing Herdr's tab keys,
-# and the failure looks random. Unbind it so that never happens.
+# === herdr ===
+# Every chord bound in herdr's config.toml must reach herdr unmodified; the
+# emulator, the platform window manager, and the OS's own shortcuts must not
+# claim it. herdr's config.toml is the single source of the chord set.
+# These six triggers are Ghostty defaults that collide with it.
+keybind = super+[=unbind
+keybind = super+]=unbind
+keybind = super+shift+[=unbind
+keybind = super+shift+]=unbind
 keybind = super+ctrl+[=unbind
 keybind = super+ctrl+]=unbind
+
+# === Includes ===
+# Both are optional and load after this file, so both win on scalar keys.
+# Omarchy's live theme (absent on macOS).
+config-file = ?"~/.local/state/omarchy/current/theme/ghostty.conf"
+# Per-machine settings: font size.
+config-file = ?"~/.config/ghostty/machine.conf"

@@ -309,7 +309,7 @@ def build_prompt(child_cwd, harness, write_dir, brief_path, run_dir=None, class_
 
     agy_extra = b""
     if harness == "agy" and not write_dir:
-        agy_extra = b"You have NO terminal: any command tool is auto-denied and ends this session. Use the file tools only.\n"
+        agy_extra = b"Browser tools are permitted. Terminal commands run inside a sandbox confined to the workspace; you still must not create, edit, or delete files.\n"
 
     cwd_section = f"\n# Working directory\n{child_cwd}\nEvery relative path in this brief is under it. Do not search elsewhere.\n\n".encode("utf-8")
 
@@ -422,8 +422,24 @@ def probe_meters(no_probe):
             pass
 
 
+def codex_home():
+    """The delegate-owned CODEX_HOME, or None when this machine has none.
+
+    A codex worker must reach the disposable browser and nothing else that is in
+    Orin's own config: no plugins, no Gmail, no codex-cli, no node_repl, no
+    hooks, no notify, and not ~/.codex/AGENTS.md, which symlinks his global
+    CLAUDE.md. A home of delegate's own holds one MCP server and gives exactly
+    that, so a run that finds one drops --ignore-user-config and points codex at
+    it. A machine without the home keeps the old isolation, which stays correct
+    and has no browser. `make delegate-codex-home` builds it.
+    """
+    home = os.environ.get("DELEGATE_CODEX_HOME") or os.path.expanduser("~/.local/share/delegate/codex-home")
+    return home if os.path.isfile(os.path.join(home, "config.toml")) else None
+
+
 def run_relay(ads_dir, harness, model, effort, timeout_str, prompt_path, child_cwd, write_dir, run_dir):
     relay_script = os.path.join(ads_dir, "skills", f"{harness}-delegate", "scripts", "relay.mjs")
+    env = None
     cmd = [
         "node",
         relay_script,
@@ -437,7 +453,13 @@ def run_relay(ads_dir, harness, model, effort, timeout_str, prompt_path, child_c
         if not write_dir:
             cmd.append("--read-only")
     elif harness == "codex":
-        cmd.extend(["--effort", effort, "--timeout", timeout_str, "--ignore-user-config", "--skip-git-repo-check"])
+        cmd.extend(["--effort", effort, "--timeout", timeout_str, "--skip-git-repo-check"])
+        home = codex_home()
+        if home:
+            env = dict(os.environ)
+            env["CODEX_HOME"] = home
+        else:
+            cmd.append("--ignore-user-config")
         if not write_dir:
             cmd.append("--read-only")
     elif harness == "agy":
@@ -456,7 +478,7 @@ def run_relay(ads_dir, harness, model, effort, timeout_str, prompt_path, child_c
 
     t0 = time.time()
     with open(stdout_path, "wb") as out_f, open(stderr_path, "wb") as err_f:
-        proc = subprocess.run(cmd, stdout=out_f, stderr=err_f)
+        proc = subprocess.run(cmd, stdout=out_f, stderr=err_f, env=env)
     secs = int(time.time() - t0)
     relay_exit = proc.returncode
 

@@ -105,11 +105,17 @@ exec /usr/bin/git "$@"
     ledger_path = os.path.join(root_dir, "ledger.jsonl")
     cache_path = os.path.join(root_dir, "usage.json")
 
+    # A codex home of delegate's own changes the codex argv, so point the tests
+    # at one that does not exist. The machine running the suite may have a real
+    # home at the default path, and the argv cases must not depend on that.
+    codex_home_dir = os.path.join(root_dir, "codex-home")
+
     base_env = dict(os.environ)
     base_env["PATH"] = os.pathsep.join([fake_bin, "/bin", "/usr/bin"])
     base_env["DELEGATE_LEDGER"] = ledger_path
     base_env["DELEGATE_CACHE"] = cache_path
     base_env["ADS_DIR"] = ads_dir
+    base_env["DELEGATE_CODEX_HOME"] = codex_home_dir
 
     return {
         "config_dir": config_dir,
@@ -467,6 +473,29 @@ def main():
         argv9a = json.load(open(os.path.join(dir9a, "argv.json")))
         exp9a = ["--model", "gpt-5.6-terra", "--effort", "high", "--timeout", "25m", "--read-only", "--ignore-user-config", "--skip-git-repo-check"]
         ok9a = all(x in argv9a for x in exp9a)
+
+        # 9a2: with a codex home of delegate's own, the run points CODEX_HOME at
+        # it and drops --ignore-user-config. The worker then reads that home's
+        # config alone — one MCP server, the disposable browser — and nothing in
+        # ~/.codex: no plugins, no Gmail, no hooks, no AGENTS.md.
+        delegate_codex_home = os.path.join(tmpdir, "delegate-codex-home")
+        os.makedirs(delegate_codex_home, exist_ok=True)
+        with open(os.path.join(delegate_codex_home, "config.toml"), "w") as f:
+            f.write('approvals_reviewer = "auto_review"\n\n[mcp_servers.playwright]\ncommand = "npx"\nargs = []\n')
+        res9a2 = run_dispatch(
+            t_env,
+            ["--lane", "terra-high@codex", "--class", "impl", "--brief", b9, "--cwd", cwd],
+            extra_env={"DELEGATE_CODEX_HOME": delegate_codex_home},
+        )
+        dir9a2 = parse_run_dir_from_stdout(res9a2.stdout)
+        argv9a2 = json.load(open(os.path.join(dir9a2, "argv.json")))
+        env9a2 = json.load(open(os.path.join(dir9a2, "env.json")))
+        ok9a2 = (
+            "--ignore-user-config" not in argv9a2 and
+            "--skip-git-repo-check" in argv9a2 and
+            env9a2.get("CODEX_HOME") == delegate_codex_home
+        )
+        record("9a2. codex home replaces --ignore-user-config", ok9a2, f"argv={argv9a2} env={env9a2}")
 
         # 9b: terra-high@codex with --effort low
         res9b = run_dispatch(t_env, ["--lane", "terra-high@codex", "--class", "impl", "--brief", b9, "--cwd", cwd, "--effort", "low"])
@@ -985,6 +1014,36 @@ def main():
             dir31 = os.path.join(t_env["runs_dir"], new_runs31[0])
             ok31 = os.path.exists(os.path.join(dir31, "argv.json")) and os.path.exists(os.path.join(dir31, "relay.stdout"))
         record("31. ORCHESTRATOR=codex sends claude lane through fake relay", ok31, f"rc={res31.returncode} stdout={res31.stdout}")
+
+        # -------------------------------------------------------------
+        # 32. prompt.md preamble permits disposable browser and forbids other network writes
+        # -------------------------------------------------------------
+        prompt_path24 = os.path.join(dir24, "prompt.md")
+        with open(prompt_path24, "r", encoding="utf-8") as f:
+            prompt24_text = f.read()
+        ok32 = (
+            "you may read and write in a disposable browser only" in prompt24_text and
+            "every other network write stays forbidden" in prompt24_text and
+            "no commits, no pushes, no messages" in prompt24_text
+        )
+        record("32. prompt preamble permits disposable browser and forbids other network writes", ok32)
+
+        # -------------------------------------------------------------
+        # 33. agy read-only prompt has new line and no 'file tools only'; --write prompt omits it
+        # -------------------------------------------------------------
+        prompt_path9e = os.path.join(dir9e, "prompt.md")
+        with open(prompt_path9e, "r", encoding="utf-8") as f:
+            prompt9e_text = f.read()
+        new_agy_line = "Browser tools are permitted. Terminal commands run inside a sandbox confined to the workspace; you still must not create, edit, or delete files."
+        ok33 = (
+            new_agy_line in prompt24_text and
+            "file tools only" not in prompt24_text and
+            "auto-denied" not in prompt24_text and
+            new_agy_line not in prompt9e_text and
+            "file tools only" not in prompt9e_text and
+            "Writes are authorized inside" in prompt9e_text
+        )
+        record("33. agy prompt: read-only has new sandbox line and no 'file tools only', --write omits it", ok33)
 
     if fails > 0:
         print(f"FAIL: {fails} tests failed", file=sys.stderr)
