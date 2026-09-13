@@ -7,7 +7,7 @@
 **Status:** landed 2026-09-09. The first dispatch was killed by SIGTERM after 6m50s having finished section 1 only; the resume dispatch (run `20260909T181534Z-sol-high@codex-3f047c42`, 876s, status `done`) completed cases 1-10. Review found one defect — the five Epoch benchmark names were hardcoded twice in `setup_tui.py`, duplicating `bench.EPOCH_BENCHMARKS` — fixed in the worktree before landing. All nine test files pass in place: 180 PASS, 0 FAIL. Open: Orin runs the wizard once.
 
 - [x] Worker result reviewed and landed
-- [ ] Orin runs the TUI wizard once and confirms the catalog (closes ticket 07)
+- [x] Orin runs the TUI wizard once and confirms the catalog (closes ticket 07) (2026-09-13; ticket 28)
 
 ## Brief as dispatched
 

@@ -11,4 +11,4 @@
 - [x] The benchmark ranking is shown before the tier questions, and the wizard never pre-fills a tier from it
 - [x] Answering no at the end writes nothing
 - [x] The written files pass the validators from ticket 01 and are formatted
-- [ ] Orin runs the wizard once on this machine and confirms the resulting catalog
+- [x] Orin runs the wizard once on this machine and confirms the resulting catalog (2026-09-13; ticket 28)

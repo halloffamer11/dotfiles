@@ -11,4 +11,4 @@
 - [x] The Artificial Analysis key is read from a file under the delegate config directory, never from the environment or the catalog
 - [x] Without the key the Epoch columns still render and the report says which source was skipped
 - [x] A grep of the skill, hooks, and ranking code finds no reference to the bench output path
-- [ ] Orin reads one report and confirms it is enough to set tier from
+- [x] Orin reads one report and confirms it is enough to set tier from (2026-09-13, the benchmark page in the wizard run; ticket 28)

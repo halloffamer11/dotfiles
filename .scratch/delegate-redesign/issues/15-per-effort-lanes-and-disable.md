@@ -84,7 +84,7 @@ sensitive.
 - [x] `tests/test_rank.py` covers a disabled lane that would otherwise be the pick
 - [x] `effort.py extract` completes one real run end to end, so the pipeline is proven, not half-proven
 - [x] A pre-screen runs before the tier screens, proposes `enabled` per lane from `effort.py` output, and sets the starting mark state rather than writing the catalog
-- [ ] Orin enumerates the codex efforts he wants and switches off the rest in one wizard run
+- [x] Orin enumerates the codex efforts he wants and switches off the rest in one wizard run (2026-09-13; ticket 28)
 
 ## Schema and generator landed 2026-09-10
 

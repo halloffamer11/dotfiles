@@ -48,46 +48,33 @@ class has a floor and a ceiling (`routing.json` `classes`), no class reaches tie
 `run --tier` raises the floor for one job, and Claude lanes run natively as the
 `lane-*` agents in `agents/agents/`.
 
-**Branch `bench-aa-effort-slugs`** (worktree
-`~/.herdr/worktrees/dotfiles/delegate-lane-catalog`) merged `main` at `c35f892`
-(2026-09-12). It holds ticket 18 (AA rows from the page's own dataset, the majority
-carry rule) and ticket 24 (the benchmark page as plots with settings). Ticket 24 was
-numbered 22 and then 23 on this branch until `main`'s 22 and 23 were seen, so
-commit `221283c` says 22 and `71b8b47` says 23. `main` holds ticket 22 (each class has
-a floor and a ceiling in `routing.json` `classes`, no class reaches tier 4,
-`run --tier` raises the floor for one job, Claude lanes run natively as the `lane-*`
-agents in `agents/agents/`) and ticket 23 (meter rows in the status line).
-
-`~/.claude/skills/delegate` and the four `delegate-*` wrappers symlink into
-`~/dotfiles`, the **main** checkout, so the installed skill has tickets 18 and 24
-only after `main` fast-forwards to this branch.
+**Landed on `main` at `d53e5af`** (2026-09-13): tickets 18, 19 and 24-28 on top of
+22 and 23. The chain was `bench-aa-effort-slugs` (18, 24), then `t19-efforts-and-rows`,
+`t25-wizard-pages`, `t26-page-tiers`, `t27-page-first`, `t28-tier-order`; the last four
+worktrees and branches are removed, and `main` merged the browser thread on the way.
+Orin's wizard run (2026-09-13, ticket 28's run note) wrote the repo catalog: 18 lanes
+on, each with a tier and an `order`, 25 off; `scout` is floor 1 / ceiling 2. The live
+`~/.config/delegate/{lanes,routing}.json` are stow links into the repo since the same
+day (the plain files it replaced sit in `~/.config/delegate/_pre-stow-2026-09-13/`,
+unused), `make skills` linked the 16 `lane-*` agents, and `rank.py impl` through the
+installed skill reads the new tiers and orders. `make delegate-wizard` runs the wizard
+on the repo catalog with the accepted rows from any directory
+(`make -C <checkout> delegate-wizard`; `WIZARD_ARGS` adds flags such as
+`--tiers-from <file>`).
 
 **Open, in priority order:**
 
-1. **Fast-forward `main` to this branch** once the suite is green here.
-2. **Orin's own wizard run is done** (2026-09-13, on branch `t28-tier-order`; ticket
-   28 holds the run note). The catalog under `stow/delegate` now carries his tiers
-   and order. What is left is the merge of `main` into `t28-tier-order`, the
-   fast-forward, and the stow steps below. Before that run: his first full run
-   (2026-09-12) found the tier pages pre-marked from placeholder tiers, so its tiers
-   would have been wrong. The tiers on the 19 generated codex lanes and the
-   three native Claude lanes are provisional by construction: `meter_weight`,
-   `timeout` and `tier` are not measurements. Each such lane says so in its `note`.
-3. **Tickets 25 and 19 are implemented on this branch** (2026-09-12, `2204034` and
-   `caa7b60`), from Orin's first full wizard run, which wrote nothing; 20 and 21 are
-   closed into them. Both wait on Orin's review in the wizard run of item 2.
-   25 is the wizard and its page: tier marks start empty (T1 still opens with every
-   open lane ticked, since what is left must take tier 1), tier pages hide lanes not
-   carried and lanes a higher tier took, a review page after T1, a routing
-   description panel, a facts-only start page, and quoted board descriptions and
-   zoom on the benchmark page (`assets/boards.json`). 19 is lanes and data: Fable,
-   Opus and Sonnet are lanes at all five claude efforts and Gemini 3.8 Flash at all
-   three agy efforts, 43 lanes in all (Haiku takes no effort; grok is high only until
-   a paid probe), every Claude lane model reaches its rows, and the report reads the
-   per-effort AA rows. Open limits: the carry rule never proposes an agy flash lane
-   off, because each agy effort is a separate model name. The branches
-   `t19-efforts-and-rows` and `t25-wizard-pages` and their worktrees are merged here
-   and can be removed.
+1. **Housekeeping**: the worktree `~/.herdr/worktrees/dotfiles/delegate-lane-catalog`
+   (branch `bench-aa-effort-slugs`) and the worktree and branch `t28-tier-order` are
+   merged and can be removed; so are the branches `delegate-lane-catalog` and
+   `effort-data-tooling`.
+2. **Provisional figures**: the `PROVISIONAL` notes on the generated lanes still say
+   "Confirm in the wizard". The tiers are now Orin's; `meter_weight` and `timeout` on
+   those lanes are still copies, and `astra-high@codex` has `price` null with the note
+   "not sourced" (`6e0f0b1` quoted `10 / 1 / 12.5 / 50` without a source). Find the
+   source before pasting the figures, then reword the notes.
+3. **Carry-rule limit**: the carry page never proposes an agy flash lane off, because
+   each agy effort is a separate model name (ticket 19).
 
 **Waiting on Orin** (nothing else blocks on these):
 
@@ -97,21 +84,6 @@ only after `main` fast-forwards to this branch.
   (`~/.hammerspoon` is the Makefile's whole-directory symlink into the repo,
   never a stow package). Ticket 23 holds the row format and the decisions; its
   last open box is one press of ⌥⌘D in each direction.
-- Run the wizard against the repo catalog, then link the live folder to it:
-  `make delegate-wizard` from any directory as `make -C <checkout> delegate-wizard`
-  (the target runs `setup.py` on `stow/delegate/.config/delegate` with the accepted
-  AA and Terminal-Bench rows; `WIZARD_ARGS="--tiers-from FILE"` adds flags),
-  then move the plain `lanes.json` and `routing.json` out of `~/.config/delegate` and
-  run `stow -d stow -t ~ -R delegate` (never `--adopt`, which would pull the 10-lane
-  live file over the repo's). Ticket 22's last section has the full steps. The run
-  closes tickets 06, 07, 07b and 15's last box. The carry page should propose
-  `astra-xhigh@codex` off ("high wins on aa" or "on tbench") and the three `ultra`
-  lanes off as never carried. The `o` key's page opens on the AA Intelligence Index
-  and Terminal-Bench, one plot each; nobody has yet hovered or dragged on it with a
-  real mouse. The run should also settle `astra-high@codex`: `6e0f0b1` said its
-  price is sourced as `10 / 1 / 12.5 / 50`, but the stowed catalog has `price` null
-  with the note "not sourced", and its `meter_weight` 40 is a placeholder. Find the
-  source before pasting the figures.
 - Type each of the four `/delegate-*` wrappers once with a plain-language
   constraint (ticket 11).
 - Two one-liners in his own files, outside this repo (ticket 09):
