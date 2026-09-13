@@ -10,6 +10,7 @@
 #   make audiotee    # build the audiotee system-audio capture binary into ~/.local/bin (Swift 5.9+, macOS 14.2+)
 #   make mictee      # build the mictee mic capture binary into ~/.local/bin (Swift)
 #   make test-recorder  # regression harness for the record-meeting rig
+#   make delegate-wizard  # the delegate catalog wizard on the repo catalog with the accepted benchmark rows; WIZARD_ARGS adds flags (e.g. --tiers-from FILE, --plain)
 #
 # Editing:
 #   - CONFIG_PACKAGES: config packages under stow/, targeted at ~
@@ -33,8 +34,11 @@
 CONFIG_PACKAGES ?= borders claude delegate ghostty git herdr nvim starship wezterm yazi zsh
 HARNESS_SKILL_DIRS ?= $(HOME)/.claude/skills $(HOME)/.agents/skills $(HOME)/.kiro/skills
 EXTRA_BREWFILES ?= 
+# Accepted benchmark rows the wizard reads (repo-relative). The pre-screen and the
+# benchmark page use AA and Terminal-Bench; swerb rows are evidence only.
+DELEGATE_ROWS ?= .scratch/delegate-redesign/_data/aa-accepted.json .scratch/delegate-redesign/_data/tbench-accepted.json
 
-.PHONY: bootstrap brew configs skills externals update audiotee mictee test-recorder
+.PHONY: bootstrap brew configs skills externals update audiotee mictee test-recorder delegate-wizard
 
 bootstrap: brew configs skills externals audiotee mictee
 
@@ -80,5 +84,10 @@ mictee:
 
 test-recorder:
 	python3 $(CURDIR)/tools/record-meeting-tests/harness.py
+
+# Writes the repo catalog under stow/delegate, never ~/.config/delegate: setup.py
+# renames over its target, which would turn a stowed symlink into a plain file.
+delegate-wizard:
+	python3 $(CURDIR)/agents/skills/delegate/scripts/setup.py --config-dir $(CURDIR)/stow/delegate/.config/delegate $(foreach f,$(DELEGATE_ROWS),--effort-rows $(CURDIR)/$(f)) $(WIZARD_ARGS)
 
 #   references/  — reference material pulled with the repo but not provisioned by brew/stow/skills (e.g. personal CLAUDE.md for the work Mac to cherry-pick from)

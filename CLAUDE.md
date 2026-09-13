@@ -68,9 +68,10 @@ only after `main` fast-forwards to this branch.
   (`~/.hammerspoon` is the Makefile's whole-directory symlink into the repo,
   never a stow package). Ticket 23 holds the row format and the decisions; its
   last open box is one press of ⌥⌘D in each direction.
-- Run the wizard against the repo catalog, then link the live folder to it. From
-  the repo root:
-  `python3 agents/skills/delegate/scripts/setup.py --config-dir stow/delegate/.config/delegate --effort-rows .scratch/delegate-redesign/_data/aa-accepted.json --effort-rows .scratch/delegate-redesign/_data/tbench-accepted.json`
+- Run the wizard against the repo catalog, then link the live folder to it:
+  `make delegate-wizard` from any directory as `make -C <checkout> delegate-wizard`
+  (the target runs `setup.py` on `stow/delegate/.config/delegate` with the accepted
+  AA and Terminal-Bench rows; `WIZARD_ARGS="--tiers-from FILE"` adds flags),
   then move the plain `lanes.json` and `routing.json` out of `~/.config/delegate` and
   run `stow -d stow -t ~ -R delegate` (never `--adopt`, which would pull the 10-lane
   live file over the repo's). Ticket 22's last section has the full steps. The run
