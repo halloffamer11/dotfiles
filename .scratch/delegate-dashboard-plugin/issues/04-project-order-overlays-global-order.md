@@ -12,7 +12,7 @@ Lands on `main`.
 
 **Blocked by:** 03 Tier leaders from the ranking boundary
 
-**Status:** implemented 2026-09-14 in the ticket worktree; not committed or landed
+**Status:** implemented 2026-09-14 (`0c293b9`, integrated as `bea657d`); not landed on `main`
 
 - [x] Project routing validation accepts Project order as a list of lane names and rejects duplicates, unknown lanes and globally off lanes, each with a message naming the lane and the rule.
 - [x] A project cannot change a lane's Tier or restore an off lane through Project order.
@@ -23,7 +23,7 @@ Lands on `main`.
 
 ## Implemented, 2026-09-14
 
-The uncommitted ticket worktree adds `project_order` at the public catalog seam.
+The ticket worktree adds `project_order` at the public catalog seam.
 `validate_project_routing` validates a proposed project document together with the
 global lane and routing documents, including the complete merged Class ranges. The
 effective lane projection groups the flat list by the existing global Tier, puts named
@@ -38,3 +38,10 @@ fixture-project reload that changes both `rank("impl", ...)` and
 - `python3 agents/skills/delegate/tests/test_rank.py`
 - `python3 -m py_compile agents/skills/delegate/scripts/catalog.py`
 - `git diff --check`
+
+## Integration check, 2026-09-14
+
+The lead repeated the catalog and ranking suites. A new regression test showed
+that the routing-only boundary raised `TypeError` for a non-object project
+document. Shape validation now runs before inspecting Project order, so this
+case raises the usual plain-language `CatalogError`. Both suites pass.
