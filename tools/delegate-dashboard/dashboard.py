@@ -106,6 +106,15 @@ def source_label(source, state):
     return f"global:{os.path.basename(source)}"
 
 
+def order_label(row, state):
+    """Effective Order with its catalog source, not a second sorting rule."""
+    if row["order"] is None:
+        return "—"
+    source = row.get("order_source")
+    mark = "?" if not source else "p" if source == state["project"]["policy"] else "g"
+    return f"{row['order']}{mark}"
+
+
 def body_lines(state, width, selected_lane=None):
     """Return semantic terminal lines; spacing is deliberately not a test seam."""
     lines = []
@@ -129,7 +138,7 @@ def body_lines(state, width, selected_lane=None):
         for row in tier["rows"]:
             leader_mark = "◆" if row["lane"] == tier["leader"] else "·"
             cursor_mark = ">" if row["lane"] == selected_lane else " "
-            order = "—" if row["order"] is None else str(row["order"])
+            order = order_label(row, state)
             eligible = "yes" if row["eligible"] else "no"
             row_color = color if leader_mark == "◆" else FOREGROUND
             is_leader = leader_mark == "◆"
@@ -180,6 +189,7 @@ def compose(
     header = [
         (f"Pinned project  {project['name']}  {project['root']}", FOREGROUND, True),
         ("Delegate project routing  /  prototype", FOREGROUND, True),
+        ("Ord: p=project · g=global/fallback (derived from global Order/name)", MUTED, False),
         (
             f"Gate {gate['display']} [{source_label(gate['source'], state)}]   "
             f"Margin {margin['display']} [{source_label(margin['source'], state)}]",

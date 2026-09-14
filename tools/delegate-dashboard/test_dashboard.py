@@ -145,9 +145,28 @@ class DashboardModelTest(unittest.TestCase):
         row = state["tiers"][1]["rows"][0]
         self.assertEqual(
             set(row),
-            {"lane", "model", "effort", "harness", "meter", "remaining", "pace", "eligible", "reason", "order"},
+            {"lane", "model", "effort", "harness", "meter", "remaining", "pace", "eligible", "reason", "order", "order_source"},
         )
         self.assertEqual(state["usage"]["label"], "Global subscription usage")
+
+    def test_order_sources_distinguish_project_from_global_fallback(self):
+        state = self.make_model().state
+        global_path = str((self.config / "lanes.json").resolve())
+        self.assertTrue(all(row["order_source"] == global_path
+                            for tier in state["tiers"] for row in tier["rows"]))
+
+        global_lanes = json.loads((self.config / "lanes.json").read_text())
+        del global_lanes["lanes"]["fable-xhigh@claude"]["order"]
+        write_json(self.config / "lanes.json", global_lanes)
+        project_policy = self.root / ".delegate" / "routing.json"
+        write_json(project_policy, {"project_order": ["opus-high@claude"]})
+        state = self.make_model().state
+        rows = state["tiers"][2]["rows"]
+        self.assertEqual([(row["lane"], row["order"], row["order_source"]) for row in rows], [
+            ("opus-high@claude", 1, str(project_policy.resolve())),
+            ("fable-xhigh@claude", 2, global_path),
+        ])
+        self.assertEqual(state["tiers"][2]["leader"], "opus-high@claude")
 
     def test_meter_byte_change_hot_reloads_leader_and_reason(self):
         dashboard = self.make_model()

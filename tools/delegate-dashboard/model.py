@@ -306,6 +306,7 @@ class DashboardModel:
 
         meters, meter_status, meter_detail, meter_signature = self._load_meters()
         previews = rank.tier_leaders(effective, meters, self.present)
+        sources = effective["sources"]
         tiers = []
         for preview in previews:
             carried = [
@@ -326,6 +327,7 @@ class DashboardModel:
                     "eligible": row["eligible"],
                     "reason": row["reason"],
                     "order": row["order"],
+                    "order_source": sources.get(f"lanes.{row['lane']}.order"),
                 }
                 for row in carried
             ]
@@ -339,7 +341,6 @@ class DashboardModel:
             )
 
         routing = effective["routing"]
-        sources = effective["sources"]
         self._revision += 1
         state = {
             "prototype": True,
