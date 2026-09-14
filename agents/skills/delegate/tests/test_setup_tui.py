@@ -81,8 +81,7 @@ def finish(w):
 
 def mark_as(w, tiers):
     """On each tier page from the one on screen down, mark the lanes `tiers`
-    gives that tier, then enter. Tier pages open unmarked (ticket 25), so a
-    test that wants a catalog written back has to say every tier itself."""
+    gives that tier, then enter."""
     while w.screen == "tier":
         for row in w.view()["rows"]:
             name = row["cells"][1]
@@ -97,8 +96,7 @@ def incoming_tiers(doc):
 
 
 def all_tier_one(doc):
-    """What enter straight through writes now that nothing starts marked:
-    every open lane falls to tier 1, where the last page ticks what is left."""
+    """Return a copy in which every lane is assigned to tier 1."""
     out = copy.deepcopy(doc)
     for lane in out["lanes"].values():
         lane["tier"] = 1
@@ -162,9 +160,10 @@ try:
     # high, so it leads; fable runs xhigh and its model was only measured at
     # max, so it has no figure here at all, the same as flash, which nobody
     # measured. The old screen showed fable the max figure (ticket 17).
-    record("1 tier 4 opens unmarked, in benchmark order",
-           v["tier"] == 4 and not any(r["marked"] for r in v["rows"])
-           and not fable["marked"]
+    record("1 tier 4 opens with current marks, in benchmark order",
+           v["tier"] == 4
+           and {r["cells"][1] for r in v["rows"] if r["marked"]} == {"fable-xhigh@claude"}
+           and fable["marked"]
            and models[:2] == ["gpt-5.6-sol", "gpt-5.6-terra"]
            and models[-2:] == ["claude-fable-5-1", "gemini-3.8-flash-high"]
            and "90.0" in sol["cells"] and sol["cells"][9] == "1.0 (n=5)"
@@ -173,27 +172,48 @@ try:
            and all(x == "—" for x in flash["cells"][4:9])
            and flash["cells"][9].startswith("—"), str(v))
 except Exception as e:
-    record("1 tier 4 opens unmarked, in benchmark order", False, repr(e))
+    record("1 tier 4 opens with current marks, in benchmark order", False, repr(e))
 
 try:
-    # Whatever lanes.json holds: here every lane is already tier 4, and the
-    # page still opens with no box ticked. Only tier 1 starts ticked, because
-    # every lane still open there has nowhere else to go.
+    w = wizard()
+    start(w)
+    restored = []
+    while w.screen == "tier":
+        expected = {
+            name for name, lane in LANES["lanes"].items()
+            if lane.get("enabled", True) and lane["tier"] == w.tier
+        }
+        marked = {row["cells"][1] for row in w.view()["rows"] if row["marked"]}
+        restored.append(marked == expected)
+        w.handle("enter")
+    finish(w)
+    record("1a the TUI restores the current catalog tiers and enter preserves them",
+           restored == [True, True, True, True]
+           and strip_order(w.result()[0]) == LANES
+           and w.result()[1] == ROUTING,
+           repr((restored, w.result())))
+except Exception as e:
+    record("1a the TUI restores the current catalog tiers and enter preserves them", False, repr(e))
+
+try:
+    # Whatever lanes.json holds is the editable starting state. Here every lane
+    # is already tier 4, so tier 4 starts fully marked and lower pages are empty.
     every_four = copy.deepcopy(LANES)
     for lane in every_four["lanes"].values():
         lane["tier"] = 4
     w = wizard(lanes=every_four)
     start(w)
-    unmarked = []
-    while w.screen == "tier" and w.tier > 1:
-        unmarked.append(not any(r["marked"] for r in w.view()["rows"]) and w._marks[w.tier] == set())
+    pages = []
+    while w.screen == "tier":
+        rows = w.view()["rows"]
+        pages.append((w.tier, len(rows), sum(1 for row in rows if row["marked"])))
         w.handle("enter")
-    t1 = w.view()["rows"]
-    record("1b every tier page above 1 opens unmarked, whatever lanes.json holds",
-           unmarked == [True, True, True] and w.tier == 1
-           and t1 and all(r["marked"] for r in t1), repr(unmarked))
+    record("1b every tier page restores lanes.json",
+           pages == [(4, len(every_four["lanes"]), len(every_four["lanes"])),
+                     (3, 0, 0), (2, 0, 0), (1, 0, 0)]
+           and w.screen == "review", repr(pages))
 except Exception as e:
-    record("1b every tier page above 1 opens unmarked, whatever lanes.json holds", False, repr(e))
+    record("1b every tier page restores lanes.json", False, repr(e))
 
 try:
     w = wizard()
@@ -207,8 +227,8 @@ try:
     w = wizard()
     start(w)
     finish(w)
-    record("2b enter straight through puts every lane on tier 1",
-           strip_order(w.result()[0]) == all_tier_one(LANES) and w.result()[1] == ROUTING
+    record("2b enter straight through preserves every current tier",
+           strip_order(w.result()[0]) == LANES and w.result()[1] == ROUTING
            and orders_are_places(w.result()[0]), repr(w.result()))
 except Exception as e:
     record("2 marking the incoming tiers writes the catalog back unchanged", False, repr(e))
@@ -228,7 +248,7 @@ try:
     record("3 a lane assigned at tier N shows on no page below N, and keeps N",
            below == [True, True, True]
            and lanes["lanes"]["sol-high@codex"]["tier"] == 4
-           and lanes["lanes"]["terra-high@codex"]["tier"] == 1, repr(below))
+           and lanes["lanes"]["terra-high@codex"]["tier"] == 2, repr(below))
 except Exception as e:
     record("3 a lane assigned at tier N shows on no page below N, and keeps N", False, repr(e))
 
@@ -282,7 +302,7 @@ try:
     expected = copy.deepcopy(ROUTING)
     expected["classes"]["mechanical"]["ceiling"] = 3
     expected["margin"] = 0.25
-    record("6 routing edits are isolated", strip_order(lanes) == all_tier_one(LANES) and routing == expected, repr(routing))
+    record("6 routing edits are isolated", strip_order(lanes) == LANES and routing == expected, repr(routing))
 except Exception as e:
     record("6 routing edits are isolated", False, repr(e))
 
@@ -308,6 +328,20 @@ try:
            w.tier == 4 and sol["marked"] and not sol["dimmed"])
 except Exception as e:
     record("8 back restores prior tier marks", False, repr(e))
+
+try:
+    w = wizard()
+    start(w)
+    w.handle("enter")
+    move_to(w, "terra-high@codex")
+    w.handle("space")
+    w.handle("b")
+    w.handle("enter")
+    terra = next(row for row in w.view()["rows"] if row["cells"][1] == "terra-high@codex")
+    record("8b back and forward preserve edits on a tier not yet submitted",
+           w.tier == 3 and terra["marked"])
+except Exception as e:
+    record("8b back and forward preserve edits on a tier not yet submitted", False, repr(e))
 
 try:
     w = wizard(False, "fixture unavailable")
@@ -632,15 +666,16 @@ try:
     record("17 a lane switched off on the carry page shows on no tier page, and space cannot mark it",
            listed == [False, False, False, False] and not marked_ever
            and w.screen == "review" and "flash-high@agy" not in review
-           and "flash-high@agy" not in w._assigned, repr((listed, review)))
+           and w._assigned["flash-high@agy"] == LANES["lanes"]["flash-high@agy"]["tier"],
+           repr((listed, review)))
 except Exception as e:
     record("17 a lane switched off on the carry page shows on no tier page, and space cannot mark it",
            False, repr(e))
 
 
 try:
-    # nobody is asked a tier for a lane that is not carried, so it keeps the one
-    # the catalog has: 3 here, where enter straight through gives the rest 1
+    # Nobody is asked a tier for a lane that is not carried, so it keeps the one
+    # the catalog has: 3 here. Carried lanes also start with their catalog tiers.
     incoming = copy.deepcopy(LANES)
     incoming["lanes"]["flash-high@agy"]["tier"] = 3
     w = wizard(lanes=incoming)
@@ -686,17 +721,16 @@ try:
     lane_rows = [r for r in v["rows"] if not r.get("section")]
     shape = (w.screen == "review" and v["columns"][:2] == ["#", "lane"]
              and [tier for tier, _ in layout] == [4, 3, 2, 1]
-             and layout[0][1] == ["sol-high@codex"] and layout[1][1] == ["terra-high@codex"]
-             and layout[2][1] == []
-             and [r["section"] for r in v["rows"] if r.get("section")][2] == "Tier 2 (no lanes)"
+             and layout[0][1] == ["sol-high@codex", "fable-xhigh@claude"]
+             and layout[1][1] == ["terra-high@codex"]
+             and layout[2][1] == ["grok46-high@grok"]
              and sorted(names) == sorted(carried)
-             and [r["cells"][0].strip() for r in lane_rows] == ["1", "1"] + [str(i) for i in range(1, len(carried) - 1)]
+             and [r["cells"][0].strip() for r in lane_rows] == ["1", "2", "1", "1", "1"]
              and "[review]" in v["steps"] and "J/K: move lane" in v["footer"] and "1-4: tier" in v["footer"])
-    w.handle("down")           # j: to terra
+    move_to(w, "terra-high@codex")
     w.handle("2")              # terra to the end of tier 2, and the cursor with it
-    w.handle("up")             # k: back to sol
-    w.handle("3")
-    order_kept = review_names(w.view()) == names
+    move_to(w, "sol-high@codex")
+    w.handle("3")              # sol to tier 3
     after = review_layout(w.view())
     w.handle("9")              # not a tier
     w.handle("enter")
@@ -709,11 +743,12 @@ try:
     lanes, _ = w.result()
     record("39 after tier 1 a review page lists every carried lane under its tier, numbered; j/k move, "
            "1-4 move a lane to that tier, enter goes to routing and b from routing returns to it",
-           shape and order_kept
-           and dict(after)[3] == ["sol-high@codex"] and dict(after)[2] == ["terra-high@codex"]
+           shape
+           and dict(after)[3] == ["sol-high@codex"]
+           and dict(after)[2] == ["grok46-high@grok", "terra-high@codex"]
            and at_routing and back
            and lanes["lanes"]["sol-high@codex"]["tier"] == 3 and lanes["lanes"]["sol-high@codex"]["order"] == 1
-           and lanes["lanes"]["terra-high@codex"]["tier"] == 2 and lanes["lanes"]["terra-high@codex"]["order"] == 1
+           and lanes["lanes"]["terra-high@codex"]["tier"] == 2 and lanes["lanes"]["terra-high@codex"]["order"] == 2
            and lanes["lanes"]["flash-high@agy"]["tier"] == LANES["lanes"]["flash-high@agy"]["tier"]
            and "order" not in lanes["lanes"]["flash-high@agy"]
            and orders_are_places(lanes)
@@ -1372,9 +1407,9 @@ try:
     for width in (80, 100, 140):
         grid = screen(w.view(width), width, 30)
         seen.append(not any("sol-high@codex" in line or "terra-high@codex" in line for line in grid)
-                    and hidden_legend(1, 1) in grid)
+                    and hidden_legend(2, 1) in grid)
     record("31 hidden lanes are off the grid, and the page counts them in a whole line",
-           all(seen) and hidden_legend(1, 1) == "Not listed: 1 taken at a higher tier, 1 not carried."
+           all(seen) and hidden_legend(2, 1) == "Not listed: 2 taken at a higher tier, 1 not carried."
            and hidden_legend(0, 0) == "", repr(seen))
 except Exception as e:
     record("31 hidden lanes are off the grid, and the page counts them in a whole line", False, repr(e))
@@ -1512,7 +1547,7 @@ try:
            # nothing off and nothing assigned: the tier definition alone
            clean == [TIER_ONELINER]
            and off_only == [hidden_legend(0, 1), TIER_ONELINER]
-           and both == [hidden_legend(1, 1), TIER_ONELINER]
+           and both == [hidden_legend(2, 1), TIER_ONELINER]
            # the reference line renders last, directly above the footer
            and all(lines[-1] == TIER_ONELINER for lines in (clean, off_only, both))
            and all(len(line) <= 79 for line in both),
@@ -1675,6 +1710,8 @@ try:
     # the review page is by tier and in Orin's order, so the model grouping
     # does not apply there (ticket 28): with no lines and no catalog order a
     # tier starts in benchmark order
+    move_to(w, "fable-low@claude")
+    w.handle("space")            # remove its current tier-4 default
     move_to(w, "sol-high@codex")
     w.handle("space")
     w.handle("enter")            # sol-high takes tier 4
@@ -1687,8 +1724,8 @@ try:
     tier1 = review[1]
     record("44b the review page lists tiers 4 to 1, each starting in benchmark order without model grouping",
            w.screen == "review"
-           and review[4] == ["sol-high@codex"] and review[3] == ["fable-low@claude"] and review[2] == []
-           and "sol-low@codex" in tier1
+           and "sol-high@codex" in review[4] and "fable-low@claude" in review[3]
+           and review[2] == sorted(review[2], key=lambda n: setup_tui.bench_order_key(w.bench, n, doc))
            and tier1 == sorted(tier1, key=lambda n: setup_tui.bench_order_key(w.bench, n, doc)),
            repr(review))
 except Exception as e:
@@ -1845,6 +1882,37 @@ except Exception as e:
 
 
 try:
+    current_lines = "\n".join(
+        f"{name} {lane['tier'] if lane.get('enabled', True) else 'off'}"
+        for name, lane in LANES["lanes"].items()
+    ) + "\n"
+    first = at_review(lambda: current_lines)
+    first.handle("v")
+    finish(first)
+    pasted, _routing = first.result()
+
+    second = wizard(lanes=pasted)
+    start(second)
+    restored = []
+    while second.screen == "tier":
+        expected = {
+            name for name, lane in pasted["lanes"].items()
+            if lane.get("enabled", True) and lane["tier"] == second.tier
+        }
+        marked = {row["cells"][1] for row in second.view()["rows"] if row["marked"]}
+        restored.append(marked == expected)
+        second.handle("enter")
+    finish(second)
+    record("48b a catalog first created with v restores its tiers and order on the next run",
+           restored == [True, True, True, True]
+           and second.result()[0] == pasted,
+           repr((restored, second.result()[0])))
+except Exception as e:
+    record("48b a catalog first created with v restores its tiers and order on the next run",
+           False, repr(e))
+
+
+try:
     def missing():
         raise setup_tui.ClipboardError("pbpaste not found")
 
@@ -1887,24 +1955,24 @@ except Exception as e:
 
 
 try:
-    # --tiers-from applies the lines at start: the tier pages list only what no line named
+    # --tiers-from applies the lines at start as editable defaults.
     w = wizard()
     summary = w.apply_tier_lines("fable-xhigh@claude 4\nsol-high@codex off\n")
     start_message = w.view()["message"]
     start(w)
     t4 = [r["cells"][1] for r in w.view()["rows"]]
+    t4_marked = [r["cells"][1] for r in w.view()["rows"] if r["marked"]]
     legend = w.view()["legend"]
-    # every lane the lines did not name went off (ticket 28), so no tier page lists a lane
     while w.screen == "tier":
         w.handle("enter")
-    record("50 lines applied at start decide every carried lane, hide them from the tier pages and say so on the start page",
+    record("50 lines applied at start become editable tier defaults and say so on the start page",
            start_message == summary == "Lines: 1 took a tier; 1 went off; 4 not named, so off."
-           and t4 == []
-           and legend[0] == "Not listed: 1 taken at a higher tier, 5 not carried."
+           and t4 == ["fable-xhigh@claude"] and t4_marked == t4
+           and legend[0] == "Not listed: 5 not carried."
            and w.screen == "review" and review_layout(w.view())[0] == (4, ["fable-xhigh@claude"]),
            repr((start_message, t4, legend)))
 except Exception as e:
-    record("50 lines applied at start hide what they decided from the tier pages", False, repr(e))
+    record("50 lines applied at start become editable tier defaults", False, repr(e))
 
 
 # --- ticket 28: an order inside each tier -------------------------------------------
