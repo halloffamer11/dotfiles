@@ -14,6 +14,7 @@
 #   make mictee      # build the mictee mic capture binary into ~/.local/bin (Swift)
 #   make test-recorder  # regression harness for the record-meeting rig
 #   make delegate-wizard  # the delegate catalog wizard on the repo catalog with the accepted benchmark rows; WIZARD_ARGS adds flags (e.g. --tiers-from FILE, --plain)
+#   make delegate-dashboard  # link and open the local dashboard; DELEGATE_DASHBOARD_PLACEMENT overrides split
 #
 # Editing:
 #   - CONFIG_PACKAGES: config packages under stow/, targeted at ~
@@ -40,8 +41,9 @@ EXTRA_BREWFILES ?=
 # Accepted benchmark rows the wizard reads (repo-relative). The pre-screen and the
 # benchmark page use AA and Terminal-Bench; swerb rows are evidence only.
 DELEGATE_ROWS ?= .scratch/delegate-redesign/_data/aa-accepted.json .scratch/delegate-redesign/_data/tbench-accepted.json
+DELEGATE_DASHBOARD_PLACEMENT ?= split
 
-.PHONY: bootstrap brew apply configs skills externals external-updates update audiotee mictee test-recorder delegate-wizard delegate-codex-home
+.PHONY: bootstrap brew apply configs skills externals external-updates update audiotee mictee test-recorder delegate-wizard delegate-codex-home delegate-dashboard
 
 bootstrap: brew apply audiotee mictee delegate-codex-home
 
@@ -104,5 +106,11 @@ test-recorder:
 # renames over its target, which would turn a stowed symlink into a plain file.
 delegate-wizard:
 	python3 $(CURDIR)/agents/skills/delegate/scripts/setup.py --config-dir $(CURDIR)/stow/delegate/.config/delegate $(foreach f,$(DELEGATE_ROWS),--effort-rows $(CURDIR)/$(f)) $(WIZARD_ARGS)
+
+delegate-dashboard:
+	@test "$${HERDR_ENV:-}" = 1
+	@test -n "$${HERDR_PANE_ID:-}"
+	@"$${HERDR_BIN_PATH:-herdr}" plugin link --enabled "$(CURDIR)/tools/delegate-dashboard"
+	@python3 "$(CURDIR)/tools/delegate-dashboard/open.py" --placement "$(DELEGATE_DASHBOARD_PLACEMENT)" --target-pane "$${HERDR_PANE_ID}"
 
 #   references/  — reference material pulled with the repo but not provisioned by brew/stow/skills (e.g. personal CLAUDE.md for the work Mac to cherry-pick from)

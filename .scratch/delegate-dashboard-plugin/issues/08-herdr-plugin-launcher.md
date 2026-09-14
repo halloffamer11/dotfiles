@@ -17,10 +17,26 @@ Throwaway branch only; never merged to `main`.
 
 **Blocked by:** 05 Read-only dashboard pinned to one project
 
-**Status:** ready-for-agent
+**Status:** implemented; integrated launch verification awaits `dashboard.py`
 
-- [ ] The plugin manifest declares one pane entrypoint that accepts Herdr's supported placements.
+**Branch:** `delegate-dashboard-t08` (uncommitted working tree; no commit made)
+
+- [x] The plugin manifest declares one pane entrypoint; the opener supports split, tab, zoomed, overlay, and popup placements.
 - [ ] Launch resolves the invoking project and the dashboard shows that identity; changing Herdr focus afterwards does not change it.
-- [ ] One task-runner target prepares, links and opens the plugin as a split beside the current pane, and is documented where the Makefile documents its targets.
-- [ ] The manifest contains no ranking, catalog or Meter logic.
-- [ ] The Shift-U popup configuration is unchanged.
+- [x] One task-runner target prepares, links and opens the plugin as a split beside the current pane, and is documented where the Makefile documents its targets.
+- [x] The manifest contains no ranking, catalog or Meter logic.
+- [x] The Shift-U popup configuration is unchanged.
+
+## Implementation evidence
+
+- `make delegate-dashboard` requires a Herdr pane, links this directory, and opens
+  the one `dashboard` entrypoint with `--no-focus`; the default placement is `split`.
+- `DELEGATE_DASHBOARD_PLACEMENT=tab|zoomed|overlay|popup make delegate-dashboard`
+  selects the corresponding placement. The installed 0.9.0 CLI handles the first
+  four; `open.py` sends `plugin.pane.open` over `HERDR_SOCKET_PATH` for `popup`.
+- `launcher.py --cwd DIRECTORY` wins over `worktree.checkout_path`, then
+  `focused_pane_cwd`, then `workspace_cwd`. It rejects an implicit plugin-root
+  selection and passes the resolved directory to `dashboard.py --cwd`.
+- Compile, help, TOML parsing, context-resolution fixtures, and `make -n` checks
+  passed on 2026-09-14. Live launch and pinning remain unverified until
+  `tools/delegate-dashboard/dashboard.py` lands; no Herdr pane was opened here.
