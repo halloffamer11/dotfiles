@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compact read-only terminal dashboard for one pinned delegate project."""
+"""Compact terminal dashboard for one pinned delegate project."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ RESET = "\033[0m"
 MUTED = "#8d8d89"
 FOREGROUND = "#e7e7e7"
 ERROR = "#d76563"
+SUCCESS = "#78bd74"
 
 
 def foreground(hex_color: str) -> str:
@@ -48,7 +49,7 @@ def source_label(source, state):
     return f"global:{os.path.basename(source)}"
 
 
-def body_lines(state, width):
+def body_lines(state, width, selected_lane=None):
     """Return semantic terminal lines; spacing is deliberately not a test seam."""
     lines = []
     for tier in state["tiers"]:
@@ -70,13 +71,14 @@ def body_lines(state, width):
             lines.append(("┃    No carried lanes", MUTED, False))
         for row in tier["rows"]:
             leader_mark = "◆" if row["lane"] == tier["leader"] else "·"
+            cursor_mark = ">" if row["lane"] == selected_lane else " "
             order = "—" if row["order"] is None else str(row["order"])
             eligible = "yes" if row["eligible"] else "no"
             row_color = color if leader_mark == "◆" else FOREGROUND
             is_leader = leader_mark == "◆"
             if width >= 132:
                 text = (
-                    f"┃ {leader_mark}  {order:>3}  {row['lane']:<24} "
+                    f"┃ {cursor_mark}{leader_mark} {order:>3}  {row['lane']:<24} "
                     f"{row['model']:<20} {row['effort']:<7} {row['harness']:<8} "
                     f"{row['meter']:<17} {percent(row['remaining']):>4}  "
                     f"{pace(row['pace']):>6}  {eligible:<3} {row['reason']}"
@@ -85,7 +87,7 @@ def body_lines(state, width):
             else:
                 lines.append(
                     (
-                        f"┃ {leader_mark} {order:>3} {row['lane']} · {row['model']} / "
+                        f"┃ {cursor_mark}{leader_mark} {order:>3} {row['lane']} · {row['model']} / "
                         f"{row['effort']} @ {row['harness']} · Meter {row['meter']}",
                         row_color,
                         is_leader,
@@ -103,7 +105,7 @@ def body_lines(state, width):
     return lines
 
 
-def compose(state, offset, width, height):
+def compose(state, offset, width, height, selected_lane=None, *, follow_selection=True):
     """Compose a clipped viewport with persistent project identity and key help."""
     gate = state["policy"]["gate"]
     margin = state["policy"]["margin"]
@@ -111,7 +113,7 @@ def compose(state, offset, width, height):
     usage = state["usage"]
     header = [
         (f"Pinned project  {project['name']}  {project['root']}", FOREGROUND, True),
-        ("Delegate project routing  /  prototype · read-only", FOREGROUND, True),
+        ("Delegate project routing  /  prototype", FOREGROUND, True),
         (
             f"Gate {gate['display']} [{source_label(gate['source'], state)}]   "
             f"Margin {margin['display']} [{source_label(margin['source'], state)}]",
@@ -128,33 +130,61 @@ def compose(state, offset, width, height):
         header.append((usage["detail"], ERROR, False))
     if state.get("error"):
         header.append((state["error"], ERROR, True))
+    save = state.get("save", {})
+    if save.get("status") != "idle" and save.get("detail"):
+        color = SUCCESS if save["status"] == "saved" else ERROR
+        header.append((save["detail"], color, save["status"] != "saved"))
 
     footer_height = 1
     if height <= footer_height:
-        return [("j/k scroll · r reload · q close", MUTED, False)], 0
+        return [("j/k select · J/K move · r reload · q close", MUTED, False)], 0
     if height == 2:
-        return [header[0], ("j/k scroll · r reload · q close", MUTED, False)], 0
+        return [header[0], ("j/k select · J/K move · r reload · q close", MUTED, False)], 0
 
     max_header = max(1, height - footer_height - 1)
     header = header[:max_header]
     available = max(1, height - len(header) - footer_height)
-    body = body_lines(state, width)
+    body = body_lines(state, width, selected_lane)
     max_offset = max(0, len(body) - available)
     offset = min(max(0, offset), max_offset)
+    selected_line = next(
+        (index for index, (text, _color, _bold) in enumerate(body) if text.startswith("┃ >")),
+        None,
+    )
+    if follow_selection and selected_line is not None:
+        if selected_line < offset:
+            offset = selected_line
+        elif selected_line >= offset + available:
+            offset = selected_line - available + 1
     visible = body[offset : offset + available]
     extent = "all" if not body else f"{offset + 1}–{min(len(body), offset + available)}/{len(body)}"
-    footer = [(f"j/k or ↑/↓ scroll · PgUp/PgDn · r reload · q close   [{extent}]", MUTED, False)]
+    footer = [(
+        f"jk/↑↓ select · JK/⇧↑↓ move · Pg scroll · r reload · q close [{extent}]",
+        MUTED,
+        False,
+    )]
     return header + visible + footer, offset
 
 
-def draw(state, offset):
+def draw(state, offset, selected_lane=None, *, follow_selection=True):
     size = shutil.get_terminal_size((100, 30))
-    lines, offset = compose(state, offset, size.columns, size.lines)
+    lines, offset = compose(
+        state,
+        offset,
+        size.columns,
+        size.lines,
+        selected_lane,
+        follow_selection=follow_selection,
+    )
     rendered = [paint(text, color, bold=bold, width=size.columns) for text, color, bold in lines]
     rendered.extend([""] * max(0, size.lines - len(rendered)))
     sys.stdout.write("\033[H" + "\033[K\n".join(rendered[: size.lines]) + "\033[K")
     sys.stdout.flush()
-    return offset, len(body_lines(state, size.columns))
+    return offset, len(body_lines(state, size.columns, selected_lane))
+
+
+def carried_lane_names(state):
+    return [row["lane"] for tier in state["tiers"] for row in tier["rows"]]
 
 
 def run_terminal(model: DashboardModel) -> int:
@@ -165,6 +195,9 @@ def run_terminal(model: DashboardModel) -> int:
     fd = sys.stdin.fileno()
     previous = termios.tcgetattr(fd)
     offset = 0
+    names = carried_lane_names(model.state)
+    selected = names[0] if names else None
+    follow_selection = True
     try:
         tty.setcbreak(fd)
         sys.stdout.write("\033[?1049h\033[?25l\033[2J")
@@ -172,9 +205,19 @@ def run_terminal(model: DashboardModel) -> int:
         while True:
             changed = model.refresh_if_changed()
             if changed:
+                names = carried_lane_names(model.state)
+                if selected not in names:
+                    selected = names[0] if names else None
+                follow_selection = True
                 dirty = True
             if dirty:
-                offset, total = draw(model.state, offset)
+                offset, total = draw(
+                    model.state,
+                    offset,
+                    selected,
+                    follow_selection=follow_selection,
+                )
+                follow_selection = False
                 dirty = False
 
             ready, _, _ = select.select([fd], [], [], 0.5)
@@ -183,10 +226,20 @@ def run_terminal(model: DashboardModel) -> int:
             key = os.read(fd, 16).decode("utf-8", errors="ignore")
             if key in ("q", "Q", "\x03"):
                 return 0
-            if key in ("j", "\x1b[B"):
-                offset += 1
-            elif key in ("k", "\x1b[A"):
-                offset = max(0, offset - 1)
+            names = carried_lane_names(model.state)
+            selected_index = names.index(selected) if selected in names else 0
+            if key in ("j", "\x1b[B") and names:
+                selected = names[min(len(names) - 1, selected_index + 1)]
+                follow_selection = True
+            elif key in ("k", "\x1b[A") and names:
+                selected = names[max(0, selected_index - 1)]
+                follow_selection = True
+            elif key in ("K", "\x1b[1;2A") and selected is not None:
+                model.move_lane(selected, -1)
+                follow_selection = True
+            elif key in ("J", "\x1b[1;2B") and selected is not None:
+                model.move_lane(selected, 1)
+                follow_selection = True
             elif key in ("\x1b[6~", " "):
                 offset += 8
             elif key in ("\x1b[5~",):
@@ -208,7 +261,7 @@ def run_terminal(model: DashboardModel) -> int:
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(
-        description="Open the read-only delegate dashboard pinned to one Git project."
+        description="Open the delegate dashboard pinned to one Git project."
     )
     parser.add_argument("--cwd", required=True, help="directory inside the Git project to pin")
     parser.add_argument("--config-dir", help="directory containing delegate lanes.json and routing.json")

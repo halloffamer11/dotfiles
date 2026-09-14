@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only state model for the delegate dashboard prototype.
+"""State model for the delegate dashboard prototype.
 
 The model resolves one Git project during construction, reads only cached Meter
 observations, and delegates every eligibility and leader decision to
@@ -8,6 +8,7 @@ observations, and delegates every eligibility and leader decision to
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -83,11 +84,18 @@ def _file_signature(path: Path) -> tuple[str, str]:
     return ("bytes", hashlib.sha256(raw).hexdigest())
 
 
+def _bytes_signature(raw: bytes | None) -> tuple[str, str]:
+    if raw is None:
+        return ("missing", "")
+    return ("bytes", hashlib.sha256(raw).hexdigest())
+
+
 class DashboardModel:
     """Public, JSON-safe dashboard state pinned to one resolved Git project.
 
     ``state`` is replaced after every successful refresh. ``refresh_if_changed``
-    watches the pinned project's routing document and the Meter cache by bytes.
+    watches the pinned project's routing document, both global policy documents,
+    and the Meter cache by bytes.
     A bad policy reload leaves the last valid rows visible with ``state['error']``;
     a missing or malformed Meter cache is rebuilt as explicit unknown data.
     """
@@ -109,6 +117,13 @@ class DashboardModel:
         self.config_dir = (
             Path(config_dir).expanduser().resolve() if config_dir is not None else None
         )
+        global_dir = (
+            self.config_dir
+            if self.config_dir is not None
+            else Path(catalog.CONFIG_DIR).expanduser().resolve()
+        )
+        self.global_lanes_path = global_dir / "lanes.json"
+        self.global_routing_path = global_dir / "routing.json"
         if meters_path is None:
             import os
 
@@ -128,37 +143,114 @@ class DashboardModel:
         )
         self.state: dict[str, Any] = {}
         self._revision = 0
-        self._watch_signatures: tuple[tuple[str, str], tuple[str, str]] | None = None
+        self._watch_signatures: tuple[tuple[str, str], ...] | None = None
+        self._loaded_policy_bytes: bytes | None = None
+        self._project_doc: dict[str, Any] = {}
+        self._global_lanes_doc: dict[str, Any] = {}
+        self._global_routing_doc: dict[str, Any] = {}
         self.refresh()
 
-    def _signatures(self) -> tuple[tuple[str, str], tuple[str, str]]:
+    def _signatures(self) -> tuple[tuple[str, str], ...]:
         return (
             _file_signature(self.project_policy_path),
             _file_signature(self.meters_path),
+            _file_signature(self.global_lanes_path),
+            _file_signature(self.global_routing_path),
         )
 
-    def _load_meters(self) -> tuple[dict[str, Any], str, str | None]:
+    @staticmethod
+    def _read_optional_bytes(path: Path) -> bytes | None:
+        try:
+            return path.read_bytes()
+        except FileNotFoundError:
+            return None
+
+    @staticmethod
+    def _load_json_snapshot(path: Path) -> tuple[dict[str, Any], bytes]:
+        try:
+            raw = path.read_bytes()
+        except OSError as exc:
+            raise DashboardError(f"{path}: cannot read: {exc}") from exc
+        try:
+            doc = _strict_json(raw)
+        except (UnicodeError, ValueError) as exc:
+            raise DashboardError(f"{path}: malformed JSON: {exc}") from exc
+        if not isinstance(doc, dict):
+            raise DashboardError(f"{path}: document must be a JSON object")
+        return doc, raw
+
+    def _load_project_snapshot(self) -> tuple[dict[str, Any], bytes | None]:
+        try:
+            raw = self._read_optional_bytes(self.project_policy_path)
+        except OSError as exc:
+            raise DashboardError(f"{self.project_policy_path}: cannot read: {exc}") from exc
+        if raw is None:
+            return {}, None
+        try:
+            doc = _strict_json(raw)
+        except (UnicodeError, ValueError) as exc:
+            raise DashboardError(f"{self.project_policy_path}: malformed JSON: {exc}") from exc
+        if not isinstance(doc, dict):
+            raise DashboardError(f"{self.project_policy_path}: document must be a JSON object")
+        return doc, raw
+
+    def _load_meters(
+        self,
+    ) -> tuple[dict[str, Any], str, str | None, tuple[str, str]]:
         try:
             raw = self.meters_path.read_bytes()
         except FileNotFoundError:
-            return {}, "missing", "Meter cache is missing; observations are unknown."
+            return (
+                {},
+                "missing",
+                "Meter cache is missing; observations are unknown.",
+                _bytes_signature(None),
+            )
         except OSError as exc:
-            return {}, "unreadable", f"Meter cache cannot be read; observations are unknown: {exc}"
+            return (
+                {},
+                "unreadable",
+                f"Meter cache cannot be read; observations are unknown: {exc}",
+                _file_signature(self.meters_path),
+            )
+        signature = _bytes_signature(raw)
         try:
             doc = _strict_json(raw)
         except (UnicodeError, ValueError):
-            return {}, "malformed", "Meter cache is malformed; observations are unknown."
+            return (
+                {},
+                "malformed",
+                "Meter cache is malformed; observations are unknown.",
+                signature,
+            )
         if not _valid_meter_document(doc):
-            return {}, "malformed", "Meter cache has invalid observations; values are unknown."
-        return doc, "ok", None
+            return (
+                {},
+                "malformed",
+                "Meter cache has invalid observations; values are unknown.",
+                signature,
+            )
+        return doc, "ok", None, signature
 
     @staticmethod
     def _display_order(row: dict[str, Any]) -> tuple[int, int, str]:
         order = row.get("order")
         return (1 if order is None else 0, order if isinstance(order, int) else 0, row["lane"])
 
-    def _build_state(self) -> dict[str, Any]:
+    def _build_state(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        global_lanes, global_lanes_raw = self._load_json_snapshot(self.global_lanes_path)
+        global_routing, global_routing_raw = self._load_json_snapshot(self.global_routing_path)
+        project_doc, project_raw = self._load_project_snapshot()
         try:
+            if project_raw is not None:
+                catalog.validate_project_routing(
+                    project_doc,
+                    global_lanes,
+                    global_routing,
+                    source=str(self.project_policy_path),
+                    lanes_source=str(self.global_lanes_path),
+                    global_source=str(self.global_routing_path),
+                )
             effective = catalog.load_catalog(
                 cwd=str(self.project_root),
                 config_dir=str(self.config_dir) if self.config_dir is not None else None,
@@ -166,7 +258,7 @@ class DashboardModel:
         except catalog.CatalogError as exc:
             raise DashboardError(str(exc)) from exc
 
-        meters, meter_status, meter_detail = self._load_meters()
+        meters, meter_status, meter_detail, meter_signature = self._load_meters()
         previews = rank.tier_leaders(effective, meters, self.present)
         tiers = []
         for preview in previews:
@@ -203,7 +295,7 @@ class DashboardModel:
         routing = effective["routing"]
         sources = effective["sources"]
         self._revision += 1
-        return {
+        state = {
             "prototype": True,
             "project": {
                 "name": self.project_root.name,
@@ -232,12 +324,26 @@ class DashboardModel:
             "tiers": tiers,
             "revision": self._revision,
             "error": None,
+            "save": {"status": "idle", "detail": None},
         }
+        snapshot = {
+            "project_doc": project_doc,
+            "project_raw": project_raw,
+            "global_lanes": global_lanes,
+            "global_routing": global_routing,
+            "signatures": (
+                _bytes_signature(project_raw),
+                meter_signature,
+                _bytes_signature(global_lanes_raw),
+                _bytes_signature(global_routing_raw),
+            ),
+        }
+        return state, snapshot
 
     def refresh(self) -> dict[str, Any]:
         """Reload public state while retaining the pinned project identity."""
         try:
-            new_state = self._build_state()
+            new_state, snapshot = self._build_state()
         except DashboardError as exc:
             if not self.state:
                 self._watch_signatures = self._signatures()
@@ -246,8 +352,16 @@ class DashboardModel:
             new_state = dict(self.state)
             new_state["revision"] = self._revision
             new_state["error"] = f"Reload failed; showing last valid state: {exc}"
+            self._watch_signatures = self._signatures()
+        else:
+            self._project_doc = copy.deepcopy(snapshot["project_doc"])
+            self._loaded_policy_bytes = snapshot["project_raw"]
+            self._global_lanes_doc = snapshot["global_lanes"]
+            self._global_routing_doc = snapshot["global_routing"]
+            # These are the bytes used to build the state, not a later sample.
+            # If a file changed during the refresh, the next watch pass sees it.
+            self._watch_signatures = snapshot["signatures"]
         self.state = new_state
-        self._watch_signatures = self._signatures()
         return self.state
 
     def refresh_if_changed(self) -> bool:
@@ -258,3 +372,111 @@ class DashboardModel:
         self.refresh()
         return True
 
+    def _set_save_state(self, status: str, detail: str) -> None:
+        save = {"status": status, "detail": detail}
+        self.state = dict(self.state)
+        self.state["save"] = save
+
+    def _unsafe_policy_target(self) -> str | None:
+        """Explain a policy path that must not be replaced, or return None."""
+        if self.project_policy_path.is_symlink():
+            return "project routing path is a symlink; refusing to replace it"
+        resolved = self.project_policy_path.resolve(strict=False)
+        global_targets = {
+            self.global_lanes_path.resolve(strict=False),
+            self.global_routing_path.resolve(strict=False),
+        }
+        if resolved in global_targets:
+            return "project routing path resolves to a global delegate policy file"
+        return None
+
+    def save_project_policy(self, proposed: dict[str, Any]) -> bool:
+        """Validate and atomically save a complete proposed project document.
+
+        The final byte check prevents the ordinary stale-editor overwrite. There
+        is intentionally no broad filesystem lock in this prototype, so another
+        writer can still race between that last check and the atomic rename.
+        """
+        proposal = copy.deepcopy(proposed)
+        try:
+            catalog.validate_project_routing(
+                proposal,
+                self._global_lanes_doc,
+                self._global_routing_doc,
+                source=str(self.project_policy_path),
+                lanes_source=str(self.global_lanes_path),
+                global_source=str(self.global_routing_path),
+            )
+        except catalog.CatalogError as exc:
+            self._set_save_state("error", f"Not saved: {exc}")
+            return False
+
+        unsafe = self._unsafe_policy_target()
+        if unsafe is not None:
+            self._set_save_state("error", f"Not saved: {unsafe}")
+            return False
+
+        try:
+            current_raw = self._read_optional_bytes(self.project_policy_path)
+        except OSError as exc:
+            self._set_save_state("error", f"Not saved: cannot recheck project policy: {exc}")
+            return False
+        if current_raw != self._loaded_policy_bytes:
+            self.refresh()
+            self._set_save_state(
+                "conflict",
+                "Conflict: project routing changed externally; reloaded it. Repeat the action to save.",
+            )
+            return False
+
+        try:
+            catalog.write_json(str(self.project_policy_path), proposal)
+        except OSError as exc:
+            self._set_save_state("error", f"Not saved: {exc}")
+            return False
+
+        self.refresh()
+        if self.state.get("error"):
+            self._set_save_state("error", "Saved, but the resulting policy could not be reloaded.")
+            return False
+        self._set_save_state("saved", "Saved project policy.")
+        return True
+
+    def move_lane(self, lane_name: str, direction: int) -> bool:
+        """Move one carried lane by one position inside its existing Tier."""
+        if type(direction) is not int or direction not in (-1, 1):
+            self._set_save_state("error", "Not saved: movement must be one position up or down.")
+            return False
+
+        selected_tier = None
+        selected_index = None
+        for tier in self.state.get("tiers", []):
+            names = [row["lane"] for row in tier["rows"]]
+            if lane_name in names:
+                selected_tier = tier
+                selected_index = names.index(lane_name)
+                break
+        if selected_tier is None or selected_index is None:
+            self._set_save_state("error", f"Not saved: lane '{lane_name}' is not carried.")
+            return False
+
+        destination = selected_index + direction
+        if destination < 0 or destination >= len(selected_tier["rows"]):
+            self._set_save_state(
+                "error",
+                f"Not saved: '{lane_name}' is already at the Tier {selected_tier['tier']} boundary.",
+            )
+            return False
+
+        complete_order = []
+        for tier in self.state["tiers"]:
+            names = [row["lane"] for row in tier["rows"]]
+            if tier is selected_tier:
+                names[selected_index], names[destination] = names[destination], names[selected_index]
+            complete_order.extend(names)
+
+        proposal = copy.deepcopy(self._project_doc)
+        if not proposal:
+            proposal["version"] = catalog.ROUTING_VERSION
+        proposal["project_order"] = complete_order
+        return self.save_project_policy(proposal)
