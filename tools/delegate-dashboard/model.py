@@ -381,6 +381,8 @@ class DashboardModel:
         """Explain a policy path that must not be replaced, or return None."""
         if self.project_policy_path.is_symlink():
             return "project routing path is a symlink; refusing to replace it"
+        if self.project_policy_path.parent.resolve() != self.project_policy_path.parent:
+            return "project policy directory is a symlink; refusing to write outside the pinned path"
         resolved = self.project_policy_path.resolve(strict=False)
         global_targets = {
             self.global_lanes_path.resolve(strict=False),

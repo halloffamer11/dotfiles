@@ -306,6 +306,18 @@ class DashboardModelTest(unittest.TestCase):
         self.assertEqual((self.config / "routing.json").read_bytes(), global_before)
         self.assertEqual(dashboard.state["save"]["status"], "error")
 
+    def test_symlinked_policy_directory_cannot_write_outside_pinned_project(self):
+        outside = Path(self.temp.name) / "other-policy"
+        target = outside / "routing.json"
+        write_json(target, {"note": "belongs to another project"})
+        (self.root / ".delegate").symlink_to(outside, target_is_directory=True)
+        before = target.read_bytes()
+        dashboard = self.make_model()
+
+        self.assertFalse(dashboard.move_lane("sol-high@codex", -1))
+        self.assertEqual(target.read_bytes(), before)
+        self.assertEqual(dashboard.state["save"]["status"], "error")
+
     def test_missing_and_malformed_meter_cache_are_unknown_not_invented(self):
         missing = Path(self.temp.name) / "missing.json"
         state = self.make_model(missing).state
