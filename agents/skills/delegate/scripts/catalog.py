@@ -690,6 +690,7 @@ def effective_routing(cwd=None, config_dir=None, lanes_doc=None, lanes_source=No
 
     if project_path and os.path.isfile(project_path):
         project_doc = load_json(project_path)
+        validate_routing(project_doc, source=project_path, partial=True)
         if lanes_doc is None and "project_order" in project_doc:
             lanes_source = os.path.join(base_dir, "lanes.json")
             lanes_doc = load_json(lanes_source)
@@ -702,8 +703,6 @@ def effective_routing(cwd=None, config_dir=None, lanes_doc=None, lanes_source=No
                 lanes_source=lanes_source or "lanes.json",
                 global_source=global_path,
             )
-        else:
-            validate_routing(project_doc, source=project_path, partial=True)
         routing, sources = merge_routing(
             global_doc,
             project_doc,

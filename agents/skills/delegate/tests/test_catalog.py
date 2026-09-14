@@ -1010,5 +1010,15 @@ with tempfile.TemporaryDirectory() as td:
         repr((before_pick, before_tier2, after_pick, previews[1]["leader"])),
     )
 
+    catalog.write_json(project_path, 42)
+    error = check_catalog_error(
+        catalog.effective_routing, cwd=project_dir, config_dir=cfg_dir
+    )
+    record(
+        "8.9 malformed project document raises a catalog error at the routing boundary",
+        error is not None and "must be a JSON object" in error,
+        str(error),
+    )
+
 
 sys.exit(1 if fails else 0)
