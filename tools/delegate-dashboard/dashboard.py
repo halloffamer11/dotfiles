@@ -383,7 +383,7 @@ def main(argv=None):
         sys.stderr.write(f"dashboard: {exc}\n")
         return 1
     if args.json:
-        json.dump(model.state, sys.stdout, indent=2, ensure_ascii=False)
+        json.dump(model.state, sys.stdout, indent=2, ensure_ascii=False, allow_nan=False)
         sys.stdout.write("\n")
         return 0
     return run_terminal(model)

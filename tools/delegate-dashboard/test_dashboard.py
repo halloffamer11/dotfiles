@@ -648,11 +648,28 @@ class DashboardModelTest(unittest.TestCase):
         self.assertEqual(state["usage"]["status"], "malformed")
         json.dumps(state, allow_nan=False)
 
+    def test_invalid_cache_timestamp_is_unknown_and_json_safe_for_all_callers(self):
+        effective = catalog.load_catalog(cwd=self.root, config_dir=self.config)
+        for timestamp in ('1e309', '"yesterday"', 'true', '1' + '0' * 400):
+            with self.subTest(timestamp=timestamp):
+                raw = ('{"probed_at":' + timestamp + ',"lanes":['
+                       '{"lane":"codex-a","r":0.01,"pace":0.5}]}')
+                self.meters.write_text(raw, encoding="utf-8")
+                dashboard = self.make_model()
+                self.assertEqual(dashboard.state["usage"]["status"], "malformed")
+                self.assertIsNone(dashboard.state["usage"]["probed_at"])
+                json.dumps(dashboard.state, allow_nan=False)
+                self.assertEqual(
+                    rank.rank("impl", effective, json.loads(raw), dashboard.present),
+                    rank.rank("impl", effective, {}, dashboard.present),
+                )
+
     def test_cache_validity_matches_canonical_rank_for_wrapped_and_legacy_inputs(self):
         self.write_meters(a_r=0.05, a_pace=0.5, b_r=0.7, b_pace=0.8)
         healthy = json.loads(self.meters.read_text())
         mixed = {"lanes": healthy["lanes"] + [{"lane": "unused", "pace": "bad"}]}
         legacy = {entry["lane"]: entry for entry in healthy["lanes"]}
+        legacy["probed_at"] = {"status": "unknown"}
         for document, status in ((mixed, "malformed"), (legacy, "ok")):
             with self.subTest(status=status):
                 write_json(self.meters, document)
@@ -664,6 +681,7 @@ class DashboardModelTest(unittest.TestCase):
                     [tier["leader"] for tier in previews],
                 )
                 self.assertEqual(dashboard.state["usage"]["status"], status)
+                self.assertIsNone(dashboard.state["usage"]["probed_at"])
                 for shown, preview in zip(dashboard.state["tiers"], previews):
                     expected = {row["lane"]: row for row in preview["rows"]}
                     for row in shown["rows"]:

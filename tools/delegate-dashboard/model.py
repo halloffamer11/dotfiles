@@ -331,7 +331,7 @@ class DashboardModel:
                 "path": str(self.meters_path),
                 "status": meter_status,
                 "detail": meter_detail,
-                "probed_at": meters.get("probed_at") if meters else None,
+                "probed_at": meters.get("probed_at") if "lanes" in meters else None,
             },
             "tiers": tiers,
             "revision": self._revision,
