@@ -10,12 +10,22 @@ This makes an exact-Tier leader (ticket 03) a second caller instead of a copy of
 arithmetic.
 
 Part of [01 Prototype the project delegation dashboard](01-prototype-project-delegation-dashboard.md).
-Lands on `main`.
+Landing target: `main`; this ticket worktree is not merged.
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** implemented in this isolated ticket worktree; not landed on `main`
 
-- [ ] The selection rule exists once and takes a Tier range; Class ranking calls it with the Class floor or per-job Tier and the Class ceiling.
-- [ ] Every Class Pick, reason, veto text and row order is unchanged for the same catalog, Meters and harnesses.
-- [ ] The existing catalog, ranking, dispatch and report suites pass without edits to their expectations.
+- [x] The selection rule exists once in `rank_range`; Class ranking calls it with the Class floor (or per-job Tier) and the Class ceiling.
+- [x] Every Class Pick, reason, veto text and row order is unchanged for the same catalog, Meters and harnesses.
+- [x] The existing catalog, ranking, dispatch and report suites pass without edits to their expectations.
+
+## Implementation and evidence
+
+- `agents/skills/delegate/scripts/rank.py` exposes `rank_range` as the canonical
+  inclusive-Tier selection boundary; `rank` only resolves Class bounds and
+  preserves Class-specific reason text before calling it.
+- Passing checks: `test_catalog.py`, `test_rank.py`, `test_dispatch.py`, and
+  `python3 -m py_compile agents/skills/delegate/scripts/rank.py`.
+- `test_report.py` passes with the inherited `NO_COLOR` setting cleared. With
+  `NO_COLOR=1`, only its color-output assertion fails; report code was not changed.
