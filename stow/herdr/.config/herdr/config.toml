@@ -65,3 +65,10 @@ command = "lazygit"
 key = "prefix+u"              # hunk: review working-tree changes, auto-reloading
 type = "pane"
 command = "hunk diff --watch"
+
+[[keys.command]]
+key = "prefix+shift+u"        # usage: cached cross-harness Delegate meters
+type = "popup"
+command = '''python3 "$HOME/.agents/skills/delegate/scripts/report.py" statusline; printf '\nPress Enter to close'; read -r _'''
+width = "85%"
+height = "40%"
