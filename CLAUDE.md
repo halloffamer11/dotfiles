@@ -15,6 +15,13 @@ Machine configuration and agent tooling managed as one Git repository.
 
 ## Active work
 
+**Project dashboard prototype**: branch `worktree/delegate-monitor-herdr`; spec
+`docs/superpowers/specs/2026-09-13-delegate-dashboard-plugin.md`, tickets
+`.scratch/delegate-dashboard-plugin/issues/`. Before changing its TUI, launcher,
+or safe-save behavior, read `tools/delegate-dashboard/CLAUDE.md`. Backend tickets
+02-04 are separate commits for eventual `main` integration; the prototype UI stays
+on this branch. Ticket 09 owns live evidence and Orin's pending usability verdict.
+
 The delegate redesign is the main live thread. Spec
 `docs/superpowers/specs/2026-09-08-delegate-redesign.md`; tickets in
 `.scratch/delegate-redesign/issues/`, each carrying its own decisions and a
