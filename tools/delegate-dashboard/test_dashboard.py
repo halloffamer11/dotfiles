@@ -450,6 +450,103 @@ class DashboardModelTest(unittest.TestCase):
         self.assertEqual(global_routing["version"], "delegate-routing.v1")
         self.assertIn("classes", global_routing)
 
+    def test_save_rejects_disabled_global_lane_without_refresh(self):
+        project_policy = self.root / ".delegate" / "routing.json"
+        original = {
+            "version": "delegate-routing.v1",
+            "note": "keep",
+            "project_order": ["terra-high@codex", "sol-high@codex"],
+        }
+        write_json(project_policy, original)
+        dashboard = self.make_model()
+        before = project_policy.read_bytes()
+
+        lanes = json.loads((self.config / "lanes.json").read_text())
+        lanes["lanes"]["terra-high@codex"]["enabled"] = False
+        write_json(self.config / "lanes.json", lanes)
+
+        self.assertFalse(dashboard.move_lane("sol-high@codex", -1))
+        self.assertEqual(project_policy.read_bytes(), before)
+        self.assertEqual(dashboard.state["save"]["status"], "error")
+        self.assertIsNotNone(dashboard.state["save"]["detail"])
+
+        edit = dashboard.begin_percentage_edit("gate")
+        self.assertFalse(dashboard.save_percentage_edit(edit, "25"))
+        self.assertEqual(project_policy.read_bytes(), before)
+        self.assertEqual(dashboard.state["save"]["status"], "error")
+        self.assertEqual(json.loads(project_policy.read_text()), original)
+
+    def test_save_rejects_stale_merged_class_constraint_without_refresh(self):
+        project_policy = self.root / ".delegate" / "routing.json"
+        original = {
+            "version": "delegate-routing.v1",
+            "classes": {"impl": {"ceiling": 2}},
+            "note": "keep",
+        }
+        write_json(project_policy, original)
+        dashboard = self.make_model()
+        before = project_policy.read_bytes()
+
+        routing = json.loads((self.config / "routing.json").read_text())
+        routing["classes"]["impl"]["floor"] = 3
+        write_json(self.config / "routing.json", routing)
+
+        self.assertFalse(dashboard.move_lane("sol-high@codex", -1))
+        self.assertEqual(project_policy.read_bytes(), before)
+        self.assertEqual(dashboard.state["save"]["status"], "error")
+        self.assertIsNotNone(dashboard.state["save"]["detail"])
+
+        edit = dashboard.begin_percentage_edit("margin")
+        self.assertFalse(dashboard.save_percentage_edit(edit, "10"))
+        self.assertEqual(project_policy.read_bytes(), before)
+        self.assertEqual(dashboard.state["save"]["status"], "error")
+        self.assertEqual(json.loads(project_policy.read_text()), original)
+
+    def test_save_rejects_malformed_global_after_failed_refresh(self):
+        project_policy = self.root / ".delegate" / "routing.json"
+        original = {
+            "version": "delegate-routing.v1",
+            "note": "keep",
+            "gate": 0.15,
+        }
+        write_json(project_policy, original)
+        dashboard = self.make_model()
+        before = project_policy.read_bytes()
+
+        (self.config / "lanes.json").write_text("{broken", encoding="utf-8")
+        dashboard.refresh()
+        self.assertIsNotNone(dashboard.state["error"])
+        self.assertIn("Reload failed", dashboard.state["error"])
+
+        self.assertFalse(dashboard.move_lane("sol-high@codex", -1))
+        self.assertEqual(project_policy.read_bytes(), before)
+        self.assertEqual(dashboard.state["save"]["status"], "error")
+        self.assertIsNotNone(dashboard.state["save"]["detail"])
+
+        edit = dashboard.begin_percentage_edit("gate")
+        self.assertFalse(dashboard.save_percentage_edit(edit, "20"))
+        self.assertEqual(project_policy.read_bytes(), before)
+        self.assertEqual(dashboard.state["save"]["status"], "error")
+        self.assertEqual(json.loads(project_policy.read_text()), original)
+
+    def test_save_still_succeeds_against_valid_fresh_globals(self):
+        project_policy = self.root / ".delegate" / "routing.json"
+        write_json(project_policy, {"version": "delegate-routing.v1", "note": "keep"})
+        dashboard = self.make_model()
+
+        routing = json.loads((self.config / "routing.json").read_text())
+        routing["gate"] = 0.05
+        write_json(self.config / "routing.json", routing)
+        real_validator = catalog.validate_project_routing
+
+        with mock.patch.object(catalog, "validate_project_routing", wraps=real_validator) as validator:
+            self.assertTrue(dashboard.move_lane("sol-high@codex", -1))
+        self.assertGreaterEqual(validator.call_count, 1)
+        self.assertEqual(validator.call_args_list[0].args[2]["gate"], 0.05)
+        saved = json.loads(project_policy.read_text())
+        self.assertEqual(saved["note"], "keep")
+        self.assertEqual(dashboard.state["save"]["status"], "saved")
+
     def test_external_edit_conflicts_without_overwriting_and_next_action_can_save(self):
         project_policy = self.root / ".delegate" / "routing.json"
         write_json(project_policy, {"version": "delegate-routing.v1", "note": "loaded"})

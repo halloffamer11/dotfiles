@@ -447,21 +447,26 @@ class DashboardModel:
     ) -> bool:
         """Validate and atomically save a complete proposed project document.
 
-        The final byte check prevents the ordinary stale-editor overwrite. There
-        is intentionally no broad filesystem lock in this prototype, so another
-        writer can still race between that last check and the atomic rename.
+        Global lane and routing documents are re-read immediately before
+        validation so a stale refresh snapshot cannot authorize a now-invalid
+        save. The final byte check prevents the ordinary stale-editor overwrite.
+        There is intentionally no broad filesystem lock in this prototype, so
+        another writer can still race between that last check and the atomic
+        rename.
         """
         proposal = copy.deepcopy(proposed)
         try:
+            global_lanes, _ = self._load_json_snapshot(self.global_lanes_path)
+            global_routing, _ = self._load_json_snapshot(self.global_routing_path)
             catalog.validate_project_routing(
                 proposal,
-                self._global_lanes_doc,
-                self._global_routing_doc,
+                global_lanes,
+                global_routing,
                 source=str(self.project_policy_path),
                 lanes_source=str(self.global_lanes_path),
                 global_source=str(self.global_routing_path),
             )
-        except catalog.CatalogError as exc:
+        except (DashboardError, catalog.CatalogError) as exc:
             self._set_save_state("error", f"Not saved: {exc}")
             return False
 
