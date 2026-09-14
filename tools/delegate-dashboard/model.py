@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 import hashlib
 import json
-import math
 from pathlib import Path
 import shutil
 import sys
@@ -83,40 +82,6 @@ def _strict_json(raw: bytes) -> Any:
         raise ValueError(f"{value} is not valid JSON")
 
     return json.loads(raw.decode("utf-8"), parse_constant=reject_constant)
-
-
-def _number_or_none(value: Any, *, fraction: bool = False) -> bool:
-    if value is None:
-        return True
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return False
-    try:
-        number = float(value)
-    except OverflowError:
-        return False
-    if not math.isfinite(number):
-        return False
-    return 0 <= number <= 1 if fraction else number >= 0
-
-
-def _valid_meter_document(doc: Any) -> bool:
-    """Accept the cache shape ranking understands, without repairing values."""
-    if not isinstance(doc, dict) or not isinstance(doc.get("lanes"), list):
-        return False
-    for observation in doc["lanes"]:
-        if not isinstance(observation, dict):
-            return False
-        if not isinstance(observation.get("lane"), str) or not observation["lane"]:
-            return False
-        if not _number_or_none(observation.get("r"), fraction=True):
-            return False
-        if not _number_or_none(observation.get("pace")):
-            return False
-        if not _number_or_none(observation.get("remaining_weekly"), fraction=True):
-            return False
-        if "status" in observation and not isinstance(observation["status"], str):
-            return False
-    return True
 
 
 def _file_signature(path: Path) -> tuple[str, str]:
@@ -269,7 +234,7 @@ class DashboardModel:
                 "Meter cache is malformed; observations are unknown.",
                 signature,
             )
-        if not _valid_meter_document(doc):
+        if rank.meter_observations(doc) is None:
             return (
                 {},
                 "malformed",

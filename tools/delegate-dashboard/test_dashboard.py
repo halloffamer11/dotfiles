@@ -648,6 +648,32 @@ class DashboardModelTest(unittest.TestCase):
         self.assertEqual(state["usage"]["status"], "malformed")
         json.dumps(state, allow_nan=False)
 
+    def test_cache_validity_matches_canonical_rank_for_wrapped_and_legacy_inputs(self):
+        self.write_meters(a_r=0.05, a_pace=0.5, b_r=0.7, b_pace=0.8)
+        healthy = json.loads(self.meters.read_text())
+        mixed = {"lanes": healthy["lanes"] + [{"lane": "unused", "pace": "bad"}]}
+        legacy = {entry["lane"]: entry for entry in healthy["lanes"]}
+        for document, status in ((mixed, "malformed"), (legacy, "ok")):
+            with self.subTest(status=status):
+                write_json(self.meters, document)
+                dashboard = self.make_model()
+                effective = catalog.load_catalog(cwd=self.root, config_dir=self.config)
+                previews = rank.tier_leaders(effective, document, dashboard.present)
+                self.assertEqual(
+                    [tier["leader"] for tier in dashboard.state["tiers"]],
+                    [tier["leader"] for tier in previews],
+                )
+                self.assertEqual(dashboard.state["usage"]["status"], status)
+                for shown, preview in zip(dashboard.state["tiers"], previews):
+                    expected = {row["lane"]: row for row in preview["rows"]}
+                    for row in shown["rows"]:
+                        self.assertEqual(row["eligible"], expected[row["lane"]]["eligible"])
+                        self.assertEqual(row["reason"], expected[row["lane"]]["reason"])
+                canonical = rank.rank("impl", effective, document, dashboard.present)
+                expected_input = {} if status == "malformed" else healthy
+                self.assertEqual(canonical, rank.rank("impl", effective, expected_input, dashboard.present))
+                json.dumps(canonical, allow_nan=False)
+
     def test_json_command_is_noninteractive(self):
         result = subprocess.run(
             [
