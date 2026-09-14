@@ -55,6 +55,12 @@ A capability level from 1 (lowest) to 4 (frontier) that Orin gives each lane in 
 A lane's place inside its tier, from 1, that Orin sets on the setup wizard's review page. Ranking sorts by tier, then order, then pace, then lane name; a lane without an order comes after every lane with one.
 _Avoid_: priority, rank (when you mean the order)
 
+**Project order**:
+A project's preferred order for lanes inside their existing tiers. It overrides Order for jobs in that project but does not change a lane's Tier.
+
+**Tier leader**:
+The lane ranking selects when selection is restricted to one Tier. It is a preview for that Tier, not the Pick for a Class range.
+
 **Class**:
 The kind of job: scout, mechanical, impl, review, or hard-impl.
 _Avoid_: task type, category
