@@ -54,6 +54,7 @@ CLI forms:
 """
 import argparse
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -65,6 +66,56 @@ if HERE not in sys.path:
 
 import catalog
 from catalog import CatalogError, CLASSES, HARNESSES, load_catalog
+
+
+def _valid_meter_number(value, *, fraction=False):
+    if value is None:
+        return True
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        number = float(value)
+    except OverflowError:
+        return False
+    return math.isfinite(number) and (0 <= number <= 1 if fraction else number >= 0)
+
+
+def meter_observations(document):
+    """Return validated observations by Meter, or None for a malformed document.
+
+    Accept the usage-cache envelope and the legacy bare Meter map. Invalid
+    observations make the whole document unknown, consistently for every caller.
+    No values are repaired and this boundary never probes a vendor.
+    """
+    if not isinstance(document, dict):
+        return None
+    if "lanes" in document:
+        if not isinstance(document["lanes"], list):
+            return None
+        observations = {}
+        for entry in document["lanes"]:
+            if not isinstance(entry, dict):
+                return None
+            name = entry.get("lane")
+            if not isinstance(name, str) or not name:
+                return None
+            observations[name] = entry
+        entries = [(entry["lane"], entry) for entry in document["lanes"]]
+    else:
+        observations = document
+        entries = document.items()
+    for name, observation in entries:
+        if not isinstance(name, str) or not name or not isinstance(observation, dict):
+            return None
+        if not _valid_meter_number(observation.get("r"), fraction=True):
+            return None
+        if not _valid_meter_number(observation.get("pace")):
+            return None
+        if not _valid_meter_number(observation.get("remaining_weekly"), fraction=True):
+            return None
+        if "status" in observation and not isinstance(observation["status"], str):
+            return None
+    return observations
 
 
 def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="tier"):
@@ -86,15 +137,7 @@ def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="
     gate = routing.get("gate", 0.1)
     reason_label = reason_label or "tier"
 
-    meter_map = {}
-    if isinstance(meters, dict):
-        lanes_list = meters.get("lanes")
-        if isinstance(lanes_list, list):
-            for entry in lanes_list:
-                if isinstance(entry, dict) and "lane" in entry:
-                    meter_map[entry["lane"]] = entry
-        else:
-            meter_map = meters
+    meter_map = meter_observations(meters) or {}
 
     present_set = set(present) if present else set()
     lanes = cat.get("lanes", {})
