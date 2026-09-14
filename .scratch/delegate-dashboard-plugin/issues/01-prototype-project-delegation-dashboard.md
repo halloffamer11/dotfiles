@@ -13,7 +13,7 @@ throwaway branch. 09 closes this ticket's boxes.
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-human — technical acceptance passed; usability verdict and independent review pending
+**Status:** ready-for-human — technical acceptance and independent review complete; usability verdict pending
 
 ## Acceptance
 
@@ -44,7 +44,8 @@ host, project pinning, and interaction that cannot be established below that bou
 Scope: committed on `worktree/delegate-monitor-herdr`, not merged to `main`.
 
 Branch: `worktree/delegate-monitor-herdr`. Backend commits for eventual `main`
-integration are `06a2f27`, `71eb342`, `bea657d`, and the validation fix `aceaf2f`.
+integration are `06a2f27`, `71eb342`, `bea657d`, the validation fix `aceaf2f`,
+canonical Meter validity `3058e23`, and timestamp validation `37dfa3c`.
 The UI and launcher remain on the prototype branch. No merge to `main` or push
 was performed.
 
@@ -62,15 +63,13 @@ bytes. This establishes correct hosting and steering behavior, not Orin's
 usability verdict or production readiness. Ticket 09 records the live evidence;
 Orin's prediction check remains open.
 
-Verification: all 13 delegate test scripts passed, as did all 20 dashboard tests,
+Verification after review fixes: all 13 delegate test scripts passed, as did all 28 dashboard tests,
 Python compilation, and `git diff --check`. The report tests ran with
 `NO_COLOR=` because the session's inherited `NO_COLOR=1` suppresses their color
 fixture output.
 
-Independent two-axis review is pending. The requested `implement` skill calls
-for `code-review`; briefs are prepared as `../brief-review-standards.md` and
-`../brief-review-spec.md`, against pre-implementation baseline `ea60b33`.
-Eligible non-author-family routing is blocked by the repository's no-bypass
-rule: Antigravity's read-only relay uses sandboxed tool auto-approval, while
-Claude and Grok are below Gate. A narrow exception was requested from Orin and
-has not been granted. No independent review result is claimed.
+Independent two-axis review used baseline `ea60b33` and frozen implementation
+`51b9328`: Grok checked Standards; Claude checked Spec. Orin chose remaining
+Grok/Claude capacity below Gate for these narrow tasks; global Gate was unchanged
+and no Antigravity permission exception was used. Reports, adjudication, and fix
+evidence are in [the review record](../research/2026-09-14-review.md).

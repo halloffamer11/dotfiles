@@ -16,14 +16,17 @@ This directory holds the throwaway project routing dashboard from
   keep their opening policy snapshot across hot reloads. `q` closes the pane.
 - The public state contains `project`, sourced `policy`, read-only `usage`, four
   `tiers`, `revision`, and `error`. Rows remain in effective Order even though
-  the canonical ranking result puts its Pick first.
+  the canonical ranking result puts its Pick first. Each row's `order_source`
+  comes from the effective catalog. `p` marks project Order; `g` marks global
+  Order/fallback. A fallback position can be derived, not literally stored.
 - Project policy, global catalog, and Meter cache watches compare file bytes. Invalid policy
   reloads retain the last valid view with an error; missing or malformed Meter
-  data becomes explicit unknown observations.
+  data becomes explicit unknown observations through `rank.meter_observations()`;
+  the dashboard does not maintain a separate validity rule.
 - Run `python3 test_dashboard.py`. Tests stay at the public model boundary; do
   not add terminal-spacing or color snapshots.
 
-Saves validate complete project policy against the original global documents,
+Saves reread the original global documents before validating complete project policy,
 preserve unrelated keys, compare the loaded policy bytes, and use the catalog's
 same-directory atomic writer. A conflict reloads and requires a fresh action.
 The final byte check is not a filesystem lock: a writer can race the rename.

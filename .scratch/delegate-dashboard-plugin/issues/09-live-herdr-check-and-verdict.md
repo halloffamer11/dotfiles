@@ -58,5 +58,10 @@ or vendor probe was performed during this window.
 
 Technical verdict and branch pointer are in ticket 01. Orin has not yet used the
 controls to confirm that the marked leader is predictable. Independent review
-also remains pending the permission decision recorded there. Popup routing was
+is recorded in [the review record](../research/2026-09-14-review.md). Popup routing was
 checked against Herdr's installed schema, but popup was not opened live.
+
+After the review fixes, a second smoke check in `w2N:p2` used the same disposable
+fixture. It showed `p` for Project order and `g` for global fallback after a partial
+Project order edit. The legend identifies fallback as derived. The pane was closed
+with `q`; no live policy was changed.
