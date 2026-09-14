@@ -1,13 +1,15 @@
 # ~/dotfiles/Makefile — machine provisioning entry points.
 #
 # Usage:
-#   make bootstrap   # fresh machine: brew packages + config symlinks + agent skills + externals + audiotee/mictee builds
+#   make bootstrap   # fresh machine: brew packages + reconciled config/skills + audiotee/mictee builds
 #   make brew        # install/verify Brewfile packages only
-#   make configs     # restow home-target config packages (what `dots` does, minus git pull)
+#   make apply       # reconcile configs, authored skills, and declared external skills
+#   make configs     # restow home-target config packages only
 #   make skills      # restow authored skills into each harness dir + brew-provided skill links + per-file agent links
-#   make externals   # (re)install externally-managed skills via the skills CLI
+#   make externals   # ensure declared external skills are installed at current upstream
+#   make external-updates  # update only the external skills declared by this repo
 #   make delegate-codex-home  # delegate's own CODEX_HOME: the disposable browser and nothing else
-#   make update      # upgrade brew packages and externally-managed skills
+#   make update      # verify Brewfile packages and update declared external skills
 #   make audiotee    # build the audiotee system-audio capture binary into ~/.local/bin (Swift 5.9+, macOS 14.2+)
 #   make mictee      # build the mictee mic capture binary into ~/.local/bin (Swift)
 #   make test-recorder  # regression harness for the record-meeting rig
@@ -39,13 +41,15 @@ EXTRA_BREWFILES ?=
 # benchmark page use AA and Terminal-Bench; swerb rows are evidence only.
 DELEGATE_ROWS ?= .scratch/delegate-redesign/_data/aa-accepted.json .scratch/delegate-redesign/_data/tbench-accepted.json
 
-.PHONY: bootstrap brew configs skills externals update audiotee mictee test-recorder delegate-wizard delegate-codex-home
+.PHONY: bootstrap brew apply configs skills externals external-updates update audiotee mictee test-recorder delegate-wizard delegate-codex-home
 
-bootstrap: brew configs skills externals audiotee mictee delegate-codex-home
+bootstrap: brew apply audiotee mictee delegate-codex-home
 
 brew:
 	brew bundle --file=$(CURDIR)/Brewfile
 	@for f in $(EXTRA_BREWFILES); do brew bundle --file=$$f; done
+
+apply: configs skills externals
 
 delegate-codex-home:
 	mkdir -p $(HOME)/.local/share/delegate/codex-home $(HOME)/.cache/playwright-mcp
@@ -73,13 +77,14 @@ skills:
 	mkdir -p $(HOME)/.claude/agents && (cd $(CURDIR)/agents && stow -t $(HOME)/.claude/agents -R agents)
 
 externals:
-	npx -y skills add herdrdev/herdr --skill herdr -g -y
-	npx -y skills add blader/humanizer -g -y
+	@# These declarations are desired state: add installs a missing skill and refreshes an existing one.
+	npx -y skills@latest add herdrdev/herdr --skill herdr --agent claude-code codex kiro-cli -g -y
+	npx -y skills@latest add blader/humanizer --skill humanizer --agent claude-code codex kiro-cli -g -y
 
-update:
-	brew bundle --file=$(CURDIR)/Brewfile
-	npx -y skills update -g -y
-	@for f in $(EXTRA_BREWFILES); do brew bundle --file=$$f; done
+external-updates:
+	npx -y skills@latest update -g -y herdr humanizer
+
+update: brew external-updates
 
 audiotee:
 	rm -rf /tmp/audiotee-build
