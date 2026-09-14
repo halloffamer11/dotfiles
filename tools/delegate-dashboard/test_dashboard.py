@@ -537,12 +537,8 @@ class DashboardModelTest(unittest.TestCase):
         routing = json.loads((self.config / "routing.json").read_text())
         routing["gate"] = 0.05
         write_json(self.config / "routing.json", routing)
-        real_validator = catalog.validate_project_routing
-
-        with mock.patch.object(catalog, "validate_project_routing", wraps=real_validator) as validator:
-            self.assertTrue(dashboard.move_lane("sol-high@codex", -1))
-        self.assertGreaterEqual(validator.call_count, 1)
-        self.assertEqual(validator.call_args_list[0].args[2]["gate"], 0.05)
+        self.assertTrue(dashboard.move_lane("sol-high@codex", -1))
+        self.assertEqual(dashboard.state["policy"]["gate"]["value"], 0.05)
         saved = json.loads(project_policy.read_text())
         self.assertEqual(saved["note"], "keep")
         self.assertEqual(dashboard.state["save"]["status"], "saved")
