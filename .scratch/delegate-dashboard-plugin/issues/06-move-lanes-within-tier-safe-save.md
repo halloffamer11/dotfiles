@@ -15,7 +15,7 @@ Throwaway branch only; never merged to `main`.
 
 **Blocked by:** 04 Project order overlays global Order; 05 Read-only dashboard pinned to one project
 
-**Status:** implemented 2026-09-14 in the ticket worktree; not committed
+**Status:** implemented as `65d534a`, integrated as `ab96e32`; live checks recorded in ticket 09
 
 - [x] Up and down moves stay inside the lane's Tier and cannot cross a boundary.
 - [x] Each accepted move saves the complete document atomically and the next Class ranking, reloaded through the public catalog boundary, reads the new Project order.
@@ -25,6 +25,10 @@ Throwaway branch only; never merged to `main`.
 - [x] A project with no routing document gets one created on the first move.
 
 ## Implemented, 2026-09-14
+
+Integration fix `b6ac740` also rejects a symlinked policy directory. Its regression
+test first reproduced a write outside the pinned project, then proved rejection
+preserves the external file bytes.
 
 `DashboardModel.move_lane()` constructs the full carried-lane `project_order` in
 Tier-then-position sequence and sends it through the reusable

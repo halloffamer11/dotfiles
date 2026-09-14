@@ -38,8 +38,7 @@ Throwaway branch only; never merged to `main`.
   `focused_pane_cwd`, then `workspace_cwd`. It rejects an implicit plugin-root
   selection and passes the resolved directory to `dashboard.py --cwd`.
 - Compile, help, TOML parsing, context-resolution fixtures, and `make -n` checks
-  passed on 2026-09-14. Live launch and pinning remain unverified until
-  `tools/delegate-dashboard/dashboard.py` lands; no Herdr pane was opened here.
+  passed on 2026-09-14. The live integration below followed the initial worker run.
 
 ## Live integration, 2026-09-14
 

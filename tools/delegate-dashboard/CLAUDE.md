@@ -11,6 +11,9 @@ This directory holds the throwaway project routing dashboard from
   `move_lane()` and `save_project_policy()`. Construction resolves and pins one Git root. Refreshes
   read the effective catalog and call delegate's canonical `tier_leaders()`;
   they never run `usage.py` or a vendor probe.
+- `j/k` or arrows select; `J/K` or Shift-arrows move within a Tier. `g/m` opens
+  Gate/Margin percentage entry, Enter saves, and Escape cancels. Percentage edits
+  keep their opening policy snapshot across hot reloads. `q` closes the pane.
 - The public state contains `project`, sourced `policy`, read-only `usage`, four
   `tiers`, `revision`, and `error`. Rows remain in effective Order even though
   the canonical ranking result puts its Pick first.

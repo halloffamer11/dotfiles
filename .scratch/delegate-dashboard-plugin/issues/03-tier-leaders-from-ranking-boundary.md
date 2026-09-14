@@ -13,7 +13,7 @@ Lands on `main`.
 
 **Blocked by:** 02 Split the ranking rule from Class filtering
 
-**Status:** implemented 2026-09-14 in the ticket worktree; not landed on `main`
+**Status:** implemented as `71eb342`, integrated on the prototype branch; not landed on `main`
 
 - [x] One operation returns, for each of the four Tiers, the Tier leader (or none) and every lane row with eligibility and reason.
 - [x] A command prints that result for the current project, in text and JSON.

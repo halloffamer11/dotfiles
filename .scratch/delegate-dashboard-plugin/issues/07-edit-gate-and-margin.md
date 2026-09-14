@@ -12,7 +12,7 @@ Throwaway branch only; never merged to `main`.
 
 **Blocked by:** 06 Move lanes inside a Tier, with a safe save
 
-**Status:** implemented 2026-09-14 in the ticket worktree; not committed
+**Status:** implemented as `2833ce7`, integrated as `47024c3`; live checks recorded in ticket 09
 
 - [x] Gate and Margin are shown and edited as percentages and stored as project overrides with their existing meaning.
 - [x] An out-of-range or malformed value is rejected and the project routing document stays byte-for-byte unchanged.

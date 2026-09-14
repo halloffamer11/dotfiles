@@ -14,7 +14,7 @@ Landing target: `main`; this ticket worktree is not merged.
 
 **Blocked by:** None — can start immediately.
 
-**Status:** implemented in this isolated ticket worktree; not landed on `main`
+**Status:** implemented as `06a2f27`, integrated on the prototype branch; not landed on `main`
 
 - [x] The selection rule exists once in `rank_range`; Class ranking calls it with the Class floor (or per-job Tier) and the Class ceiling.
 - [x] Every Class Pick, reason, veto text and row order is unchanged for the same catalog, Meters and harnesses.

@@ -14,10 +14,47 @@ Part of [01 Prototype the project delegation dashboard](01-prototype-project-del
 
 **Blocked by:** 07 Edit Gate and Margin; 08 Herdr plugin launcher and make target
 
-**Status:** ready-for-human
+**Status:** ready-for-human — technical checks passed 2026-09-14; Orin's prediction/verdict remains
 
-- [ ] The dashboard opens as a targeted split and in one other placement, pinned to the invoking project.
-- [ ] Order, Gate and Margin edits in a disposable project change the file and the Tier leader together.
-- [ ] No worker dispatched and no repeated vendor probe during the check.
+- [x] The dashboard opens as a targeted split and in one other placement, pinned to the invoking project.
+- [x] Order, Gate and Margin edits in a disposable project change the file and the Tier leader together.
+- [x] No worker dispatched and no repeated vendor probe during the check.
 - [ ] Orin can predict the marked Tier leader after each kind of edit.
-- [ ] Ticket 01 records the tested question, the verdict and the throwaway branch pointer.
+- [x] Ticket 01 records the tested question, the verdict and the throwaway branch pointer.
+
+## Live evidence, 2026-09-14
+
+The lead performed this check directly because it requires the session's live
+Herdr context. Implementation tickets were routed through delegate in separate
+Herdr worktrees. Ticket 08 records the normal `make -C` invoking-project checks.
+
+After integration at `47024c3`, the locally linked `delegate.project-dashboard`
+entrypoint opened as split `w2C:p6` beside the task shell `w2C:p1`, then as tab
+`w2C:p7`. Both visibly pinned `/private/tmp/delegate-dashboard-live.frqMrD/project`.
+The disposable global catalog and Meter fixtures were supplied through
+`open.py --cwd ... --config-dir ... --meters ...`; they never replaced live config.
+
+Fixture Tier 1 had A first (Pace 0.80) and B second (Pace 0.95), both above Gate.
+Tier 2 had G first (Remaining 5%, Pace 0.75) and O second (Pace 0.80).
+Initial Gate was 10%, Margin 20%, and leaders were A and O.
+
+- `J` moved A below B, saved the full Tier-then-position list, and marked B.
+- `K` restored A first. `m`, `10`, Enter saved Margin 0.1 and marked B with
+  `stolen by pace: 0.95 >= 0.8 + 0.1`.
+- `m`, `20`, Enter restored Margin 0.2 and marked A.
+- `g`, `1`, Enter saved Gate 0.01 and marked G in Tier 2.
+- Gate 101% showed an error and retained policy hash
+  `88e25dd12ac70b3693a15f05c6e96e6d017b648a` byte-for-byte.
+- During a new Gate entry, an external note edit hot-reloaded. Enter showed a
+  conflict and retained external hash `382d2b3175e31b4663b3215045a1fbbe89bae263`.
+
+Both test panes were closed with `q`. During the entire editing/placement check,
+the live ledger hash stayed `e8955431941e1bc822b419d36b3f6134920de70c` and the live
+usage-cache hash stayed `34cd3eabc12e983fda4eb65d2c1029c6860cf97c`. The disposable
+global lanes, routing, and Meter hashes also stayed unchanged. No worker launch
+or vendor probe was performed during this window.
+
+Technical verdict and branch pointer are in ticket 01. Orin has not yet used the
+controls to confirm that the marked leader is predictable. Independent review
+also remains pending the permission decision recorded there. Popup routing was
+checked against Herdr's installed schema, but popup was not opened live.

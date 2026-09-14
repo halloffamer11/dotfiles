@@ -16,7 +16,7 @@ Throwaway branch only; never merged to `main`.
 
 **Blocked by:** 03 Tier leaders from the ranking boundary
 
-**Status:** implemented 2026-09-14 in the ticket worktree; live Herdr checks remain ticket 09
+**Status:** implemented as `b2f7122`, integrated as `a3fc419`; live checks recorded in ticket 09
 
 - [x] The command opens on a given directory, pins that project, and shows its identity.
 - [x] Four Tier sections show only globally carried lanes with the listed fields, reasons and a color-plus-marker Tier leader.

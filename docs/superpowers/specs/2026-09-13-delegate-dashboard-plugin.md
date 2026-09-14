@@ -1,6 +1,7 @@
 # Project delegation dashboard prototype
 
-Date: 2026-09-13. Status: design agreed; prototype not started.
+Date: 2026-09-13. Status: prototype implemented on `worktree/delegate-monitor-herdr`
+and technically checked 2026-09-14; independent review and human usability verdict pending.
 
 ## Problem Statement
 
