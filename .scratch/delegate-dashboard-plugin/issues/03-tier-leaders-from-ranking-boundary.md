@@ -13,9 +13,23 @@ Lands on `main`.
 
 **Blocked by:** 02 Split the ranking rule from Class filtering
 
-**Status:** ready-for-agent
+**Status:** implemented 2026-09-14 in the ticket worktree; not landed on `main`
 
-- [ ] One operation returns, for each of the four Tiers, the Tier leader (or none) and every lane row with eligibility and reason.
-- [ ] A command prints that result for the current project, in text and JSON.
-- [ ] Tests on fixtures cover: the first eligible lane in Order leads; a lane below Gate is vetoed and the next lane leads; a later lane steals by Margin inside the Tier; an unknown Meter keeps its existing safe behavior; a missing harness is vetoed; lane name breaks ties deterministically; a Tier with no eligible lane has no leader.
-- [ ] Tests assert the rule on fixtures, never Orin's live tiers.
+- [x] One operation returns, for each of the four Tiers, the Tier leader (or none) and every lane row with eligibility and reason.
+- [x] A command prints that result for the current project, in text and JSON.
+- [x] Tests on fixtures cover: the first eligible lane in Order leads; a lane below Gate is vetoed and the next lane leads; a later lane steals by Margin inside the Tier; an unknown Meter keeps its existing safe behavior; a missing harness is vetoed; lane name breaks ties deterministically; a Tier with no eligible lane has no leader.
+- [x] Tests assert the rule on fixtures, never Orin's live tiers.
+
+## Implemented, 2026-09-14
+
+Added `tier_leaders(cat, meters, present)` on the ranking boundary and the
+`rank.py tiers` text/JSON command. Exact-Tier previews reuse `rank_range`; the
+default Tier command reads the cached usage document directly, and treats a
+missing or invalid cache as unknown observations without running vendor probes.
+Normal Class ranking remains on its existing path.
+
+Verified in the ticket worktree (no commit):
+
+- `python3 agents/skills/delegate/tests/test_rank.py`
+- `python3 agents/skills/delegate/tests/test_catalog.py`
+- `python3 -m py_compile agents/skills/delegate/scripts/rank.py agents/skills/delegate/tests/test_rank.py`
