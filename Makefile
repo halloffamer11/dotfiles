@@ -110,7 +110,7 @@ delegate-wizard:
 delegate-dashboard:
 	@test "$${HERDR_ENV:-}" = 1
 	@test -n "$${HERDR_PANE_ID:-}"
-	@"$${HERDR_BIN_PATH:-herdr}" plugin link --enabled "$(CURDIR)/tools/delegate-dashboard"
+	@"$${HERDR_BIN_PATH:-herdr}" plugin link "$(CURDIR)/tools/delegate-dashboard"
 	@python3 "$(CURDIR)/tools/delegate-dashboard/open.py" --placement "$(DELEGATE_DASHBOARD_PLACEMENT)" --target-pane "$${HERDR_PANE_ID}"
 
 #   references/  — reference material pulled with the repo but not provisioned by brew/stow/skills (e.g. personal CLAUDE.md for the work Mac to cherry-pick from)

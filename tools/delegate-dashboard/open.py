@@ -72,16 +72,47 @@ def _request_params(args: argparse.Namespace, plugin_id: str, entrypoint: str) -
         "entrypoint": entrypoint,
         "placement": args.placement,
         "focus": False,
+        "env": _launch_env(args),
     }
-    _add_optional(params, "target_pane_id", args.target_pane)
-    _add_optional(params, "workspace_id", args.workspace)
-    _add_optional(params, "cwd", _absolute_cwd(args.cwd))
+    if args.placement in ("split", "zoomed"):
+        _add_optional(params, "target_pane_id", args.target_pane)
+    if args.placement == "tab":
+        _add_optional(params, "workspace_id", args.workspace)
     if args.placement == "split":
         params["direction"] = args.direction
     if args.placement == "popup":
         _add_optional(params, "width", args.width)
         _add_optional(params, "height", args.height)
     return params
+
+
+def _launch_env(args: argparse.Namespace) -> dict[str, str]:
+    # Plugin processes inherit the server environment, not this invoking shell.
+    env = {"PATH": os.environ.get("PATH", os.defpath)}
+    project_cwd = args.cwd
+    if not project_cwd and args.target_pane:
+        try:
+            result = subprocess.run(
+                [_herdr_binary(), "pane", "get", args.target_pane],
+                capture_output=True, text=True, check=True,
+            )
+            pane = json.loads(result.stdout)["result"]["pane"]
+            # make -C changes its own cwd while the invoking pane stays in the
+            # user's project. Use that pane context, not the helper process.
+            project_cwd = pane["cwd"]
+        except (OSError, subprocess.CalledProcessError, ValueError, KeyError) as exc:
+            raise OpenError(f"could not resolve invoking pane {args.target_pane}: {exc}") from exc
+    if not project_cwd:
+        raise OpenError("pass --target-pane or --cwd to identify the launch project")
+    for option, variable in (
+        ("cwd", "DELEGATE_DASHBOARD_CWD"),
+        ("config_dir", "DELEGATE_DASHBOARD_CONFIG_DIR"),
+        ("meters", "DELEGATE_DASHBOARD_METERS"),
+    ):
+        value = _absolute_cwd(project_cwd if option == "cwd" else getattr(args, option))
+        if value:
+            env[variable] = value
+    return env
 
 
 def _open_with_cli(args: argparse.Namespace, plugin_id: str, entrypoint: str) -> int:
@@ -96,17 +127,16 @@ def _open_with_cli(args: argparse.Namespace, plugin_id: str, entrypoint: str) ->
         entrypoint,
         "--placement",
         args.placement,
-        "--no-focus",
     ]
-    if args.target_pane:
+    if args.placement in ("split", "zoomed") and args.target_pane:
         command.extend(["--target-pane", args.target_pane])
-    if args.workspace:
+    if args.placement == "tab" and args.workspace:
         command.extend(["--workspace", args.workspace])
-    absolute_cwd = _absolute_cwd(args.cwd)
-    if absolute_cwd:
-        command.extend(["--cwd", absolute_cwd])
+    for key, value in _launch_env(args).items():
+        command.extend(["--env", f"{key}={value}"])
     if args.placement == "split":
         command.extend(["--direction", args.direction])
+    command.append("--no-focus")
     try:
         completed = subprocess.run(command, check=False)
     except OSError as exc:
@@ -176,7 +206,9 @@ def _parser() -> argparse.ArgumentParser:
         help="workspace for a tab placement (default: HERDR_WORKSPACE_ID)",
     )
     parser.add_argument("--direction", choices=("right", "down"), default="right")
-    parser.add_argument("--cwd", metavar="PATH", help="optional cwd for the managed pane")
+    parser.add_argument("--cwd", metavar="PATH", help="project directory to pin; overrides invocation context")
+    parser.add_argument("--config-dir", metavar="PATH", help="optional delegate catalog directory")
+    parser.add_argument("--meters", metavar="FILE", help="optional cached Meter fixture")
     parser.add_argument("--width", help="popup width in cells or percent")
     parser.add_argument("--height", help="popup height in cells or percent")
     return parser

@@ -138,13 +138,19 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: Optional[list[str]] = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        project_cwd = resolve_project_cwd(explicit_cwd=args.cwd)
+        project_cwd = resolve_project_cwd(
+            explicit_cwd=args.cwd or os.environ.get("DELEGATE_DASHBOARD_CWD")
+        )
         if not DASHBOARD_PATH.is_file():
             raise LauncherError(
                 f"dashboard.py is not present at {DASHBOARD_PATH}; "
                 "integrated dashboard work is still required"
             )
-        os.execv(sys.executable, dashboard_command(project_cwd, args.config_dir, args.meters))
+        os.execv(sys.executable, dashboard_command(
+            project_cwd,
+            args.config_dir or os.environ.get("DELEGATE_DASHBOARD_CONFIG_DIR"),
+            args.meters or os.environ.get("DELEGATE_DASHBOARD_METERS"),
+        ))
     except LauncherError as exc:
         print(f"delegate-dashboard launcher: {exc}", file=sys.stderr)
         return 2
