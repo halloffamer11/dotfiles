@@ -2,20 +2,19 @@
 """rank.py — deterministic quota-aware lane ranking for delegate.
 
 Ranks execution lanes from the JSON catalog (lanes.json and routing.json)
-for a given task class, taking into account model tier requirements,
-subscription meter gate thresholds, harness CLI availability, and pacing.
+over an inclusive Tier range, taking into account subscription meter gate
+thresholds, harness CLI availability, and pacing.  The Class-facing ``rank``
+wrapper resolves its range from routing classes before calling that rule.
 
 The selection rule:
-  1. Determine task tier requirement: floor and ceiling from routing.classes[class].
-     If tier is given, it replaces floor (must satisfy floor <= tier <= ceiling).
-  2. Filter eligible lanes:
+  1. Filter eligible lanes in the supplied Tier range:
        enabled is True (defaults to True if absent),
        floor <= tier <= ceiling,
        meter gate passed: meter r is None (unknown) or r >= routing.gate,
        harness CLI is present (found in PATH or specified via --harnesses).
      Vetoed lanes fail one or more conditions (reported in precedence order:
      disabled, floor, ceiling, gate, cli).
-  3. Sort eligible lanes by:
+  2. Sort eligible lanes by:
        tier ascending,
        order ascending (the lane's `order`, its place inside its tier that
          Orin sets in the setup wizard; a lane without `order` sorts after
@@ -27,8 +26,8 @@ The selection rule:
      to lane name: an arbitrary factor, chosen only to make the pick
      deterministic. A catalog with no `order` field ranks as it did before
      ticket 28: every lane sorts as unordered, so tier and pace decide.
-  4. Initial pick is eligible[0].
-  5. Steal rule: evaluate remaining eligible lanes in sorted order. If a lane's
+  3. Initial pick is eligible[0].
+  4. Steal rule: evaluate remaining eligible lanes in sorted order. If a lane's
      pace exceeds the current pick's pace by at least routing.margin, it steals
      the pick:
        for L in eligible[1:]:
@@ -67,32 +66,24 @@ import catalog
 from catalog import CatalogError, CLASSES, HARNESSES, load_catalog
 
 
-def rank(cls, cat, meters, present, tier=None, effort=None):
-    """Rank catalog lanes for a given class.
+def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="tier"):
+    """Apply the canonical selection rule to an inclusive Tier range.
+
+    ``floor`` and ``ceiling`` are range bounds, not a Class lookup.  The
+    optional ``reason_label`` keeps the existing Class-facing veto text while
+    allowing another caller to describe the same range in its own terms.
 
     cat: dict from catalog.load_catalog
     meters: usage document dict (or {})
     present: set of harness names
-    tier: optional floor override (must be between class floor and ceiling)
-    effort: optional effort override (unused in base ranking rule)
     """
-    routing = cat.get("routing", {})
-    classes = routing.get("classes", {})
-    if cls not in classes and cls not in CLASSES:
-        raise ValueError(f"unknown class '{cls}'; must be one of {', '.join(CLASSES)}")
+    if floor is not None and ceiling is not None and floor > ceiling:
+        raise ValueError(f"invalid tier range [{floor}, {ceiling}]")
 
-    cls_config = classes.get(cls, {})
-    floor = cls_config.get("floor")
-    ceiling = cls_config.get("ceiling")
+    routing = cat.get("routing", {})
     margin = routing.get("margin", 0.2)
     gate = routing.get("gate", 0.1)
-
-    if tier is not None:
-        if floor is not None and ceiling is not None and (tier < floor or tier > ceiling):
-            raise ValueError(f"tier {tier} outside [{floor}, {ceiling}] for class '{cls}'")
-        effective_floor = tier
-    else:
-        effective_floor = floor
+    reason_label = reason_label or "tier"
 
     meter_map = {}
     if isinstance(meters, dict):
@@ -132,10 +123,10 @@ def rank(cls, cat, meters, present, tier=None, effort=None):
         veto_reason = None
         if not lane_def.get("enabled", True):
             veto_reason = f"vetoed:disabled, {lane_name}"
-        elif lane_tier is not None and effective_floor is not None and lane_tier < effective_floor:
-            veto_reason = f"vetoed:floor, {lane_name} (tier {lane_tier}) < {cls} floor (tier {effective_floor})"
+        elif lane_tier is not None and floor is not None and lane_tier < floor:
+            veto_reason = f"vetoed:floor, {lane_name} (tier {lane_tier}) < {reason_label} floor (tier {floor})"
         elif lane_tier is not None and ceiling is not None and lane_tier > ceiling:
-            veto_reason = f"vetoed:ceiling, {lane_name} (tier {lane_tier}) > {cls} ceiling (tier {ceiling})"
+            veto_reason = f"vetoed:ceiling, {lane_name} (tier {lane_tier}) > {reason_label} ceiling (tier {ceiling})"
         elif r is not None and r < gate:
             r_pct = f"{int(round(r * 100)):d}%"
             gate_pct = f"{int(round(gate * 100)):d}%"
@@ -203,6 +194,39 @@ def rank(cls, cat, meters, present, tier=None, effort=None):
         ordered_eligible = []
 
     return ordered_eligible + vetoed_rows
+
+
+def rank(cls, cat, meters, present, tier=None, effort=None):
+    """Rank catalog lanes for a given class.
+
+    cat: dict from catalog.load_catalog
+    meters: usage document dict (or {})
+    present: set of harness names
+    tier: optional floor override (must be between class floor and ceiling)
+    effort: optional effort override (unused in base ranking rule)
+    """
+    routing = cat.get("routing", {})
+    classes = routing.get("classes", {})
+    if cls not in classes and cls not in CLASSES:
+        raise ValueError(f"unknown class '{cls}'; must be one of {', '.join(CLASSES)}")
+
+    cls_config = classes.get(cls, {})
+    floor = cls_config.get("floor")
+    ceiling = cls_config.get("ceiling")
+
+    if tier is not None:
+        if floor is not None and ceiling is not None and (tier < floor or tier > ceiling):
+            raise ValueError(f"tier {tier} outside [{floor}, {ceiling}] for class '{cls}'")
+        floor = tier
+
+    return rank_range(
+        cat,
+        meters,
+        present,
+        floor=floor,
+        ceiling=ceiling,
+        reason_label=cls,
+    )
 
 
 def format_rows(rows):
