@@ -90,6 +90,8 @@ def meter_observations(document):
     if not isinstance(document, dict):
         return None
     if "lanes" in document:
+        if not _valid_meter_number(document.get("probed_at")):
+            return None
         if not isinstance(document["lanes"], list):
             return None
         observations = {}
