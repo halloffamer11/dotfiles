@@ -50,6 +50,7 @@ Reason vocabulary (exactly one per lane):
 
 CLI forms:
   rank.py <class> [--tier N] [--cwd DIR] [--config-dir DIR] [--meters FILE] [--harnesses a,b,c] [--json]
+  rank.py tiers [--cwd DIR] [--config-dir DIR] [--meters FILE] [--harnesses a,b,c] [--json]
 """
 import argparse
 import json
@@ -229,6 +230,29 @@ def rank(cls, cat, meters, present, tier=None, effort=None):
     )
 
 
+def tier_leaders(cat, meters, present):
+    """Return the leader and ranked rows for each exact Tier from 1 to 4.
+
+    Each preview delegates selection to ``rank_range`` with equal floor and
+    ceiling bounds, then projects away rows from other Tiers. A leader is the
+    exact-Tier preview, not the Pick for any Class range.
+    """
+    previews = []
+    for tier in range(1, 5):
+        rows = rank_range(
+            cat,
+            meters,
+            present,
+            floor=tier,
+            ceiling=tier,
+            reason_label=f"Tier {tier}",
+        )
+        rows = [row for row in rows if row["tier"] == tier]
+        leader = next((row["lane"] for row in rows if row["pick"]), None)
+        previews.append({"tier": tier, "leader": leader, "rows": rows})
+    return previews
+
+
 def format_rows(rows):
     if not rows:
         return []
@@ -271,15 +295,32 @@ def run_usage():
         return {}
 
 
+def load_cached_usage(cache_path=None):
+    """Read the usage cache without invoking usage.py or any vendor probe."""
+    path = cache_path
+    if path is None:
+        path = (
+            os.environ.get("DELEGATE_CACHE")
+            or os.environ.get("CONSULT_CACHE")
+            or os.path.expanduser("~/.cache/delegate/usage.json")
+        )
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            doc = json.load(f)
+        return doc if isinstance(doc, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
 
     parser = argparse.ArgumentParser(
         prog="rank.py",
-        description="Rank execution lanes for a class."
+        description="Rank execution lanes for a Class or preview all four exact Tiers."
     )
-    parser.add_argument("cls", metavar="class", help=f"class to rank: {', '.join(CLASSES)}")
+    parser.add_argument("target", metavar="class|tiers", help=f"class to rank ({', '.join(CLASSES)}) or tiers")
     parser.add_argument("--tier", type=int, default=None, help="override floor tier for this job")
     parser.add_argument("--cwd", default=None, help="working directory to find git root from")
     parser.add_argument("--config-dir", default=None, help="config directory containing lanes.json and routing.json")
@@ -288,10 +329,13 @@ def main(argv=None):
     parser.add_argument("--json", action="store_true", help="output as JSON")
 
     args = parser.parse_args(argv)
+    tiers_mode = args.target == "tiers"
 
-    if args.cls not in CLASSES:
-        sys.stderr.write(f"rank: unknown class '{args.cls}'; must be one of {', '.join(CLASSES)}\n")
+    if not tiers_mode and args.target not in CLASSES:
+        sys.stderr.write(f"rank: unknown class '{args.target}'; must be one of {', '.join(CLASSES)}\n")
         sys.exit(2)
+    if tiers_mode and args.tier is not None:
+        parser.error("--tier is only valid with a Class")
 
     try:
         cat = load_catalog(cwd=args.cwd, config_dir=args.config_dir)
@@ -306,22 +350,48 @@ def main(argv=None):
         except Exception:
             meters_doc = {}
     else:
-        meters_doc = run_usage()
+        meters_doc = load_cached_usage() if tiers_mode else run_usage()
 
     if args.harnesses is not None:
         present = set(h.strip() for h in args.harnesses.split(",") if h.strip())
     else:
         present = {h for h in HARNESSES if shutil.which(h)}
 
+    if tiers_mode:
+        previews = tier_leaders(cat, meters_doc, present)
+        routing = cat["routing"]
+        margin = routing["margin"]
+        gate = routing["gate"]
+
+        if args.json:
+            out = {
+                "margin": margin,
+                "gate": gate,
+                "tiers": previews,
+            }
+            sys.stdout.write(json.dumps(out, indent=2) + "\n")
+            sys.exit(0)
+
+        gate_pct = f"{int(round(gate * 100))}%"
+        for preview in previews:
+            leader = preview["leader"] or "none"
+            print(
+                f"# Tier {preview['tier']} preview; not a Class Pick  "
+                f"leader={leader}  margin={margin}  gate={gate_pct}"
+            )
+            for line in format_rows(preview["rows"]):
+                print(line)
+        sys.exit(0)
+
     try:
-        rows = rank(args.cls, cat, meters_doc, present, tier=args.tier)
+        rows = rank(args.target, cat, meters_doc, present, tier=args.tier)
     except ValueError as e:
         sys.stderr.write(f"rank: {e}\n")
         sys.exit(2)
     has_pick = bool(rows and rows[0]["pick"])
 
     routing = cat["routing"]
-    cls_config = routing.get("classes", {}).get(args.cls, {})
+    cls_config = routing.get("classes", {}).get(args.target, {})
     floor = args.tier if args.tier is not None else cls_config.get("floor")
     ceiling = cls_config.get("ceiling")
     margin = routing["margin"]
@@ -329,7 +399,7 @@ def main(argv=None):
 
     if args.json:
         out = {
-            "class": args.cls,
+            "class": args.target,
             "floor": floor,
             "ceiling": ceiling,
             "margin": margin,
@@ -341,7 +411,7 @@ def main(argv=None):
         sys.exit(0 if has_pick else 1)
 
     if not has_pick:
-        print(f"STOP: no lane eligible for {args.cls}")
+        print(f"STOP: no lane eligible for {args.target}")
         for line in format_rows(rows):
             print(line)
         sys.exit(1)
@@ -349,7 +419,7 @@ def main(argv=None):
     project_file = cat.get("files", {}).get("project")
     override_str = project_file if project_file else "none"
     gate_pct = f"{int(round(gate * 100))}%"
-    print(f"# {args.cls}  floor={floor} ceiling={ceiling}  margin={margin}  gate={gate_pct}  (routing: global; project override: {override_str})")
+    print(f"# {args.target}  floor={floor} ceiling={ceiling}  margin={margin}  gate={gate_pct}  (routing: global; project override: {override_str})")
     for line in format_rows(rows):
         print(line)
     sys.exit(0)

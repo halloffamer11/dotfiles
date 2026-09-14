@@ -695,4 +695,158 @@ with tempfile.TemporaryDirectory() as td:
            and any("sol-high@codex" in line and "order=- " in line for line in lines19),
            res19.stdout[:400] + res19t.stdout)
 
+    # -------------------------------------------------------------
+    # 20. Exact-Tier previews use the canonical range rule and return only
+    # lanes in that Tier. These fixture tiers and orders are deliberately local
+    # to this test: no expectation depends on the live catalog's assignments.
+    tier_cat = copy.deepcopy(cat)
+    tier_layout = {
+        "flash-high@agy": (1, 1),
+        "luna-low@codex": (1, 2),
+        "grok46-high@grok": (2, 1),
+        "terra-high@codex": (2, 2),
+        "sol-high@codex": (3, 1),
+        "fable-xhigh@claude": (4, 1),
+    }
+    for lane_name, (tier, order) in tier_layout.items():
+        tier_cat["lanes"][lane_name]["tier"] = tier
+        tier_cat["lanes"][lane_name]["order"] = order
+
+    tier_meters = {
+        "lanes": [
+            meter("codex", weekly=0.80, five_h=0.80, pace=0.80, status="ok"),
+            meter("grok", weekly=0.80, pace=0.90, status="ok"),
+            meter("claude-fable", weekly=0.80, five_h=0.80, pace=0.70, status="ok"),
+            meter("agy-gemini", weekly=0.80, five_h=0.80, pace=0.85, status="ok"),
+        ]
+    }
+    previews20 = rank.tier_leaders(tier_cat, tier_meters, ALL_HARNESSES)
+    expected_leaders20 = ["flash-high@agy", "grok46-high@grok", "sol-high@codex", "fable-xhigh@claude"]
+    shape20_ok = (
+        [preview["tier"] for preview in previews20] == [1, 2, 3, 4]
+        and [preview["leader"] for preview in previews20] == expected_leaders20
+        and all(
+            row["tier"] == preview["tier"]
+            and isinstance(row["eligible"], bool)
+            and bool(row["reason"])
+            for preview in previews20
+            for row in preview["rows"]
+        )
+    )
+    record("case 20 tier_leaders() returns four exact-Tier previews", shape20_ok)
+
+    # First in Order leads when the later lane is less than Margin ahead.
+    tier2_20 = previews20[1]
+    order20_ok = (
+        tier2_20["leader"] == "grok46-high@grok"
+        and [row["lane"] for row in tier2_20["rows"]] == ["grok46-high@grok", "terra-high@codex"]
+        and tier2_20["rows"][0]["reason"] == "pick"
+        and tier2_20["rows"][1]["reason"] == "eligible"
+    )
+    record("case 20 tier leader starts with first eligible lane in Order", order20_ok)
+
+    # Gate veto: first-in-Order Grok is below Gate, so Terra leads.
+    gate_meters20 = copy.deepcopy(tier_meters)
+    grok_gate20 = next(row for row in gate_meters20["lanes"] if row["lane"] == "grok")
+    grok_gate20.update({"r": 0.05, "remaining_weekly": 0.05, "status": "unavailable"})
+    gate_preview20 = rank.tier_leaders(tier_cat, gate_meters20, ALL_HARNESSES)[1]
+    grok_row20 = next(row for row in gate_preview20["rows"] if row["lane"] == "grok46-high@grok")
+    gate20_ok = (
+        gate_preview20["leader"] == "terra-high@codex"
+        and not grok_row20["eligible"]
+        and grok_row20["reason"] == "vetoed:gate, grok46-high@grok: grok meter 5% left < gate 10%"
+    )
+    record("case 20 tier leader skips a lane below Gate", gate20_ok)
+
+    # Margin steal: the later Terra lane is at least Margin ahead of Grok.
+    steal_meters20 = copy.deepcopy(tier_meters)
+    next(row for row in steal_meters20["lanes"] if row["lane"] == "grok")["pace"] = 0.70
+    next(row for row in steal_meters20["lanes"] if row["lane"] == "codex")["pace"] = 0.95
+    steal_preview20 = rank.tier_leaders(tier_cat, steal_meters20, ALL_HARNESSES)[1]
+    steal20_ok = (
+        steal_preview20["leader"] == "terra-high@codex"
+        and steal_preview20["rows"][0]["reason"] == "stolen by pace: 0.95 >= 0.7 + 0.2"
+    )
+    record("case 20 later lane steals Tier lead by Margin", steal20_ok)
+
+    # Unknown observations remain eligible, sort last, and never invent pace.
+    unknown_meters20 = copy.deepcopy(tier_meters)
+    unknown_grok20 = next(row for row in unknown_meters20["lanes"] if row["lane"] == "grok")
+    unknown_grok20.update({"r": None, "pace": None, "remaining_weekly": None, "status": "unknown"})
+    unknown_preview20 = rank.tier_leaders(tier_cat, unknown_meters20, ALL_HARNESSES)[1]
+    unknown_row20 = next(row for row in unknown_preview20["rows"] if row["lane"] == "grok46-high@grok")
+    unknown20_ok = (
+        unknown_preview20["leader"] == "terra-high@codex"
+        and unknown_row20["eligible"]
+        and unknown_row20["pace"] is None
+        and unknown_row20["reason"] == "unknown meter, sorted last"
+    )
+    record("case 20 unknown Meter keeps safe ranking behavior", unknown20_ok)
+
+    # Harness veto, name tie-break, and a Tier with no eligible lane.
+    missing_preview20 = rank.tier_leaders(tier_cat, tier_meters, ALL_HARNESSES - {"claude"})[3]
+    missing20_ok = (
+        missing_preview20["leader"] is None
+        and missing_preview20["rows"][0]["reason"] == "vetoed:cli, fable-xhigh@claude: claude not on PATH"
+    )
+    tie_cat20 = copy.deepcopy(tier_cat)
+    tie_cat20["lanes"]["grok46-high@grok"].pop("order")
+    tie_cat20["lanes"]["terra-high@codex"].pop("order")
+    tie_meters20 = copy.deepcopy(tier_meters)
+    next(row for row in tie_meters20["lanes"] if row["lane"] == "grok")["pace"] = 0.80
+    tie_preview20 = rank.tier_leaders(tie_cat20, tie_meters20, ALL_HARNESSES)[1]
+    tie20_ok = tie_preview20["leader"] == "grok46-high@grok"
+    record("case 20 harness veto, empty Tier leader, and deterministic name tie", missing20_ok and tie20_ok)
+
+    # Text and JSON CLI expose the same four previews. With no --meters, the
+    # Tier command reads the named cache directly; a missing cache yields
+    # unknown observations rather than invoking usage.py and probing vendors.
+    cfg20_dir = os.path.join(td, "cfg20")
+    os.makedirs(cfg20_dir, exist_ok=True)
+    lanes20_doc = catalog.load_json(os.path.join(cfg_dir, "lanes.json"))
+    for lane_name, (tier, order) in tier_layout.items():
+        lanes20_doc["lanes"][lane_name]["tier"] = tier
+        lanes20_doc["lanes"][lane_name]["order"] = order
+    catalog.write_json(os.path.join(cfg20_dir, "lanes.json"), lanes20_doc)
+    shutil.copy(os.path.join(cfg_dir, "routing.json"), cfg20_dir)
+    write_meters_doc(meters_path, tier_meters["lanes"])
+    res20_json = subprocess.run(
+        [sys.executable, RANK_PY, "tiers", "--config-dir", cfg20_dir, "--meters", meters_path,
+         "--harnesses", ALL_HARNESSES_ARG, "--json"],
+        capture_output=True,
+        text=True,
+    )
+    data20_json = json.loads(res20_json.stdout)
+    res20_text = subprocess.run(
+        [sys.executable, RANK_PY, "tiers", "--config-dir", cfg20_dir, "--meters", meters_path,
+         "--harnesses", ALL_HARNESSES_ARG],
+        capture_output=True,
+        text=True,
+    )
+    missing_cache20 = os.path.join(td, "missing-usage.json")
+    env20 = dict(os.environ, DELEGATE_CACHE=missing_cache20)
+    res20_missing = subprocess.run(
+        [sys.executable, RANK_PY, "tiers", "--config-dir", cfg20_dir,
+         "--harnesses", ALL_HARNESSES_ARG, "--json"],
+        capture_output=True,
+        text=True,
+        env=env20,
+    )
+    data20_missing = json.loads(res20_missing.stdout)
+    cli20_ok = (
+        res20_json.returncode == 0
+        and [preview["tier"] for preview in data20_json["tiers"]] == [1, 2, 3, 4]
+        and [preview["leader"] for preview in data20_json["tiers"]] == expected_leaders20
+        and res20_text.returncode == 0
+        and res20_text.stdout.count("preview; not a Class Pick") == 4
+        and res20_missing.returncode == 0
+        and all(
+            row["meter_status"] == "unknown" and row["pace"] is None and row["r"] is None
+            for preview in data20_missing["tiers"]
+            for row in preview["rows"]
+        )
+    )
+    record("case 20 Tier CLI text/JSON and missing-cache behavior", cli20_ok,
+           res20_json.stderr + res20_text.stderr + res20_missing.stderr)
+
 sys.exit(1 if fails else 0)
