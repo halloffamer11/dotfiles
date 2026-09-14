@@ -24,7 +24,9 @@ Throwaway branch only; never merged to `main`.
 - [x] The screen shows a saved, error or conflict state, and the affected Tier leader updates after an accepted move.
 - [x] A project with no routing document gets one created on the first move.
 
-## Implemented, 2026-09-14
+## Landed, 2026-09-14
+
+Scope: committed on `worktree/delegate-monitor-herdr`, not merged to `main`.
 
 Integration fix `b6ac740` also rejects a symlinked policy directory. Its regression
 test first reproduced a write outside the pinned project, then proved rejection

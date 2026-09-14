@@ -40,7 +40,9 @@ Throwaway branch only; never merged to `main`.
 - Compile, help, TOML parsing, context-resolution fixtures, and `make -n` checks
   passed on 2026-09-14. The live integration below followed the initial worker run.
 
-## Live integration, 2026-09-14
+## Landed, 2026-09-14
+
+Scope: committed on `worktree/delegate-monitor-herdr`, not merged to `main`.
 
 The worker timed out after writing the launcher; the lead inspected and completed
 its integration. `make -C <prototype-checkout> delegate-dashboard` now opens a

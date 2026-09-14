@@ -2,6 +2,14 @@
 
 External worker routing lives in this directory. Read `SKILL.md` first, then use these files as the implementation authority:
 
+Project routing changes go through `catalog.load_catalog()`: a flat `project_order`
+projects carried lanes within their global Tiers and preserves Order provenance.
+Validate complete save proposals with `catalog.validate_project_routing()` against
+the original global documents, not projected lane records. For exact-Tier previews,
+use `rank.tier_leaders()`; it and the Class-facing `rank()` share `rank_range()`.
+`rank.load_cached_usage()` reads observations without a vendor probe. The throwaway
+Herdr UI is documented in `tools/delegate-dashboard/CLAUDE.md` at the repo root.
+
 - `scripts/catalog.py`: the two configuration files (`~/.config/delegate/lanes.json`, `routing.json`, project override `.delegate/routing.json`), validators, `show`/`check`/`fmt`. It also owns the mapping from a benchmark source's printed model name to a lane model (`resolve_published_model`, the lane field `published_as`; a row's `effort` picks the member of an agy slug family); `bench.py` and the setup pre-screen both read it from here. `HARNESS_EFFORTS` is the effort each harness offers, with the command or page that proved each list; `check` and `delegate.py --effort` refuse anything outside it (ticket 19). `assets/samples/`: the starting catalog from the spec.
 - `scripts/rank.py`: the selection rule over the catalog and the live meters (class floor and ceiling, gate; sort by tier, then the lane's `order` inside its tier, then pace, then lane name; pace margin). A catalog with no `order` ranks as before ticket 28.
 - `scripts/delegate.py`: one run through a pinned ADS relay (`dispatch`), and rank-then-dispatch (`run`); native lanes (harness = `ORCHESTRATOR`) print a spawn line instead of starting a relay. Run directories under `~/.cache/delegate/runs/`, never reused.

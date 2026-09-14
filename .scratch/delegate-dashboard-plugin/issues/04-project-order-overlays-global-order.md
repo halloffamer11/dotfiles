@@ -39,7 +39,9 @@ fixture-project reload that changes both `rank("impl", ...)` and
 - `python3 -m py_compile agents/skills/delegate/scripts/catalog.py`
 - `git diff --check`
 
-## Integration check, 2026-09-14
+## Landed, 2026-09-14
+
+Scope: committed on `worktree/delegate-monitor-herdr`, not merged to `main`.
 
 The lead repeated the catalog and ranking suites. A new regression test showed
 that the routing-only boundary raised `TypeError` for a non-object project

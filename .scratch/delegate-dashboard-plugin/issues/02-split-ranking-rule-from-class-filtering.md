@@ -20,7 +20,9 @@ Landing target: `main`; this ticket worktree is not merged.
 - [x] Every Class Pick, reason, veto text and row order is unchanged for the same catalog, Meters and harnesses.
 - [x] The existing catalog, ranking, dispatch and report suites pass without edits to their expectations.
 
-## Implementation and evidence
+## Landed, 2026-09-14
+
+Scope: committed on `worktree/delegate-monitor-herdr`, not merged to `main`.
 
 - `agents/skills/delegate/scripts/rank.py` exposes `rank_range` as the canonical
   inclusive-Tier selection boundary; `rank` only resolves Class bounds and

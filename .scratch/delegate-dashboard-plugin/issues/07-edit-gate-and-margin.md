@@ -20,7 +20,9 @@ Throwaway branch only; never merged to `main`.
 - [x] End-to-end on fixtures: changing Margin starts or stops a steal exactly as the ranking rule specifies.
 - [x] The next Class ranking reads the saved Gate and Margin.
 
-## Implemented, 2026-09-14
+## Landed, 2026-09-14
+
+Scope: committed on `worktree/delegate-monitor-herdr`, not merged to `main`.
 
 `DashboardModel.begin_percentage_edit()` captures the displayed fractional value,
 complete project document, and exact loaded bytes. `save_percentage_edit()` parses a

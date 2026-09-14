@@ -22,7 +22,9 @@ Part of [01 Prototype the project delegation dashboard](01-prototype-project-del
 - [ ] Orin can predict the marked Tier leader after each kind of edit.
 - [x] Ticket 01 records the tested question, the verdict and the throwaway branch pointer.
 
-## Live evidence, 2026-09-14
+## Landed, 2026-09-14
+
+Scope: committed on `worktree/delegate-monitor-herdr`, not merged to `main`.
 
 The lead performed this check directly because it requires the session's live
 Herdr context. Implementation tickets were routed through delegate in separate

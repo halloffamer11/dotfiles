@@ -39,7 +39,9 @@ The accepted testing seam is the effective catalog-and-ranking boundary. Termina
 rendering details are not the contract. The live Herdr check covers only the plugin
 host, project pinning, and interaction that cannot be established below that boundary.
 
-## Prototype result, 2026-09-14
+## Landed, 2026-09-14
+
+Scope: committed on `worktree/delegate-monitor-herdr`, not merged to `main`.
 
 Branch: `worktree/delegate-monitor-herdr`. Backend commits for eventual `main`
 integration are `06a2f27`, `71eb342`, `bea657d`, and the validation fix `aceaf2f`.

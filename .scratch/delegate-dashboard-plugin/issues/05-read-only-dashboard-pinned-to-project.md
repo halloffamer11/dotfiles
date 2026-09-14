@@ -25,7 +25,9 @@ Throwaway branch only; never merged to `main`.
 - [x] The dashboard never dispatches and never forces a vendor re-probe.
 - [x] No snapshot tests of colors, borders or spacing.
 
-## Implemented, 2026-09-14
+## Landed, 2026-09-14
+
+Scope: committed on `worktree/delegate-monitor-herdr`, not merged to `main`.
 
 `tools/delegate-dashboard/dashboard.py` is the stdlib terminal entrypoint and
 `model.py` is its public, JSON-safe state boundary. The model resolves one Git root
