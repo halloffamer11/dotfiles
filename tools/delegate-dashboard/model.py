@@ -9,6 +9,8 @@ observations, and delegates every eligibility and leader decision to
 from __future__ import annotations
 
 import copy
+from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 from pathlib import Path
@@ -33,9 +35,46 @@ TIER_COLORS = {
     4: "#be80ca",
 }
 
+_CURRENT_POLICY = object()
+
 
 class DashboardError(Exception):
     """A plain-language failure to build dashboard state."""
+
+
+@dataclass(frozen=True)
+class PercentageEdit:
+    """One percentage editor's value and policy snapshot at open time."""
+
+    field: str
+    text: str
+    project_doc: dict[str, Any]
+    policy_bytes: bytes | None
+
+
+def _percentage_text(value: int | float) -> str:
+    """Render a stored fraction as a lossless, human-editable percentage."""
+    percentage = Decimal(str(value)) * Decimal(100)
+    if percentage == 0:
+        return "0"
+    return format(percentage.normalize(), "f")
+
+
+def _parse_percentage(text: str) -> float:
+    """Parse a finite percentage from 0 through 100 into its stored fraction."""
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("enter a percentage from 0 to 100")
+    try:
+        percentage = Decimal(text.strip())
+    except InvalidOperation as exc:
+        raise ValueError("enter a number from 0 to 100") from exc
+    if not percentage.is_finite():
+        raise ValueError("percentage must be finite and from 0 to 100")
+    if percentage < 0 or percentage > 100:
+        raise ValueError("percentage must be from 0 to 100")
+    if percentage == 0:
+        return 0.0
+    return float(percentage / Decimal(100))
 
 
 def _strict_json(raw: bytes) -> Any:
@@ -305,12 +344,12 @@ class DashboardModel:
             "policy": {
                 "gate": {
                     "value": routing["gate"],
-                    "display": f"{round(routing['gate'] * 100):g}%",
+                    "display": f"{_percentage_text(routing['gate'])}%",
                     "source": sources.get("gate"),
                 },
                 "margin": {
                     "value": routing["margin"],
-                    "display": f"{round(routing['margin'] * 100):g}%",
+                    "display": f"{_percentage_text(routing['margin'])}%",
                     "source": sources.get("margin"),
                 },
             },
@@ -392,7 +431,12 @@ class DashboardModel:
             return "project routing path resolves to a global delegate policy file"
         return None
 
-    def save_project_policy(self, proposed: dict[str, Any]) -> bool:
+    def save_project_policy(
+        self,
+        proposed: dict[str, Any],
+        *,
+        expected_policy_bytes: bytes | None | object = _CURRENT_POLICY,
+    ) -> bool:
         """Validate and atomically save a complete proposed project document.
 
         The final byte check prevents the ordinary stale-editor overwrite. There
@@ -423,7 +467,12 @@ class DashboardModel:
         except OSError as exc:
             self._set_save_state("error", f"Not saved: cannot recheck project policy: {exc}")
             return False
-        if current_raw != self._loaded_policy_bytes:
+        expected = (
+            self._loaded_policy_bytes
+            if expected_policy_bytes is _CURRENT_POLICY
+            else expected_policy_bytes
+        )
+        if current_raw != expected:
             self.refresh()
             self._set_save_state(
                 "conflict",
@@ -443,6 +492,37 @@ class DashboardModel:
             return False
         self._set_save_state("saved", "Saved project policy.")
         return True
+
+    def begin_percentage_edit(self, field: str) -> PercentageEdit:
+        """Capture a Gate or Margin edit, including its conflict baseline."""
+        if field not in ("gate", "margin"):
+            raise ValueError("percentage field must be 'gate' or 'margin'")
+        return PercentageEdit(
+            field=field,
+            text=_percentage_text(self.state["policy"][field]["value"]),
+            project_doc=copy.deepcopy(self._project_doc),
+            policy_bytes=self._loaded_policy_bytes,
+        )
+
+    def save_percentage_edit(self, edit: PercentageEdit, text: str) -> bool:
+        """Validate and save a percentage edit through the project-policy seam."""
+        if not isinstance(edit, PercentageEdit) or edit.field not in ("gate", "margin"):
+            self._set_save_state("error", "Not saved: invalid percentage edit.")
+            return False
+        try:
+            fraction = _parse_percentage(text)
+        except ValueError as exc:
+            self._set_save_state("error", f"Not saved: {edit.field.title()} {exc}.")
+            return False
+
+        proposal = copy.deepcopy(edit.project_doc)
+        if not proposal:
+            proposal["version"] = catalog.ROUTING_VERSION
+        proposal[edit.field] = fraction
+        return self.save_project_policy(
+            proposal,
+            expected_policy_bytes=edit.policy_bytes,
+        )
 
     def move_lane(self, lane_name: str, direction: int) -> bool:
         """Move one carried lane by one position inside its existing Tier."""

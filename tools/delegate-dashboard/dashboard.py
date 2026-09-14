@@ -21,6 +21,63 @@ FOREGROUND = "#e7e7e7"
 ERROR = "#d76563"
 SUCCESS = "#78bd74"
 
+KEY_SEQUENCES = (
+    "\x1b[1;2A",
+    "\x1b[1;2B",
+    "\x1b[5~",
+    "\x1b[6~",
+    "\x1b[A",
+    "\x1b[B",
+)
+
+
+def pop_key(pending, *, flush_escape=False):
+    """Pop one key without dropping batched text or split terminal sequences."""
+    if not pending:
+        return None, pending
+    if not pending.startswith("\x1b"):
+        return pending[0], pending[1:]
+    for sequence in KEY_SEQUENCES:
+        if pending.startswith(sequence):
+            return sequence, pending[len(sequence) :]
+    if not flush_escape and any(sequence.startswith(pending) for sequence in KEY_SEQUENCES):
+        return None, pending
+    return "\x1b", pending[1:]
+
+
+class PercentageEditor:
+    """Small input editor backed by a model policy snapshot."""
+
+    def __init__(self, model, field):
+        self.model = model
+        self.edit = model.begin_percentage_edit(field)
+        self.text = self.edit.text
+        self.pristine = True
+
+    @property
+    def label(self):
+        return self.edit.field.title()
+
+    def feed(self, key):
+        """Consume one key; return whether the editor remains open."""
+        if key == "\x1b":
+            return False
+        if key in ("\r", "\n"):
+            self.model.save_percentage_edit(self.edit, self.text)
+            return False
+        if key in ("\x7f", "\b"):
+            self.text = "" if self.pristine else self.text[:-1]
+            self.pristine = False
+        elif key == "\x15":
+            self.text = ""
+            self.pristine = False
+        elif len(key) == 1 and key.isprintable():
+            if self.pristine:
+                self.text = ""
+            self.text += key
+            self.pristine = False
+        return True
+
 
 def foreground(hex_color: str) -> str:
     value = hex_color.removeprefix("#")
@@ -105,7 +162,16 @@ def body_lines(state, width, selected_lane=None):
     return lines
 
 
-def compose(state, offset, width, height, selected_lane=None, *, follow_selection=True):
+def compose(
+    state,
+    offset,
+    width,
+    height,
+    selected_lane=None,
+    *,
+    follow_selection=True,
+    editor=None,
+):
     """Compose a clipped viewport with persistent project identity and key help."""
     gate = state["policy"]["gate"]
     margin = state["policy"]["margin"]
@@ -130,6 +196,15 @@ def compose(state, offset, width, height, selected_lane=None, *, follow_selectio
         header.append((usage["detail"], ERROR, False))
     if state.get("error"):
         header.append((state["error"], ERROR, True))
+    if editor is not None:
+        header.append(
+            (
+                f"Edit {editor.label} percentage (0–100): {editor.text}_  "
+                "Enter save · Esc cancel",
+                FOREGROUND,
+                True,
+            )
+        )
     save = state.get("save", {})
     if save.get("status") != "idle" and save.get("detail"):
         color = SUCCESS if save["status"] == "saved" else ERROR
@@ -158,15 +233,16 @@ def compose(state, offset, width, height, selected_lane=None, *, follow_selectio
             offset = selected_line - available + 1
     visible = body[offset : offset + available]
     extent = "all" if not body else f"{offset + 1}–{min(len(body), offset + available)}/{len(body)}"
-    footer = [(
-        f"jk/↑↓ select · JK/⇧↑↓ move · Pg scroll · r reload · q close [{extent}]",
-        MUTED,
-        False,
-    )]
+    footer_text = (
+        f"editing {editor.label} · type value · Enter save · Esc cancel [{extent}]"
+        if editor is not None
+        else f"jk/↑↓ select · JK/⇧↑↓ move · g Gate · m Margin · r reload · q close [{extent}]"
+    )
+    footer = [(footer_text, MUTED, False)]
     return header + visible + footer, offset
 
 
-def draw(state, offset, selected_lane=None, *, follow_selection=True):
+def draw(state, offset, selected_lane=None, *, follow_selection=True, editor=None):
     size = shutil.get_terminal_size((100, 30))
     lines, offset = compose(
         state,
@@ -175,6 +251,7 @@ def draw(state, offset, selected_lane=None, *, follow_selection=True):
         size.lines,
         selected_lane,
         follow_selection=follow_selection,
+        editor=editor,
     )
     rendered = [paint(text, color, bold=bold, width=size.columns) for text, color, bold in lines]
     rendered.extend([""] * max(0, size.lines - len(rendered)))
@@ -198,6 +275,8 @@ def run_terminal(model: DashboardModel) -> int:
     names = carried_lane_names(model.state)
     selected = names[0] if names else None
     follow_selection = True
+    editor = None
+    pending = ""
     try:
         tty.setcbreak(fd)
         sys.stdout.write("\033[?1049h\033[?25l\033[2J")
@@ -216,41 +295,57 @@ def run_terminal(model: DashboardModel) -> int:
                     offset,
                     selected,
                     follow_selection=follow_selection,
+                    editor=editor,
                 )
                 follow_selection = False
                 dirty = False
 
             ready, _, _ = select.select([fd], [], [], 0.5)
-            if not ready:
+            if not ready and not pending:
                 continue
-            key = os.read(fd, 16).decode("utf-8", errors="ignore")
-            if key in ("q", "Q", "\x03"):
-                return 0
-            names = carried_lane_names(model.state)
-            selected_index = names.index(selected) if selected in names else 0
-            if key in ("j", "\x1b[B") and names:
-                selected = names[min(len(names) - 1, selected_index + 1)]
-                follow_selection = True
-            elif key in ("k", "\x1b[A") and names:
-                selected = names[max(0, selected_index - 1)]
-                follow_selection = True
-            elif key in ("K", "\x1b[1;2A") and selected is not None:
-                model.move_lane(selected, -1)
-                follow_selection = True
-            elif key in ("J", "\x1b[1;2B") and selected is not None:
-                model.move_lane(selected, 1)
-                follow_selection = True
-            elif key in ("\x1b[6~", " "):
-                offset += 8
-            elif key in ("\x1b[5~",):
-                offset = max(0, offset - 8)
-            elif key == "g":
-                offset = 0
-            elif key == "G":
-                offset = max(0, total - 1)
-            elif key in ("r", "R"):
-                model.refresh()
-            dirty = True
+            if ready:
+                pending += os.read(fd, 4096).decode("utf-8", errors="ignore")
+            flush_escape = not ready
+            while pending:
+                key, pending = pop_key(pending, flush_escape=flush_escape)
+                if key is None:
+                    break
+                if editor is not None:
+                    if key == "\x03":
+                        return 0
+                    if not editor.feed(key):
+                        editor = None
+                    dirty = True
+                    continue
+                if key in ("q", "Q", "\x03"):
+                    return 0
+                names = carried_lane_names(model.state)
+                selected_index = names.index(selected) if selected in names else 0
+                if key in ("j", "\x1b[B") and names:
+                    selected = names[min(len(names) - 1, selected_index + 1)]
+                    follow_selection = True
+                elif key in ("k", "\x1b[A") and names:
+                    selected = names[max(0, selected_index - 1)]
+                    follow_selection = True
+                elif key in ("K", "\x1b[1;2A") and selected is not None:
+                    model.move_lane(selected, -1)
+                    follow_selection = True
+                elif key in ("J", "\x1b[1;2B") and selected is not None:
+                    model.move_lane(selected, 1)
+                    follow_selection = True
+                elif key in ("\x1b[6~", " "):
+                    offset += 8
+                elif key in ("\x1b[5~",):
+                    offset = max(0, offset - 8)
+                elif key == "g":
+                    editor = PercentageEditor(model, "gate")
+                elif key == "m":
+                    editor = PercentageEditor(model, "margin")
+                elif key == "G":
+                    offset = max(0, total - 1)
+                elif key in ("r", "R"):
+                    model.refresh()
+                dirty = True
     except KeyboardInterrupt:
         return 0
     finally:

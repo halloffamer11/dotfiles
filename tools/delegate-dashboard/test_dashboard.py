@@ -15,6 +15,7 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 from model import DashboardModel
+from dashboard import PercentageEditor, pop_key
 
 import catalog
 import rank
@@ -174,6 +175,179 @@ class DashboardModelTest(unittest.TestCase):
         self.assertEqual(dashboard.state["policy"]["gate"]["display"], "0%")
         self.assertEqual(dashboard.state["policy"]["gate"]["source"], str(project_policy.resolve()))
         self.assertEqual(dashboard.state["tiers"][1]["leader"], "terra-high@codex")
+
+    def test_fractional_percentages_round_trip_through_display_and_prefilled_editor(self):
+        project_policy = self.root / ".delegate" / "routing.json"
+        write_json(
+            project_policy,
+            {
+                "version": "delegate-routing.v1",
+                "gate": 0.1234567,
+                "margin": 0.0075,
+            },
+        )
+        dashboard = self.make_model()
+
+        self.assertEqual(dashboard.state["policy"]["gate"]["display"], "12.34567%")
+        self.assertEqual(dashboard.state["policy"]["margin"]["display"], "0.75%")
+        edit = dashboard.begin_percentage_edit("gate")
+        self.assertEqual(edit.text, "12.34567")
+
+        self.assertTrue(dashboard.save_percentage_edit(edit, "12.345678"))
+        self.assertEqual(json.loads(project_policy.read_text())["gate"], 0.12345678)
+        self.assertEqual(dashboard.state["policy"]["gate"]["display"], "12.345678%")
+
+    def test_lowering_gate_changes_leader_and_next_class_rank(self):
+        self.write_meters(a_r=0.05, a_pace=0.5, b_r=0.7, b_pace=0.6)
+        global_lanes_before = (self.config / "lanes.json").read_bytes()
+        global_routing_before = (self.config / "routing.json").read_bytes()
+        meters_before = self.meters.read_bytes()
+        project_policy = self.root / ".delegate" / "routing.json"
+        write_json(
+            project_policy,
+            {
+                "version": "delegate-routing.v1",
+                "classes": {"impl": {"ceiling": 2}},
+                "note": "preserve",
+            },
+        )
+        dashboard = self.make_model()
+        self.assertEqual(dashboard.state["tiers"][1]["leader"], "sol-high@codex")
+
+        edit = dashboard.begin_percentage_edit("gate")
+        self.assertTrue(dashboard.save_percentage_edit(edit, "4.5"))
+        self.assertEqual(dashboard.state["tiers"][1]["leader"], "terra-high@codex")
+        saved = json.loads(project_policy.read_text())
+        self.assertEqual(saved["gate"], 0.045)
+        self.assertEqual(saved["note"], "preserve")
+        self.assertEqual((self.config / "lanes.json").read_bytes(), global_lanes_before)
+        self.assertEqual((self.config / "routing.json").read_bytes(), global_routing_before)
+        self.assertEqual(self.meters.read_bytes(), meters_before)
+
+        effective = catalog.load_catalog(cwd=self.root, config_dir=self.config)
+        rows = rank.rank(
+            "impl",
+            effective,
+            json.loads(self.meters.read_text()),
+            {"codex", "claude", "grok"},
+        )
+        self.assertEqual(effective["routing"]["gate"], 0.045)
+        self.assertEqual(rows[0]["lane"], "terra-high@codex")
+
+    def test_margin_edit_starts_and_stops_steal_and_next_class_rank(self):
+        project_policy = self.root / ".delegate" / "routing.json"
+        write_json(
+            project_policy,
+            {
+                "version": "delegate-routing.v1",
+                "classes": {"impl": {"ceiling": 2}},
+            },
+        )
+        dashboard = self.make_model()
+        self.assertEqual(dashboard.state["tiers"][1]["leader"], "terra-high@codex")
+
+        self.assertTrue(
+            dashboard.save_percentage_edit(
+                dashboard.begin_percentage_edit("margin"),
+                "10",
+            )
+        )
+        self.assertEqual(dashboard.state["tiers"][1]["leader"], "sol-high@codex")
+        effective = catalog.load_catalog(cwd=self.root, config_dir=self.config)
+        rows = rank.rank(
+            "impl",
+            effective,
+            json.loads(self.meters.read_text()),
+            {"codex", "claude", "grok"},
+        )
+        self.assertEqual(effective["routing"]["margin"], 0.1)
+        self.assertEqual(rows[0]["lane"], "sol-high@codex")
+
+        self.assertTrue(
+            dashboard.save_percentage_edit(
+                dashboard.begin_percentage_edit("margin"),
+                "10.01",
+            )
+        )
+        self.assertEqual(dashboard.state["tiers"][1]["leader"], "terra-high@codex")
+        effective = catalog.load_catalog(cwd=self.root, config_dir=self.config)
+        rows = rank.rank(
+            "impl",
+            effective,
+            json.loads(self.meters.read_text()),
+            {"codex", "claude", "grok"},
+        )
+        self.assertEqual(effective["routing"]["margin"], 0.1001)
+        self.assertEqual(rows[0]["lane"], "terra-high@codex")
+
+    def test_bad_percentage_values_preserve_policy_bytes_and_other_keys(self):
+        project_policy = self.root / ".delegate" / "routing.json"
+        original = {
+            "version": "delegate-routing.v1",
+            "gate": 0.15,
+            "note": "unchanged",
+        }
+        write_json(project_policy, original)
+        before = project_policy.read_bytes()
+        dashboard = self.make_model()
+
+        for value in ("", "not-a-number", "NaN", "Infinity", "-0.01", "100.01"):
+            with self.subTest(value=value):
+                edit = dashboard.begin_percentage_edit("gate")
+                self.assertFalse(dashboard.save_percentage_edit(edit, value))
+                self.assertEqual(project_policy.read_bytes(), before)
+                self.assertEqual(dashboard.state["save"]["status"], "error")
+        self.assertEqual(json.loads(project_policy.read_text()), original)
+
+    def test_policy_reload_during_percentage_entry_conflicts_from_starting_snapshot(self):
+        project_policy = self.root / ".delegate" / "routing.json"
+        write_json(project_policy, {"version": "delegate-routing.v1", "note": "loaded"})
+        dashboard = self.make_model()
+        edit = dashboard.begin_percentage_edit("gate")
+
+        write_json(project_policy, {"version": "delegate-routing.v1", "note": "external"})
+        external = project_policy.read_bytes()
+        self.assertTrue(dashboard.refresh_if_changed())
+        self.assertFalse(dashboard.save_percentage_edit(edit, "25"))
+        self.assertEqual(project_policy.read_bytes(), external)
+        self.assertEqual(dashboard.state["save"]["status"], "conflict")
+
+    def test_percentage_editor_escape_cancels_without_saving(self):
+        project_policy = self.root / ".delegate" / "routing.json"
+        write_json(project_policy, {"version": "delegate-routing.v1", "gate": 0.15})
+        before = project_policy.read_bytes()
+        dashboard = self.make_model()
+        editor = PercentageEditor(dashboard, "gate")
+        self.assertEqual(editor.text, "15")
+
+        self.assertFalse(editor.feed("\x1b"))
+        self.assertEqual(project_policy.read_bytes(), before)
+        self.assertEqual(dashboard.state["save"]["status"], "idle")
+
+    def test_key_stream_preserves_batched_text_and_escape_sequences(self):
+        pending = "g12.5\rj\x1b[B"
+        keys = []
+        while pending:
+            key, pending = pop_key(pending)
+            self.assertIsNotNone(key)
+            keys.append(key)
+        self.assertEqual(keys, ["g", "1", "2", ".", "5", "\r", "j", "\x1b[B"])
+
+        key, pending = pop_key("\x1b[")
+        self.assertIsNone(key)
+        self.assertEqual(pending, "\x1b[")
+        key, pending = pop_key(pending + "A")
+        self.assertEqual((key, pending), ("\x1b[A", ""))
+
+        dashboard = self.make_model()
+        editor = PercentageEditor(dashboard, "margin")
+        pending = "10.01\r"
+        active = True
+        while pending:
+            key, pending = pop_key(pending)
+            active = editor.feed(key)
+        self.assertFalse(active)
+        self.assertEqual(dashboard.state["policy"]["margin"]["display"], "10.01%")
 
     def test_move_stays_in_tier_and_saves_complete_order(self):
         project_policy = self.root / ".delegate" / "routing.json"
