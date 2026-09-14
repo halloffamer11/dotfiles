@@ -21,6 +21,10 @@ Machine configuration and agent tooling managed as one Git repository.
 or safe-save behavior, read `tools/delegate-dashboard/CLAUDE.md`. Backend tickets
 02-04 are separate commits for eventual `main` integration; the prototype UI stays
 on this branch. Ticket 09 owns live evidence and Orin's pending usability verdict.
+Before using the installed delegate skill in this project, read ticket 09's
+2026-09-14 user-test note: the saved `.delegate/routing.json` now has Project order,
+which the installed main-checkout validator rejects. The branch backend accepts
+it. Keep this test policy branch-local; backend integration needs approval.
 
 The delegate redesign is the main live thread. Spec
 `docs/superpowers/specs/2026-09-08-delegate-redesign.md`; tickets in

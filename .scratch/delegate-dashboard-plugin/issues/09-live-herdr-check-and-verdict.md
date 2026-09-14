@@ -56,8 +56,8 @@ usage-cache hash stayed `34cd3eabc12e983fda4eb65d2c1029c6860cf97c`. The disposab
 global lanes, routing, and Meter hashes also stayed unchanged. No worker launch
 or vendor probe was performed during this window.
 
-Technical verdict and branch pointer are in ticket 01. Orin has not yet used the
-controls to confirm that the marked leader is predictable. Independent review
+Technical verdict and branch pointer are in ticket 01. Orin's predictability
+verdict is still pending. Independent review
 is recorded in [the review record](../research/2026-09-14-review.md). Popup routing was
 checked against Herdr's installed schema, but popup was not opened live.
 
@@ -65,3 +65,25 @@ After the review fixes, a second smoke check in `w2N:p2` used the same disposabl
 fixture. It showed `p` for Project order and `g` for global fallback after a partial
 Project order edit. The legend identifies fallback as derived. The pane was closed
 with `q`; no live policy was changed.
+
+User test, 2026-09-14: Orin opened the dashboard in `w1Y:p9` and saved project
+Gate 0% and Margin 50%. Herdr's visible pane and the installed skill's
+`rank.py impl --tier 3 --meters ~/.cache/delegate/usage.json` both selected
+`grok46-high@grok`. Normal `impl` (Tiers 2-3) selected `flash-high@agy` through
+a Pace steal. A Tier leader is not the Pick for a Class range.
+
+During wrap-up, `.delegate/routing.json` also acquired `project_order` from the
+user's test. This is preserved on the prototype branch, not intended for `main`.
+The installed `~/.agents/skills/delegate` and `~/.claude/skills/delegate` both
+resolve to `~/dotfiles/agents/skills/delegate`, not this worktree. Its catalog
+validator now fails with `key 'project_order': unknown top-level key` for this
+project. The branch validator accepts the file, and the branch ranker still
+selects Grok for exact Tier 3 with the same cached Meters. The earlier installed
+skill confirmation preceded the Project order save; it does not establish current
+compatibility. Next: obtain direction for backend integration or an installed-skill
+update before expecting installed dispatch to consume this project policy. No
+merge, installation change, or removal of the user's policy was authorized.
+
+Keep the disposable fixture `/tmp/delegate-dashboard-live.frqMrD` and the review
+evidence until the human verdict. No fresh-context deletion was performed. The
+user's dashboard pane stays open; no background implementation workers remain.
