@@ -469,7 +469,15 @@ def validate_routing(doc, source="routing.json", partial=False):
     if "classTier" in doc:
         raise CatalogError(f"{source}: key 'classTier': 'classTier' has been replaced by 'classes'; use {{\"classes\": {{\"<class>\": {{\"floor\": 1, \"ceiling\": 2}}}}}}")
 
+    if not partial and "project_order" in doc:
+        raise CatalogError(
+            f"{source}: key 'project_order': project_order is project-only and "
+            "cannot appear in global routing"
+        )
+
     allowed_top = {"version", "classes", "margin", "gate", "note"}
+    if partial:
+        allowed_top.add("project_order")
     for k in doc:
         if k not in allowed_top:
             raise CatalogError(
@@ -543,6 +551,20 @@ def validate_routing(doc, source="routing.json", partial=False):
                 f"{source}: key 'gate': gate must be a number between 0 and 1, got {g!r}"
             )
 
+    if "project_order" in doc:
+        project_order = doc["project_order"]
+        if not isinstance(project_order, list):
+            raise CatalogError(
+                f"{source}: key 'project_order': project_order must be a flat list "
+                f"of non-empty lane-name strings, got {project_order!r}"
+            )
+        for lane_name in project_order:
+            if not isinstance(lane_name, str) or not lane_name.strip():
+                raise CatalogError(
+                    f"{source}: key 'project_order': project_order must be a flat list "
+                    f"of non-empty lane-name strings, got entry {lane_name!r}"
+                )
+
     if "note" in doc and not isinstance(doc["note"], str):
         raise CatalogError(f"{source}: key 'note': note must be a string")
 
@@ -592,7 +614,70 @@ def merge_routing(global_doc, project_doc=None, global_source="routing.json", pr
     return routing, sources
 
 
-def effective_routing(cwd=None, config_dir=None):
+def _validate_merged_routing(routing, source):
+    """Validate a complete effective routing document.
+
+    ``project_order`` has already been validated as project policy; remove that
+    project-only projection before applying the complete global-routing shape.
+    """
+    routing_fields = copy.deepcopy(routing)
+    routing_fields.pop("project_order", None)
+    validate_routing(routing_fields, source=source, partial=False)
+
+
+def validate_project_routing(
+    doc,
+    global_lanes,
+    global_routing,
+    source="project routing.json",
+    lanes_source="lanes.json",
+    global_source="routing.json",
+):
+    """Validate proposed project policy against both global documents.
+
+    This is the public pre-save boundary for project routing. It validates all
+    three input documents, Project order's catalog references, and the complete
+    routing document produced by merging the proposal over global routing.
+    Returns ``doc`` unchanged, or raises ``CatalogError``.
+    """
+    validate_lanes(global_lanes, source=lanes_source)
+    validate_routing(global_routing, source=global_source, partial=False)
+    validate_routing(doc, source=source, partial=True)
+
+    lanes = global_lanes["lanes"]
+    seen = set()
+    for lane_name in doc.get("project_order", []):
+        if lane_name in seen:
+            raise CatalogError(
+                f"{source}: project_order lane '{lane_name}': duplicate lane; "
+                "each lane may appear only once"
+            )
+        seen.add(lane_name)
+        if lane_name not in lanes:
+            raise CatalogError(
+                f"{source}: project_order lane '{lane_name}': lane is not in the "
+                "global lane catalog"
+            )
+        if not lanes[lane_name].get("enabled", True):
+            raise CatalogError(
+                f"{source}: project_order lane '{lane_name}': lane is globally off; "
+                "project_order cannot restore it"
+            )
+
+    routing, _sources = merge_routing(
+        global_routing,
+        doc,
+        global_source=global_source,
+        project_source=source,
+    )
+    _validate_merged_routing(
+        routing,
+        source=f"{source} merged with {global_source}",
+    )
+    return doc
+
+
+def effective_routing(cwd=None, config_dir=None, lanes_doc=None, lanes_source=None):
     """Loads global routing, validates it, finds project file from cwd (default current dir),
     validates with partial=True if exists, merges. Returns (routing, sources)."""
     base_dir = os.path.expanduser(config_dir if config_dir is not None else CONFIG_DIR)
@@ -605,19 +690,81 @@ def effective_routing(cwd=None, config_dir=None):
 
     if project_path and os.path.isfile(project_path):
         project_doc = load_json(project_path)
-        validate_routing(project_doc, source=project_path, partial=True)
-        return merge_routing(
+        if lanes_doc is None and "project_order" in project_doc:
+            lanes_source = os.path.join(base_dir, "lanes.json")
+            lanes_doc = load_json(lanes_source)
+        if lanes_doc is not None:
+            validate_project_routing(
+                project_doc,
+                lanes_doc,
+                global_doc,
+                source=project_path,
+                lanes_source=lanes_source or "lanes.json",
+                global_source=global_path,
+            )
+        else:
+            validate_routing(project_doc, source=project_path, partial=True)
+        routing, sources = merge_routing(
             global_doc,
             project_doc,
             global_source=global_path,
             project_source=project_path,
         )
-    return merge_routing(
+        _validate_merged_routing(
+            routing,
+            source=f"{project_path} merged with {global_path}",
+        )
+        return routing, sources
+    routing, sources = merge_routing(
         global_doc,
         None,
         global_source=global_path,
         project_source=None,
     )
+    _validate_merged_routing(routing, source=global_path)
+    return routing, sources
+
+
+def _effective_lanes(lanes, routing, sources, lanes_source):
+    """Return lane records with the canonical Project order projection."""
+    effective = copy.deepcopy(lanes)
+    for lane_name, lane in effective.items():
+        if "order" in lane:
+            sources[f"lanes.{lane_name}.order"] = lanes_source
+
+    if "project_order" not in routing:
+        return effective
+
+    project_source = sources.get("project_order", "project routing.json")
+    project_order = routing["project_order"]
+    named = set(project_order)
+
+    for tier in range(1, 5):
+        named_in_tier = [
+            name for name in project_order if effective[name]["tier"] == tier
+        ]
+        fallback = sorted(
+            (
+                (name, lane)
+                for name, lane in effective.items()
+                if lane["tier"] == tier
+                and lane.get("enabled", True)
+                and name not in named
+            ),
+            key=lambda item: (
+                item[1].get("order") is None,
+                item[1].get("order", 0),
+                item[0],
+            ),
+        )
+        ordered_names = named_in_tier + [name for name, _lane in fallback]
+        for order, lane_name in enumerate(ordered_names, 1):
+            effective[lane_name]["order"] = order
+            sources[f"lanes.{lane_name}.order"] = (
+                project_source if lane_name in named else lanes_source
+            )
+
+    return effective
 
 
 def load_catalog(cwd=None, config_dir=None):
@@ -630,7 +777,18 @@ def load_catalog(cwd=None, config_dir=None):
     lanes_doc = load_json(lanes_path)
     validate_lanes(lanes_doc, source=lanes_path)
 
-    routing, sources = effective_routing(cwd=cwd, config_dir=config_dir)
+    routing, sources = effective_routing(
+        cwd=cwd,
+        config_dir=config_dir,
+        lanes_doc=lanes_doc,
+        lanes_source=lanes_path,
+    )
+    lanes = _effective_lanes(
+        lanes_doc["lanes"],
+        routing,
+        sources,
+        lanes_path,
+    )
 
     git_root = find_git_root(cwd)
     project_path = os.path.join(git_root, ".delegate", "routing.json") if git_root else None
@@ -639,7 +797,7 @@ def load_catalog(cwd=None, config_dir=None):
 
     return {
         "meters": lanes_doc["meters"],
-        "lanes": lanes_doc["lanes"],
+        "lanes": lanes,
         "routing": routing,
         "sources": sources,
         "files": {
@@ -690,12 +848,21 @@ def show_catalog(cwd=None, config_dir=None, as_json=False):
     print("\n# lanes")
     sorted_lanes = sorted(
         cat["lanes"].items(),
-        key=lambda item: (-item[1]["tier"], item[0]),
+        key=lambda item: (
+            -item[1]["tier"],
+            item[1].get("order") is None,
+            item[1].get("order", 0),
+            item[0],
+        ),
     )
     for name, l in sorted_lanes:
+        order = l.get("order")
+        order_source = cat["sources"].get(f"lanes.{name}.order", "")
+        order_text = f"  order={order}  {order_source}" if order is not None else ""
         print(
             f"{name}  {l['tier']}  {l['harness']}  {l['model']}  "
-            f"{l['effort']}  {l['meter']}  {l['meter_weight']}  {l['timeout']}  {l['basis']}"
+            f"{l['effort']}  {l['meter']}  {l['meter_weight']}  {l['timeout']}  "
+            f"{l['basis']}{order_text}"
         )
 
     print("\n# routing")

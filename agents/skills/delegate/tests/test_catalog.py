@@ -15,6 +15,7 @@ CATALOG_PY = os.path.join(DELEGATE_DIR, "catalog.py")
 
 sys.path.insert(0, DELEGATE_DIR)
 import catalog
+import rank
 
 fails = 0
 
@@ -815,6 +816,199 @@ record(
     _seen and _seen <= set(_claude_names) and not _wrong,
     f"unaccounted={sorted(_seen - set(_claude_names))} wrong={_wrong}",
 )
+
+
+# 8. Ticket 04: Project order is a project-only overlay on global Order.
+project_order_doc = {
+    "project_order": ["terra-high@codex", "flash-high@agy", "sol-high@codex"],
+}
+record(
+    "8.1 a flat partial Project order spanning Tiers validates",
+    check_catalog_error(
+        catalog.validate_project_routing,
+        project_order_doc,
+        copy.deepcopy(lanes_sample),
+        copy.deepcopy(routing_sample),
+    ) is None,
+)
+
+for bad, tag in (
+    ("terra-high@codex", "a string instead of a list"),
+    ({"2": ["terra-high@codex"]}, "Tier-keyed object"),
+    (["terra-high@codex", 7], "non-string lane"),
+    (["terra-high@codex", ""], "empty lane name"),
+):
+    bad_doc = {"project_order": bad}
+    msg = check_catalog_error(catalog.validate_routing, bad_doc, partial=True)
+    record(
+        f"8.2 Project order rejects {tag}",
+        bool(msg and "project_order" in msg and "flat list" in msg),
+        msg,
+    )
+
+global_project_order = copy.deepcopy(routing_sample)
+global_project_order["project_order"] = ["terra-high@codex"]
+msg = check_catalog_error(catalog.validate_routing, global_project_order)
+record(
+    "8.2 Project order is rejected in global routing",
+    bool(msg and "project_order" in msg and "project-only" in msg),
+    msg,
+)
+
+for bad_order, lane_name, rule in (
+    (["terra-high@codex", "terra-high@codex"], "terra-high@codex", "duplicate"),
+    (["not-a-lane@codex"], "not-a-lane@codex", "global lane catalog"),
+):
+    msg = check_catalog_error(
+        catalog.validate_project_routing,
+        {"project_order": bad_order},
+        copy.deepcopy(lanes_sample),
+        copy.deepcopy(routing_sample),
+    )
+    record(
+        f"8.3 Project order rejects {rule}",
+        bool(msg and lane_name in msg and rule in msg),
+        msg,
+    )
+
+off_lanes = copy.deepcopy(lanes_sample)
+off_lanes["lanes"]["terra-high@codex"]["enabled"] = False
+msg = check_catalog_error(
+    catalog.validate_project_routing,
+    {"project_order": ["terra-high@codex"]},
+    off_lanes,
+    copy.deepcopy(routing_sample),
+)
+record(
+    "8.3 Project order cannot restore a globally off lane",
+    bool(msg and "terra-high@codex" in msg and "globally off" in msg),
+    msg,
+)
+
+# The partial project document is valid by itself, but the merged Class is not.
+msg = check_catalog_error(
+    catalog.validate_project_routing,
+    {"classes": {"scout": {"floor": 4}}},
+    copy.deepcopy(lanes_sample),
+    copy.deepcopy(routing_sample),
+)
+record(
+    "8.4 public project validation rejects a merged floor above the global ceiling",
+    bool(msg and "scout" in msg and "floor (4) cannot exceed ceiling (3)" in msg),
+    msg,
+)
+
+with tempfile.TemporaryDirectory() as td:
+    cfg_dir = os.path.join(td, "cfg")
+    os.makedirs(cfg_dir)
+    global_lanes = copy.deepcopy(lanes_sample)
+    global_lanes["lanes"]["terra-high@codex"]["order"] = 1
+    global_lanes["lanes"]["grok46-high@grok"]["order"] = 2
+    global_lanes["lanes"]["fable-xhigh@claude"]["enabled"] = False
+    global_lanes["lanes"]["fable-xhigh@claude"]["order"] = 7
+
+    # Two catalog additions without Order prove the final fallback is by lane name.
+    global_lanes["lanes"]["terra-low@codex"] = copy.deepcopy(
+        global_lanes["lanes"]["terra-high@codex"]
+    )
+    global_lanes["lanes"]["terra-low@codex"]["effort"] = "low"
+    global_lanes["lanes"]["terra-low@codex"].pop("order")
+    global_lanes["lanes"]["luna-high@codex"] = copy.deepcopy(
+        global_lanes["lanes"]["luna-low@codex"]
+    )
+    global_lanes["lanes"]["luna-high@codex"]["effort"] = "high"
+    global_lanes["lanes"]["luna-high@codex"]["tier"] = 2
+    global_lanes["lanes"]["luna-high@codex"].pop("order", None)
+
+    lanes_path = os.path.join(cfg_dir, "lanes.json")
+    routing_path = os.path.join(cfg_dir, "routing.json")
+    catalog.write_json(lanes_path, global_lanes)
+    catalog.write_json(routing_path, routing_sample)
+
+    project_dir = os.path.join(td, "fixture-project")
+    os.makedirs(os.path.join(project_dir, ".delegate"))
+    open(os.path.join(project_dir, ".git"), "w").close()
+    project_path = os.path.join(project_dir, ".delegate", "routing.json")
+
+    before = catalog.load_catalog(cwd=project_dir, config_dir=cfg_dir)
+    before_orders = {
+        name: lane.get("order") for name, lane in before["lanes"].items()
+    }
+    record(
+        "8.5 no Project order leaves global lane records unchanged",
+        before["lanes"] == global_lanes["lanes"]
+        and before_orders["terra-high@codex"] == 1
+        and before_orders["grok46-high@grok"] == 2
+        and before_orders["luna-high@codex"] is None,
+    )
+
+    catalog.write_json(project_path, {
+        "project_order": ["grok46-high@grok", "flash-high@agy"],
+        "note": "unrelated project key survives",
+    })
+    effective = catalog.load_catalog(cwd=project_dir, config_dir=cfg_dir)
+    tier2 = sorted(
+        (
+            (lane["order"], name)
+            for name, lane in effective["lanes"].items()
+            if lane["tier"] == 2
+        )
+    )
+    record(
+        "8.6 named lanes precede global-Order and name fallbacks inside each Tier",
+        tier2 == [
+            (1, "grok46-high@grok"),
+            (2, "terra-high@codex"),
+            (3, "luna-high@codex"),
+            (4, "terra-low@codex"),
+        ],
+        repr(tier2),
+    )
+    record(
+        "8.6 effective Order has field sources and cannot change Tier or enabled",
+        effective["sources"]["lanes.grok46-high@grok.order"] == project_path
+        and effective["sources"]["lanes.terra-high@codex.order"] == lanes_path
+        and effective["lanes"]["grok46-high@grok"]["tier"]
+            == global_lanes["lanes"]["grok46-high@grok"]["tier"]
+        and effective["lanes"]["grok46-high@grok"].get("enabled", True)
+            == global_lanes["lanes"]["grok46-high@grok"].get("enabled", True)
+        and effective["lanes"]["fable-xhigh@claude"]["enabled"] is False
+        and effective["lanes"]["fable-xhigh@claude"]["order"] == 7
+        and effective["sources"]["lanes.fable-xhigh@claude.order"] == lanes_path,
+    )
+
+    show = io.StringIO()
+    old_out = sys.stdout
+    sys.stdout = show
+    try:
+        catalog.show_catalog(cwd=project_dir, config_dir=cfg_dir)
+    finally:
+        sys.stdout = old_out
+    show_text = show.getvalue()
+    record(
+        "8.7 show displays each effective Order source",
+        "grok46-high@grok" in show_text
+        and f"order=1  {project_path}" in show_text
+        and f"order=2  {lanes_path}" in show_text,
+        show_text,
+    )
+
+    # Reload the fixture after the project write: both public ranking projections
+    # must consume the one effective catalog rather than applying an overlay again.
+    present = set(catalog.HARNESSES)
+    before_pick = next(r["lane"] for r in rank.rank("impl", before, {}, present) if r["pick"])
+    before_tier2 = rank.tier_leaders(before, {}, present)[1]["leader"]
+    after_pick = next(r["lane"] for r in rank.rank("impl", effective, {}, present) if r["pick"])
+    previews = rank.tier_leaders(effective, {}, present)
+    record(
+        "8.8 reloaded fixture changes Class ranking and the Tier leader through the public seam",
+        before_pick == "terra-high@codex"
+        and before_tier2 == "terra-high@codex"
+        and after_pick == "grok46-high@grok"
+        and [p["tier"] for p in previews] == [1, 2, 3, 4]
+        and previews[1]["leader"] == "grok46-high@grok",
+        repr((before_pick, before_tier2, after_pick, previews[1]["leader"])),
+    )
 
 
 sys.exit(1 if fails else 0)
