@@ -849,4 +849,23 @@ with tempfile.TemporaryDirectory() as td:
     record("case 20 Tier CLI text/JSON and missing-cache behavior", cli20_ok,
            res20_json.stderr + res20_text.stderr + res20_missing.stderr)
 
+    # 21. All callers use one validity rule; malformed observations are unknown.
+    legacy21 = {entry["lane"]: entry for entry in tier_meters["lanes"]}
+    record("case 21 valid wrapped and legacy Meter inputs agree",
+           rank.rank("review", tier_cat, legacy21, ALL_HARNESSES)
+           == rank.rank("review", tier_cat, tier_meters, ALL_HARNESSES)
+           and rank.tier_leaders(tier_cat, legacy21, ALL_HARNESSES)
+           == rank.tier_leaders(tier_cat, tier_meters, ALL_HARNESSES))
+    for field21, value21 in (("pace", "bad"), ("pace", float("inf")),
+                             ("pace", 10 ** 400), ("r", True), ("status", 42)):
+        bad21 = copy.deepcopy(tier_meters)
+        bad21["lanes"].append({"lane": "unused", field21: value21})
+        rows21 = rank.rank("review", tier_cat, bad21, ALL_HARNESSES)
+        tiers21 = rank.tier_leaders(tier_cat, bad21, ALL_HARNESSES)
+        observed21 = rows21 + [row for tier in tiers21 for row in tier["rows"]]
+        record(f"case 21 malformed {field21} becomes unknown for Class and Tier ranking",
+               all(row["r"] is None and row["pace"] is None
+                   and row["meter_status"] == "unknown" for row in observed21))
+        json.dumps(observed21, allow_nan=False)
+
 sys.exit(1 if fails else 0)
