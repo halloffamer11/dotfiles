@@ -504,6 +504,38 @@ class DashboardModelTest(unittest.TestCase):
         self.assertTrue(all(row["remaining"] is None and row["pace"] is None
                             for tier in state["tiers"] for row in tier["rows"]))
 
+    def test_nonfinite_or_unrepresentable_meter_cache_is_malformed_and_json_safe(self):
+        self.meters.write_text(
+            '{"probed_at":100,"lanes":['
+            '{"lane":"codex-a","r":0.7,"pace":1e309,"remaining_weekly":0.7,"status":"ok"},'
+            '{"lane":"codex-b","r":0.7,"pace":0.6,"remaining_weekly":0.7,"status":"ok"},'
+            '{"lane":"claude","r":0.8,"pace":0.7,"remaining_weekly":0.8,"status":"ok"},'
+            '{"lane":"grok","r":0.9,"pace":0.8,"remaining_weekly":0.9,"status":"ok"}'
+            "]}",
+            encoding="utf-8",
+        )
+        state = self.make_model().state
+        self.assertEqual(state["usage"]["status"], "malformed")
+        self.assertTrue(
+            all(
+                row["remaining"] is None and row["pace"] is None
+                for tier in state["tiers"]
+                for row in tier["rows"]
+            )
+        )
+        json.dumps(state, allow_nan=False)
+
+        huge = "1" + "0" * 400
+        self.meters.write_text(
+            '{"probed_at":100,"lanes":['
+            f'{{"lane":"codex-a","r":0.7,"pace":{huge},"remaining_weekly":0.7,"status":"ok"}}'
+            "]}",
+            encoding="utf-8",
+        )
+        state = self.make_model().state
+        self.assertEqual(state["usage"]["status"], "malformed")
+        json.dumps(state, allow_nan=False)
+
     def test_json_command_is_noninteractive(self):
         result = subprocess.run(
             [

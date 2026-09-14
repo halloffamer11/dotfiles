@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 import hashlib
 import json
+import math
 from pathlib import Path
 import shutil
 import sys
@@ -89,7 +90,13 @@ def _number_or_none(value: Any, *, fraction: bool = False) -> bool:
         return True
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return False
-    return 0 <= value <= 1 if fraction else value >= 0
+    try:
+        number = float(value)
+    except OverflowError:
+        return False
+    if not math.isfinite(number):
+        return False
+    return 0 <= number <= 1 if fraction else number >= 0
 
 
 def _valid_meter_document(doc: Any) -> bool:
