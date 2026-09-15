@@ -99,6 +99,7 @@ Orin also directed backend integration into `main`. Branch `dashboard-backend`
 carries tickets 02-04 as cherry-picks of `06a2f27`, `71eb342`, `bea657d`, `aceaf2f`,
 the shared Meter validity commits `3058e23` and `37dfa3c`, the ticket filing commit
 `ea60b33`, and one docs commit, on top of `main` at `7225507`. All 13 delegate test
-scripts pass there; the integrated validator says `ok` for this project's
-`.delegate/routing.json`, which the installed skill still rejects until `main`
-fast-forwards. The prototype UI, tickets 05-09 and this record stay on this branch.
+scripts pass there. Orin fast-forwarded `main` to `2a8e323` the same day; the
+installed skill then said `ok` for this project's `.delegate/routing.json` and
+picked `grok46-high@grok` for exact Tier 3 with the cached Meters. The prototype
+UI, tickets 05-09 and this record stay on this branch.

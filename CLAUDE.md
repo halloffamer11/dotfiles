@@ -21,8 +21,8 @@ Machine configuration and agent tooling managed as one Git repository.
 or safe-save behavior, read `tools/delegate-dashboard/CLAUDE.md`. Orin's verdict
 (2026-09-15, tickets 01 and 09): a Herdr plugin is the right host and project Order,
 Gate and Margin give useful steering. Backend tickets 02-04 plus the shared Meter
-validity commits are cherry-picked onto branch `dashboard-backend` for a
-fast-forward of `main`; once `main` has them, the installed skill accepts this
+validity commits landed on `main` at `2a8e323` (2026-09-15, branch
+`dashboard-backend`, fast-forwarded by Orin), and the installed skill accepts this
 project's `.delegate/routing.json` with its Project order. The prototype UI stays
 on this branch per the spec. A production control surface is not ticketed yet.
 
