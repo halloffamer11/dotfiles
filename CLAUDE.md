@@ -27,8 +27,9 @@ carry their Landed notes here. Orin's verdict, 2026-09-15: a Herdr plugin is the
 right host for a persistent delegation control surface, and project Order, Gate and
 Margin give useful manual steering. The prototype UI, tickets 05-09 with their live
 evidence, and the verdict record on tickets 01 and 09 stay on branch
-`worktree/delegate-monitor-herdr`, as the spec requires. A production control
-surface is not ticketed yet.
+`worktree/delegate-monitor-herdr`, as the spec requires; its worktree was closed
+on 2026-09-15 and the branch's own CLAUDE.md says how to reopen the dashboard. A
+production control surface is not ticketed yet.
 
 The delegate redesign is the main live thread. Spec
 `docs/superpowers/specs/2026-09-08-delegate-redesign.md`; tickets in
@@ -79,16 +80,12 @@ on the repo catalog with the accepted rows from any directory
 
 **Open, in priority order:**
 
-1. **Housekeeping**: the worktree `~/.herdr/worktrees/dotfiles/delegate-lane-catalog`
-   (branch `bench-aa-effort-slugs`) and the worktree and branch `t28-tier-order` are
-   merged and can be removed; so are the branches `delegate-lane-catalog` and
-   `effort-data-tooling`.
-2. **Provisional figures**: the `PROVISIONAL` notes on the generated lanes still say
+1. **Provisional figures**: the `PROVISIONAL` notes on the generated lanes still say
    "Confirm in the wizard". The tiers are now Orin's; `meter_weight` and `timeout` on
    those lanes are still copies, and `astra-high@codex` has `price` null with the note
    "not sourced" (`6e0f0b1` quoted `10 / 1 / 12.5 / 50` without a source). Find the
    source before pasting the figures, then reword the notes.
-3. **Carry-rule limit**: the carry page never proposes an agy flash lane off, because
+2. **Carry-rule limit**: the carry page never proposes an agy flash lane off, because
    each agy effort is a separate model name (ticket 19).
 
 **Waiting on Orin** (nothing else blocks on these):
