@@ -5,6 +5,12 @@ import json, os, shutil, subprocess, sys, tempfile, time
 from decimal import Decimal, ROUND_HALF_UP
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+# Run from a fresh directory with no Git root above it, so that
+# `catalog.find_git_root()` never finds the invoking checkout's own
+# `.delegate/routing.json`. Every path this file needs comes from HERE.
+_ISOLATED_CWD = tempfile.TemporaryDirectory(prefix="delegate-test-")
+os.chdir(_ISOLATED_CWD.name)
 SKILL = os.path.dirname(HERE)
 REPORT = os.path.abspath(os.path.join(SKILL, "scripts", "report.py"))
 SAMPLES = os.path.abspath(os.path.join(SKILL, "assets", "samples"))
