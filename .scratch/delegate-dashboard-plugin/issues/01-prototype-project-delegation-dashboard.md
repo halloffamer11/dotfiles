@@ -13,7 +13,7 @@ throwaway branch. 09 closes this ticket's boxes.
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-human — technical acceptance and independent review complete; usability verdict pending
+**Status:** done — technical acceptance, independent review and Orin's 2026-09-15 verdict complete
 
 ## Acceptance
 
@@ -73,3 +73,12 @@ Independent two-axis review used baseline `ea60b33` and frozen implementation
 Grok/Claude capacity below Gate for these narrow tasks; global Gate was unchanged
 and no Antigravity permission exception was used. Reports, adjudication, and fix
 evidence are in [the review record](../research/2026-09-14-review.md).
+
+## Verdict, 2026-09-15
+
+Question tested: is a Herdr plugin the right host for a persistent delegation control
+surface, and do project-level Order, Gate and Margin controls give useful manual
+steering? Orin: yes to both. Branch: `worktree/delegate-monitor-herdr`. Backend
+integration into `main` is prepared as branch `dashboard-backend`; ticket 09 lists
+its commits and checks. Production work on a control surface is the next decision,
+not part of this ticket.

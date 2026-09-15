@@ -18,13 +18,13 @@ Machine configuration and agent tooling managed as one Git repository.
 **Project dashboard prototype**: branch `worktree/delegate-monitor-herdr`; spec
 `docs/superpowers/specs/2026-09-13-delegate-dashboard-plugin.md`, tickets
 `.scratch/delegate-dashboard-plugin/issues/`. Before changing its TUI, launcher,
-or safe-save behavior, read `tools/delegate-dashboard/CLAUDE.md`. Backend tickets
-02-04 are separate commits for eventual `main` integration; the prototype UI stays
-on this branch. Ticket 09 owns live evidence and Orin's pending usability verdict.
-Before using the installed delegate skill in this project, read ticket 09's
-2026-09-14 user-test note: the saved `.delegate/routing.json` now has Project order,
-which the installed main-checkout validator rejects. The branch backend accepts
-it. Keep this test policy branch-local; backend integration needs approval.
+or safe-save behavior, read `tools/delegate-dashboard/CLAUDE.md`. Orin's verdict
+(2026-09-15, tickets 01 and 09): a Herdr plugin is the right host and project Order,
+Gate and Margin give useful steering. Backend tickets 02-04 plus the shared Meter
+validity commits are cherry-picked onto branch `dashboard-backend` for a
+fast-forward of `main`; once `main` has them, the installed skill accepts this
+project's `.delegate/routing.json` with its Project order. The prototype UI stays
+on this branch per the spec. A production control surface is not ticketed yet.
 
 The delegate redesign is the main live thread. Spec
 `docs/superpowers/specs/2026-09-08-delegate-redesign.md`; tickets in

@@ -14,12 +14,12 @@ Part of [01 Prototype the project delegation dashboard](01-prototype-project-del
 
 **Blocked by:** 07 Edit Gate and Margin; 08 Herdr plugin launcher and make target
 
-**Status:** ready-for-human — technical checks passed 2026-09-14; Orin's prediction/verdict remains
+**Status:** done — technical checks passed 2026-09-14; Orin's verdict recorded 2026-09-15
 
 - [x] The dashboard opens as a targeted split and in one other placement, pinned to the invoking project.
 - [x] Order, Gate and Margin edits in a disposable project change the file and the Tier leader together.
 - [x] No worker dispatched and no repeated vendor probe during the check.
-- [ ] Orin can predict the marked Tier leader after each kind of edit.
+- [x] Orin can predict the marked Tier leader after each kind of edit.
 - [x] Ticket 01 records the tested question, the verdict and the throwaway branch pointer.
 
 ## Landed, 2026-09-14
@@ -87,3 +87,18 @@ merge, installation change, or removal of the user's policy was authorized.
 Keep the disposable fixture `/tmp/delegate-dashboard-live.frqMrD` and the review
 evidence until the human verdict. No fresh-context deletion was performed. The
 user's dashboard pane stays open; no background implementation workers remain.
+
+## Verdict, 2026-09-15
+
+Orin answered both questions yes: a Herdr plugin is the right host for a persistent
+delegation control surface, and project Order, Gate and Margin controls give useful
+manual steering. The prediction box is ticked on that answer and on the 2026-09-14
+user test above, where the visible leader matched `rank.py impl --tier 3`.
+
+Orin also directed backend integration into `main`. Branch `dashboard-backend`
+carries tickets 02-04 as cherry-picks of `06a2f27`, `71eb342`, `bea657d`, `aceaf2f`,
+the shared Meter validity commits `3058e23` and `37dfa3c`, the ticket filing commit
+`ea60b33`, and one docs commit, on top of `main` at `7225507`. All 13 delegate test
+scripts pass there; the integrated validator says `ok` for this project's
+`.delegate/routing.json`, which the installed skill still rejects until `main`
+fast-forwards. The prototype UI, tickets 05-09 and this record stay on this branch.
