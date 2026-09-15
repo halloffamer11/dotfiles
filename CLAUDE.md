@@ -25,7 +25,7 @@ validity commits landed on `main` at `2a8e323` (2026-09-15, branch
 `dashboard-backend`, fast-forwarded by Orin), and the installed skill accepts this
 project's `.delegate/routing.json` with its Project order. The prototype UI stays
 on this branch per the spec. A production control surface is not ticketed yet.
-Since `main` at `6814806` every delegate test script runs from a directory with no
+Since `main` at `93655b2` every delegate test script runs from a directory with no
 Git root, so the committed `.delegate/routing.json` here no longer reaches a test.
 
 The delegate redesign is the main live thread. Spec
