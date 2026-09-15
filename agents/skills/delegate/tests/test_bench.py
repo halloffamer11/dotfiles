@@ -157,7 +157,6 @@ def run_bench(args, home):
         capture_output=True,
         text=True,
         env=env,
-        cwd=DELEGATE_DIR,
     )
 
 
