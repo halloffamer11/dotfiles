@@ -27,6 +27,10 @@ project's `.delegate/routing.json` with its Project order. The prototype UI stay
 on this branch per the spec. A production control surface is not ticketed yet.
 Since `main` at `93655b2` every delegate test script runs from a directory with no
 Git root, so the committed `.delegate/routing.json` here no longer reaches a test.
+Tree closed 2026-09-15: the Herdr worktree and plugin link were removed and the
+13 worker branches deleted; this branch is the record. To use the dashboard again,
+`herdr worktree open --cwd ~/dotfiles --branch worktree/delegate-monitor-herdr`,
+then `make -C <that path> delegate-dashboard` from a project pane relinks the plugin.
 
 The delegate redesign is the main live thread. Spec
 `docs/superpowers/specs/2026-09-08-delegate-redesign.md`; tickets in

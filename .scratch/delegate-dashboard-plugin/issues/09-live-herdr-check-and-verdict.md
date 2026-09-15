@@ -84,9 +84,11 @@ compatibility. Next: obtain direction for backend integration or an installed-sk
 update before expecting installed dispatch to consume this project policy. No
 merge, installation change, or removal of the user's policy was authorized.
 
-Keep the disposable fixture `/tmp/delegate-dashboard-live.frqMrD` and the review
-evidence until the human verdict. No fresh-context deletion was performed. The
-user's dashboard pane stays open; no background implementation workers remain.
+The disposable fixture `/tmp/delegate-dashboard-live.frqMrD` was kept until the
+verdict and deleted with the tree close-out on 2026-09-15, together with the
+worktree, the plugin link and the 13 worker branches (each patch-equivalent to a
+commit on this branch, checked with `git cherry`). The review evidence stays in
+`../research/`.
 
 ## Verdict, 2026-09-15
 
