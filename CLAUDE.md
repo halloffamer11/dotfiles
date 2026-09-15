@@ -25,10 +25,8 @@ validity commits landed on `main` at `2a8e323` (2026-09-15, branch
 `dashboard-backend`, fast-forwarded by Orin), and the installed skill accepts this
 project's `.delegate/routing.json` with its Project order. The prototype UI stays
 on this branch per the spec. A production control surface is not ticketed yet.
-Caveat: six delegate test scripts fail when run inside this worktree, because
-`catalog.find_git_root()` finds the committed `.delegate/routing.json` here and the
-fixture catalogs lack its lanes; the same code passes on `main` and in any checkout
-without that file. The tests do not isolate themselves from the invoking repo.
+Since `main` at `6814806` every delegate test script runs from a directory with no
+Git root, so the committed `.delegate/routing.json` here no longer reaches a test.
 
 The delegate redesign is the main live thread. Spec
 `docs/superpowers/specs/2026-09-08-delegate-redesign.md`; tickets in
