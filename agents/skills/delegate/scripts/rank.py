@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""rank.py — deterministic quota-aware lane ranking for delegate.
+"""rank.py — deterministic Meter-aware lane ranking for delegate.
 
 Ranks execution lanes from the JSON catalog (lanes.json and routing.json)
 over an inclusive Tier range, taking into account subscription meter gate
