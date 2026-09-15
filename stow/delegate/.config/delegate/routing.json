@@ -14,7 +14,7 @@
       "ceiling": 3
     },
     "review": {
-      "floor": 3,
+      "floor": 2,
       "ceiling": 3
     },
     "hard-impl": {

@@ -568,12 +568,6 @@ class Wizard:
         self.cursor = 0
         self.message = initial_message or ("benchmark data unavailable" if bench is None else "")
         self._result = None
-        self._assigned = {}
-        # Every tier page opens with nothing marked, whatever lanes.json holds
-        # (Orin, 2026-09-12). Marks filled from the incoming tiers put the
-        # generated lanes' placeholder tiers on tier 4 already ticked, and enter
-        # assigned them: it read as the carry decisions carrying through.
-        self._marks = {tier: set() for tier in range(1, 5)}
         self._review_order = []
         # Orin's order inside each tier, as the review page shows it (ticket 28),
         # and each lane's place in the last lines applied, which starts it
@@ -584,6 +578,20 @@ class Wizard:
         proposals = propose_enabled(self.lanes_doc, effort_rows)
         self._enabled = {name: enabled for name, (enabled, _) in proposals.items()}
         self._reasons = {name: reason for name, (_, reason) in proposals.items()}
+        # The catalog is the starting state of a rerun. A lane that the carry
+        # page proposes off keeps its tier here, so switching it back on restores
+        # the catalog default instead of making the operator place it from
+        # scratch.
+        self._assigned = {
+            name: lane["tier"] for name, lane in self.lanes_doc["lanes"].items()
+        }
+        self._marks = {
+            tier: {
+                name for name, assigned in self._assigned.items()
+                if assigned == tier and self._enabled[name]
+            }
+            for tier in range(1, 5)
+        }
 
     def result(self):
         return self._result
@@ -607,12 +615,18 @@ class Wizard:
         return [name for name in self.lanes_doc["lanes"] if self._enabled[name]]
 
     def _tier_names(self):
-        """The lanes still open on a tier page: carried, and not taken by a
-        higher tier. A lane that is not is hidden, not dimmed (ticket 25): a
-        grey row that space still toggled was a decision offered twice.
+        """The lanes open on this tier page: carried, and not placed higher.
+
+        Current assignments at this tier stay visible and marked. Assignments
+        below it stay visible and unmarked, so a rerun can move a lane up.
+        A lane placed higher is hidden, not dimmed (ticket 25): a grey row that
+        space still toggled was a decision offered twice.
         Benchmark order places each model's group; inside it the efforts run
         from most to least (ticket 26)."""
-        active = [name for name in self._carried() if name not in self._assigned]
+        active = [
+            name for name in self._carried()
+            if name not in self._assigned or self._assigned[name] <= self.tier
+        ]
         active.sort(key=self._bench_order)
         return group_lanes(active, self.lanes_doc)
 
@@ -628,10 +642,11 @@ class Wizard:
         self.tier = tier
         self.cursor = 0
         self.message = ""
+        active = self._tier_names()
         if tier == 1:
-            # Whatever is still open takes tier 1, so the last page starts
-            # with every line ticked; this is the flow's rule, not lanes.json.
-            self._marks[1].update(self._tier_names())
+            # Whatever is still open must take tier 1, including a lane removed
+            # from a higher tier during this run.
+            self._marks[1].update(active)
 
     def _enter_review(self):
         self.screen = "review"
@@ -687,6 +702,9 @@ class Wizard:
         name = self._review_cursor_name()
         self._tier_order[self._assigned[name]].remove(name)
         self._assigned[name] = tier
+        for marks in self._marks.values():
+            marks.discard(name)
+        self._marks[tier].add(name)
         self._tier_order[tier].append(name)
         self._flatten_review()
         self.cursor = self._review_order.index(name)
@@ -717,6 +735,13 @@ class Wizard:
                 self._enabled[name] = True
                 self._assigned[name] = value
         if parsed["decided"]:
+            self._marks = {
+                tier: {
+                    name for name, assigned in self._assigned.items()
+                    if assigned == tier and self._enabled[name]
+                }
+                for tier in range(1, 5)
+            }
             self._line_order = {name: index for index, name in enumerate(parsed["decided"])}
             self._tier_order = {tier: [] for tier in range(1, 5)}
         summary = tier_lines_summary(parsed, dropped)
@@ -742,11 +767,6 @@ class Wizard:
             return
         self.apply_tier_lines(text)
 
-    def _undo_tier(self, tier):
-        for name in list(self._assigned):
-            if self._assigned[name] == tier:
-                del self._assigned[name]
-
     def _enter_prescreen(self):
         self.screen = "prescreen"
         self.tier = None
@@ -765,6 +785,13 @@ class Wizard:
     def _toggle_enabled(self, name):
         if name:
             self._enabled[name] = not self._enabled[name]
+            for marks in self._marks.values():
+                marks.discard(name)
+            if self._enabled[name]:
+                tier = self._assigned.setdefault(
+                    name, self._original_lanes["lanes"][name]["tier"]
+                )
+                self._marks[tier].add(name)
 
     def _active_name(self):
         active = self._tier_names()
@@ -831,6 +858,12 @@ class Wizard:
                 if self.tier == 1 and any(name not in self._marks[1] for name in active):
                     self.message = "every lane needs a tier"
                     return
+                # A marked lane takes this tier. An unmarked lane that used to
+                # be here becomes open for the next lower page. Existing lower
+                # assignments remain as that lane's editable default.
+                for name in active:
+                    if self._assigned.get(name) == self.tier:
+                        del self._assigned[name]
                 for name in active:
                     if name in self._marks[self.tier]:
                         self._assigned[name] = self.tier
@@ -840,7 +873,6 @@ class Wizard:
                     self._enter_review()
             elif key == "b" and self.tier < 4:
                 previous = self.tier + 1
-                self._undo_tier(previous)
                 self._enter_tier(previous)
             elif key == "b" and self.tier == 4:
                 self._enter_prescreen()
@@ -862,7 +894,6 @@ class Wizard:
                 self.cursor = 0
                 self.message = ""
             elif key == "b":
-                self._undo_tier(1)
                 self._enter_tier(1)
             return
         if self.screen == "routing":
@@ -1026,7 +1057,10 @@ class Wizard:
         is earned only when something was left out.
         """
         lines = []
-        taken = sum(1 for name in self._carried() if name in self._assigned)
+        taken = sum(
+            1 for name in self._carried()
+            if self._assigned.get(name, 0) > self.tier
+        )
         off = sum(1 for name in self.lanes_doc["lanes"] if not self._enabled[name])
         hidden = hidden_legend(taken, off)
         if hidden:

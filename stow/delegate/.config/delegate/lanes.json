@@ -114,7 +114,7 @@
         "Fable 5.1"
       ],
       "note": "PROVISIONAL: tier, meter_weight and timeout are not measurements. meter_weight, timeout and price are copied from fable-xhigh@claude; every effort of one model has the same token rates. The tier is 1 because this effort is weaker than fable-xhigh@claude's and nothing has measured it. Confirm in the wizard.",
-      "order": 5
+      "order": 4
     },
     "fable-max@claude": {
       "harness": "claude",
@@ -282,7 +282,7 @@
       "published_as": [
         "Opus 5"
       ],
-      "order": 1
+      "order": 3
     },
     "opus-low@claude": {
       "harness": "claude",
@@ -384,7 +384,7 @@
       "tier": 4,
       "basis": "frontier codex model, priority 1 in the CLI; added 2026-09-09",
       "note": "PROVISIONAL: meter_weight 40 is a placeholder set by the session, not measured. price is null because GPT-6-Astra token pricing was not sourced. Confirm both in the wizard.",
-      "order": 6
+      "order": 5
     },
     "astra-low@codex": {
       "harness": "codex",
@@ -399,10 +399,10 @@
         "cache_write": null,
         "out": null
       },
-      "tier": 3,
+      "tier": 4,
       "basis": "same model as astra-high@codex; effort 'low' offered by codex, discovered by discover.py --efforts 2026-09-10",
       "note": "PROVISIONAL: meter_weight and timeout are copied from astra-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is 1 because this effort is weaker than astra-high@codex's and nothing has measured it: a ceiling too low leaves the lane unused, a ceiling too high sends it work it cannot do.",
-      "order": 2
+      "order": 7
     },
     "astra-medium@codex": {
       "harness": "codex",
@@ -420,7 +420,7 @@
       "tier": 4,
       "basis": "same model as astra-high@codex; effort 'medium' offered by codex, discovered by discover.py --efforts 2026-09-10",
       "note": "PROVISIONAL: meter_weight and timeout are copied from astra-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is 1 because this effort is weaker than astra-high@codex's and nothing has measured it: a ceiling too low leaves the lane unused, a ceiling too high sends it work it cannot do.",
-      "order": 7
+      "order": 6
     },
     "astra-xhigh@codex": {
       "harness": "codex",
@@ -438,7 +438,7 @@
       "tier": 4,
       "basis": "same model as astra-high@codex; effort 'xhigh' offered by codex, discovered by discover.py --efforts 2026-09-10",
       "note": "PROVISIONAL: meter_weight and timeout are copied from astra-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is astra-high@codex's: the same model reasoning harder is at least as capable, so it claims nothing new.",
-      "order": 4
+      "enabled": false
     },
     "astra-max@codex": {
       "harness": "codex",
@@ -527,7 +527,7 @@
       "tier": 3,
       "basis": "same model as sol-high@codex; effort 'medium' offered by codex, discovered by discover.py --efforts 2026-09-10",
       "note": "PROVISIONAL: meter_weight and timeout are copied from sol-high@codex and are not measurements of this effort — a higher effort spends more meter and needs more time. Confirm in the wizard. The tier is 1 because this effort is weaker than sol-high@codex's and nothing has measured it: a ceiling too low leaves the lane unused, a ceiling too high sends it work it cannot do.",
-      "order": 7
+      "order": 6
     },
     "sol-xhigh@codex": {
       "harness": "codex",
@@ -705,7 +705,7 @@
       },
       "tier": 3,
       "basis": "sink for terra-grade work; not a lone reviewer",
-      "order": 3
+      "order": 1
     },
     "luna-low@codex": {
       "harness": "codex",
@@ -811,7 +811,7 @@
       },
       "tier": 3,
       "basis": "cheap floor; fabricated citations in 3 impl briefs (ledger)",
-      "order": 5
+      "order": 2
     },
     "flash-low@agy": {
       "harness": "agy",
@@ -847,7 +847,7 @@
       "tier": 3,
       "basis": "same model as flash-high@agy; effort 'medium' offered by agy models (slug suffix) and agy --help, 2026-09-12 (ticket 19)",
       "note": "PROVISIONAL: tier, meter_weight and timeout are not measurements. meter_weight, timeout and price are copied from flash-high@agy; every effort of one model has the same token rates. The tier is 1 because this effort is weaker than flash-high@agy's and nothing has measured it. Confirm in the wizard.",
-      "order": 6
+      "order": 5
     }
   }
 }
