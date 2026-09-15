@@ -15,6 +15,16 @@ Machine configuration and agent tooling managed as one Git repository.
 
 ## Active work
 
+**Delegate modular research** (2026-09-15): eight worker notes in
+`.scratch/delegate-modular/research/` answer four questions about the delegate skill: two
+deep-modules reviews (astra xhigh, grok), a refactoring consultation toward the modular
+story (grok), the benchmark boards behind it (Artificial Analysis from the accepted rows;
+Terminal-Bench 4.0, APEX-Agents and DeepSWE read in the browser), a multi-domain tiers and
+judgment-setup scope (astra high), and two comparisons with kunchenguid/quota-axi (grok,
+agy). `2026-09-15-verification-notes.md` there records what was checked at merge and which
+claims to discount. No tickets are cut from it yet; the consultation's 18-step migration
+and the scope's tickets M1-M11 are the proposals on the table.
+
 **Project routing backend** (2026-09-15, from the dashboard prototype): a
 project's `.delegate/routing.json` may carry `project_order`, a flat list of carried
 lane names that reorders them inside their global Tiers and never changes a Tier
