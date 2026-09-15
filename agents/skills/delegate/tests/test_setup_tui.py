@@ -13,6 +13,12 @@ import termios
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+# Run from a fresh directory with no Git root above it, so that
+# `catalog.find_git_root()` never finds the invoking checkout's own
+# `.delegate/routing.json`. Every path this file needs comes from HERE.
+_ISOLATED_CWD = tempfile.TemporaryDirectory(prefix="delegate-test-")
+os.chdir(_ISOLATED_CWD.name)
 DELEGATE_DIR = os.path.abspath(os.path.join(HERE, "..", "scripts"))
 FIXTURE = os.path.join(HERE, "fixture", "bench-epoch.csv")
 FIXTURES = os.path.join(HERE, "fixtures")

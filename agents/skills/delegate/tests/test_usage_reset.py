@@ -3,6 +3,12 @@
 import json, os, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+# Run from a fresh directory with no Git root above it, so that
+# `catalog.find_git_root()` never finds the invoking checkout's own
+# `.delegate/routing.json`. Every path this file needs comes from HERE.
+_ISOLATED_CWD = tempfile.TemporaryDirectory(prefix="delegate-test-")
+os.chdir(_ISOLATED_CWD.name)
 sys.path.insert(0, os.path.abspath(os.path.join(HERE, "..", "scripts")))
 from usage import claude_reset, write_cache, load_cache, lane
 
