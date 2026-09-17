@@ -73,10 +73,10 @@ before reuse. The no-probe helper passed against the pre-WIP baseline; run it ag
 after completing the patch. The owning ticket and source are durable; recreate
 fixtures if /private/tmp is cleared. The prior restart record is historical evidence.
 
-A cleanup question is pending for five obsolete files: restart `check_compatibility.py`,
-`main-state.json`, `prototype-state.json`, and compatibility `impl-ranking.json`,
-`tui-ranking.json`. No deletion has been approved or performed. Retain worker run
-records and the reusable artifacts above.
+Orin approved cleanup on 2026-09-17. Deleted exactly five obsolete files: restart
+`check_compatibility.py`, `main-state.json`, `prototype-state.json`, and compatibility
+`impl-ranking.json`, `tui-ranking.json`. Verified all five absent. Worker Briefs, run
+records, test logs, and reusable live fixtures remain.
 
 The local project policy Gate 10% / Margin 20% change is retained separately on
 this prototype branch. It must stay off main. No production merge is authorized.
