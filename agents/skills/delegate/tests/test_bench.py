@@ -615,4 +615,387 @@ record(
     f"order={bench.LANE_EFFORT_ORDER} efforts={catalog.EFFORTS}",
 )
 
+
+# --- carry policy: structured decisions beside collect() ----------------------
+CARRY_LANES = {
+    "version": "delegate-lanes.v1",
+    "lanes": {
+        "luna-low@codex": {"harness": "codex", "model": "gpt-5.6-luna", "effort": "low",
+                           "tier": 1, "meter": "codex"},
+        "luna-medium@codex": {"harness": "codex", "model": "gpt-5.6-luna", "effort": "medium",
+                              "tier": 1, "meter": "codex"},
+        "luna-high@codex": {"harness": "codex", "model": "gpt-5.6-luna", "effort": "high",
+                            "tier": 1, "meter": "codex"},
+        "sol-high@codex": {"harness": "codex", "model": "gpt-5.6-sol", "effort": "high",
+                           "tier": 2, "meter": "codex"},
+    },
+}
+
+
+def carry_row(effort, benchmark, score, cost, source="aa", **extra):
+    row = {"model": "gpt-5.6-luna", "effort": effort, "benchmark": benchmark,
+           "score": score, "cost_usd": cost, "uncertain": False, "source": source}
+    row.update(extra)
+    return row
+
+
+try:
+    rows = [
+        carry_row("medium", "b1", 0.6, 1.0), carry_row("high", "b1", 0.5, 2.0),
+        carry_row("medium", "b2", 0.6, 1.0), carry_row("high", "b2", 0.5, 2.0),
+        carry_row("medium", "b3", 0.4, 1.0), carry_row("high", "b3", 0.5, 2.0),
+        carry_row("low", "b1", 0.7, 0.5), carry_row("low", "b2", 0.1, 0.5),
+        carry_row("low", "b3", 0.1, 0.5),
+    ]
+    proposals = bench.propose_enabled(CARRY_LANES, rows)
+    high, medium, low = (proposals[f"luna-{e}@codex"] for e in ("high", "medium", "low"))
+    record(
+        "dominating_effort is same-source majority, returned as kind/source/competitor",
+        high == {"lane": "luna-high@codex", "enabled": False, "kind": "dominated",
+                 "source": "aa", "competitor": "medium"}
+        and medium["kind"] == "not_dominated" and medium["enabled"] is True
+        and low["kind"] == "not_dominated"
+        and bench.carry_reason(high) == "medium wins on aa"
+        and proposals["sol-high@codex"]["kind"] == "no_rows",
+        str({k: proposals[k] for k in ("luna-high@codex", "luna-medium@codex", "luna-low@codex")}),
+    )
+except Exception as e:
+    record("dominating_effort is same-source majority, returned as kind/source/competitor",
+           False, repr(e))
+
+try:
+    rows = [
+        carry_row("medium", "b1", 0.6, 1.0), carry_row("high", "b1", 0.5, 2.0),
+        carry_row("medium", "b2", 0.4, 1.0), carry_row("high", "b2", 0.5, 2.0),
+        carry_row("medium", "index", 50.0, 1.0, composite=True),
+        carry_row("high", "index", 40.0, 2.0, composite=True),
+    ]
+    high = bench.propose_enabled(CARRY_LANES, rows)["luna-high@codex"]
+    record(
+        "the AA composite is shown and never counted in domination",
+        high["kind"] == "not_dominated" and high["enabled"] is True,
+        str(high),
+    )
+except Exception as e:
+    record("the AA composite is shown and never counted in domination", False, repr(e))
+
+try:
+    none_rows = bench.propose_enabled(CARRY_LANES, None)
+    empty_rows = bench.propose_enabled(CARRY_LANES, [])
+    record(
+        "unavailable evidence and an empty proposal remain distinct",
+        all(d["kind"] == "unavailable" for d in none_rows.values())
+        and bench.evidence_unavailable(None, none_rows)
+        and not bench.evidence_unavailable([], empty_rows)
+        and all(d["kind"] == "no_rows" for d in empty_rows.values())
+        and bench.carry_reason(none_rows["luna-low@codex"]) == "no per-effort data"
+        and bench.carry_reason(empty_rows["luna-low@codex"]) == "no rows for this lane",
+        f"none={none_rows['luna-low@codex']} empty={empty_rows['luna-low@codex']}",
+    )
+except Exception as e:
+    record("unavailable evidence and an empty proposal remain distinct", False, repr(e))
+
+try:
+    tied = [
+        carry_row("high", "b", 5.0, 2.0, source="t"),
+        carry_row("medium", "b", 5.0, 2.0, source="t"),
+    ]
+    cheaper = [
+        carry_row("high", "b", 5.0, 2.0, source="t"),
+        carry_row("medium", "b", 5.0, 1.5, source="t"),
+    ]
+    tied_p = bench.propose_enabled(CARRY_LANES, tied)
+    cheap_p = bench.propose_enabled(CARRY_LANES, cheaper)
+    record(
+        "equal score at equal cost does not dominate; a cheaper equal score does",
+        tied_p["luna-high@codex"]["kind"] == "not_dominated"
+        and tied_p["luna-medium@codex"]["kind"] == "not_dominated"
+        and cheap_p["luna-high@codex"]["kind"] == "dominated"
+        and cheap_p["luna-high@codex"]["competitor"] == "medium"
+        and cheap_p["luna-high@codex"]["source"] == "t",
+        str({"tied": tied_p["luna-high@codex"], "cheap": cheap_p["luna-high@codex"]}),
+    )
+except Exception as e:
+    record("equal score at equal cost does not dominate; a cheaper equal score does",
+           False, repr(e))
+
+try:
+    with tempfile.TemporaryDirectory() as td:
+        csv_path = os.path.join(td, "epoch.csv")
+        write_epoch_csv(csv_path, [epoch_row("gpt-6-astra", "high", "DeepSWE", "0.58")])
+        items = bench.build_epoch_section(
+            bench.catalog_models(ATTRIB_LANES["lanes"]),
+            bench.match_epoch_rows(
+                bench.load_epoch(csv_path),
+                bench.catalog_models(ATTRIB_LANES["lanes"]),
+            ),
+        )
+        data = bench.collect(ATTRIB_LANES, epoch_csv=csv_path)
+        text = bench.format_collection(data)
+    record(
+        "collect does not build a discarded display table; markdown is rendered later",
+        isinstance(items, list) and items and "model" in items[0]
+        and text.startswith("# Lane benchmark ranking")
+        and "| Lane(s) |" in text,
+        f"type={type(items).__name__} head={text[:80]!r}",
+    )
+except Exception as e:
+    record("collect does not build a discarded display table; markdown is rendered later",
+           False, repr(e))
+
+
+# --- ticket 12: read-only all-board model inspection --------------------------
+INSPECT_LANES = {
+    "version": "delegate-lanes.v1",
+    "lanes": {
+        "sol-high@codex": {"harness": "codex", "model": "gpt-5.6-sol", "effort": "high",
+                           "tier": 3, "meter": "codex"},
+        "sol-max@codex": {"harness": "codex", "model": "gpt-5.6-sol", "effort": "max",
+                          "tier": 3, "meter": "codex", "enabled": False},
+        "luna-low@codex": {"harness": "codex", "model": "gpt-5.6-luna", "effort": "low",
+                           "tier": 1, "meter": "codex"},
+        "flash-high@agy": {"harness": "agy", "model": "gemini-3.8-flash-high", "effort": "high",
+                           "tier": 2, "meter": "agy-gemini"},
+        "flash-medium@agy": {"harness": "agy", "model": "gemini-3.8-flash-medium", "effort": "medium",
+                             "tier": 1, "meter": "agy-gemini"},
+    },
+}
+
+
+def inspect_row(source, model, effort, benchmark, score, cost, **extra):
+    row = {"source": source, "model": model, "effort": effort, "benchmark": benchmark,
+           "score": score, "cost_usd": cost, "uncertain": False, "provenance": "unlabelled",
+           "observed": "2026-09-11", "url": "https://example.invalid/board"}
+    row.update(extra)
+    return row
+
+
+INSPECT_ROWS = [
+    inspect_row("aa", "GPT-5.6 Sol", "high", "Terminal-Bench 2.1", 0.80, 0.81),
+    inspect_row("aa", "GPT-5.6 Sol", "max", "Terminal-Bench 2.1", 0.88, 1.99),
+    inspect_row("aa", "GPT-5.6 Sol", "high", "Omniscience", 20.367, 0.81),
+    inspect_row("aa", "GPT-5.6 Luna", "low", "Terminal-Bench 2.1", 0.30, 0.05),
+    inspect_row("tbench", "GPT-5.6 Sol", "high", "Terminal-Bench 4.0", 39.9, 100.0,
+                score_unit="%"),
+    inspect_row("aa", "GPT-5.6 Sol", "high", "Artificial Analysis Intelligence Index", 42.5, 0.81,
+                composite=True),
+    inspect_row("aa", "Grok 4.3", "none", "Omniscience", 1.0, 0.01, uncertain=True),
+    inspect_row("aa", "Gemini 3.8 Flash", None, "Omniscience", 29.5, 1.24),
+    inspect_row("aa", "Gemini 3.8 Flash", "high", "Omniscience", 29.55, 1.24),
+    inspect_row("x", "GPT-5.6 Sol", "high", "Nobody's board", 9.0, 1.0),
+]
+
+
+try:
+    called = []
+    orig_fetch = bench.fetch_bytes
+
+    def boom(*a, **k):
+        called.append(a)
+        raise AssertionError("network")
+
+    bench.fetch_bytes = boom
+    try:
+        doc = bench.inspect_model("gpt-5.6-sol", INSPECT_LANES, effort_rows=INSPECT_ROWS)
+        text = bench.format_inspection(doc)
+    finally:
+        bench.fetch_bytes = orig_fetch
+    high = next(r for r in doc["family_view"]
+                if r["source"] == "aa" and r["benchmark"] == "Terminal-Bench 2.1"
+                and r["effort"] == "high")
+    max_row = next(r for r in doc["family_view"]
+                   if r["source"] == "aa" and r["benchmark"] == "Terminal-Bench 2.1"
+                   and r["effort"] == "max")
+    tbench = next(r for r in doc["family_view"] if r["source"] == "tbench")
+    unknown = next(r for r in doc["family_view"] if r["benchmark"] == "Nobody's board")
+    sol_high = next(v for v in doc["lane_view"] if v["lane"] == "sol-high@codex")
+    sol_max = next(v for v in doc["lane_view"] if v["lane"] == "sol-max@codex")
+    record(
+        "exact effort is attributed only to the lane that ran it",
+        high["attributed"] is True and high["lane_model"] == "gpt-5.6-sol"
+        and high["lanes"] == ["sol-high@codex"]
+        and max_row["lanes"] == ["sol-max@codex"]
+        and all(r["effort"] == "high" for r in sol_high["records"])
+        and all(r["effort"] == "max" for r in sol_max["records"])
+        and not any(r["effort"] == "max" for r in sol_high["records"]),
+        str({"high": high["lanes"], "max": max_row["lanes"],
+             "lane_high": [r["effort"] for r in sol_high["records"]]}),
+    )
+    record(
+        "board versions stay isolated and standing is scoped to source/board/version",
+        high["version"] == "2.1" and tbench["version"] == "4.0"
+        and high["standing"]["n"] == 3 and tbench["standing"]["n"] == 1
+        and high["standing"]["scope"].startswith("loaded snapshot, aa / Terminal-Bench 2.1")
+        and "tbench" not in high["standing"]["scope"]
+        and tbench["standing"]["rank"] == 1,
+        str({"high": high["standing"], "tbench": tbench["standing"]}),
+    )
+    record(
+        "cost labels stay source-specific; no combined score",
+        "Intelligence Index" in (high["cost_basis"] or "")
+        and "whole run" in (tbench["cost_basis"] or "")
+        and "mean" not in doc
+        and "combined" not in text.lower(),
+        str({"aa": high["cost_basis"], "tbench": tbench["cost_basis"]}),
+    )
+    record(
+        "unknown direction leaves standing unknown; ties share a rank",
+        unknown["direction"] == bench.DIRECTION_UNKNOWN
+        and unknown["standing"]["rank"] is None
+        and unknown["standing"]["direction"] == bench.DIRECTION_UNKNOWN
+        and high["standing"]["tied"] is False
+        and high["standing"]["direction"] == bench.DIRECTION_HIGHER,
+        str(unknown["standing"]),
+    )
+    luna = bench.inspect_model("gpt-5.6-luna", INSPECT_LANES, effort_rows=INSPECT_ROWS)
+    absent_boards = {(r["source"], r["benchmark"]) for r in luna["absent"]}
+    record(
+        "absent snapshot boards stay visible and are not invented scores",
+        ("aa", "Omniscience") in absent_boards
+        and ("tbench", "Terminal-Bench 4.0") in absent_boards
+        and all(r.get("score") is None for r in luna["absent"])
+        and luna["family_view"]
+        and all(r["lane_model"] == "gpt-5.6-luna" for r in luna["family_view"]),
+        str(sorted(absent_boards)),
+    )
+    grok = bench.inspect_model("Grok 4.3", INSPECT_LANES, effort_rows=INSPECT_ROWS)
+    record(
+        "an unmatched published name stays unresolved and is still shown",
+        grok["family_view"]
+        and grok["family_view"][0]["identity"] == "unresolved"
+        and grok["family_view"][0]["identity_reason"] == "no catalog model"
+        and grok["family_view"][0]["uncertain"] is True
+        and grok["family_view"][0]["attributed"] is False
+        and grok["family_view"][0]["observed"] == "2026-09-11"
+        and not grok["lane_view"],
+        str(grok["family_view"][:1]),
+    )
+    flash = bench.inspect_model("Gemini 3.8 Flash", INSPECT_LANES, effort_rows=INSPECT_ROWS)
+    unresolved = flash["unresolved"]
+    high_flash = [r for r in flash["family_view"] if r["effort"] == "high"]
+    none_flash = [r for r in flash["family_view"] if r["effort"] == bench.UNKNOWN_EFFORT]
+    record(
+        "conflicting family identity without an effort stays unresolved; effort selects one member",
+        none_flash and none_flash[0]["identity"] == "unresolved"
+        and "conflicting identity" in (none_flash[0]["identity_reason"] or "")
+        and high_flash and high_flash[0]["identity"] == "resolved"
+        and high_flash[0]["lane_model"] == "gemini-3.8-flash-high"
+        and high_flash[0]["attributed"] is True
+        and {m for m in flash["family"]["models"]}
+        == {"gemini-3.8-flash-high", "gemini-3.8-flash-medium"},
+        str({"unresolved": unresolved, "high": high_flash, "none": none_flash}),
+    )
+    empty = bench.inspect_model("gpt-5.6-sol", INSPECT_LANES)
+    record(
+        "missing inputs are visible and inspection fetches nothing",
+        empty["fetched"] is False and empty["inputs"]["effort_rows"] is False
+        and empty["inputs"]["epoch_csv"] is False
+        and empty["family_view"] == []
+        and "No accepted rows or Epoch CSV given" in bench.format_inspection(empty)
+        and called == [],
+        str(empty["inputs"]),
+    )
+    human = bench.format_inspection(doc)
+    record(
+        "human and JSON views expose the same evidence records",
+        doc["fetched"] is False
+        and "gpt-5.6-sol" in human and "0.8" in human
+        and "Terminal-Bench 2.1" in human and "Terminal-Bench 4.0" in human
+        and "Intelligence Index" in human and "whole run" in human
+        and "Read-only" in human and "does not change Tier" in human
+        and any("deepswe" in (r.get("name") or "") for r in doc["references"]),
+        human[:500],
+    )
+except Exception as e:
+    record("ticket 12 model inspection records", False, repr(e))
+
+
+try:
+    with tempfile.TemporaryDirectory() as td:
+        cfg = copy_config(td)
+        home = os.path.join(td, "home")
+        os.makedirs(home)
+        rows_a = os.path.join(td, "a.json")
+        rows_b = os.path.join(td, "b.json")
+        with open(rows_a, "w", encoding="utf-8") as f:
+            json.dump(INSPECT_ROWS[:3], f)
+        with open(rows_b, "w", encoding="utf-8") as f:
+            json.dump(INSPECT_ROWS[3:5], f)
+        lanes_path = os.path.join(cfg, "lanes.json")
+        routing_path = os.path.join(cfg, "routing.json")
+        before_lanes = open(lanes_path, encoding="utf-8").read()
+        before_routing = open(routing_path, encoding="utf-8").read()
+        orig_fetch = bench.fetch_bytes
+
+        def boom(*a, **k):
+            raise AssertionError("network")
+
+        env = dict(os.environ)
+        env["HOME"] = home
+        res = subprocess.run(
+            [sys.executable, BENCH_PY, "model", "gpt-5.6-sol",
+             "--config-dir", cfg, "--effort-rows", rows_a, "--effort-rows", rows_b, "--json"],
+            capture_output=True, text=True, env=env,
+        )
+        after_lanes = open(lanes_path, encoding="utf-8").read()
+        after_routing = open(routing_path, encoding="utf-8").read()
+        payload = json.loads(res.stdout) if res.returncode == 0 and res.stdout.strip() else {}
+        benches = {(r["source"], r["benchmark"]) for r in payload.get("family_view") or []}
+        report = run_bench(
+            ["--config-dir", cfg, "--out-dir", os.path.join(td, "out"),
+             "--date", "2026-09-16", "--epoch-csv",
+             os.path.join(HERE, "fixture", "bench-epoch.csv"),
+             "--effort-rows", rows_a],
+            home,
+        )
+        record(
+            "model CLI is read-only, concatenates --effort-rows, and leaves the report CLI intact",
+            res.returncode == 0 and payload.get("fetched") is False
+            and ("aa", "Terminal-Bench 2.1") in benches
+            and ("tbench", "Terminal-Bench 4.0") in benches
+            and before_lanes == after_lanes and before_routing == after_routing
+            and report.returncode == 0 and "bench: wrote" in report.stdout
+            and "Lane view" not in report.stdout,
+            f"code={res.returncode} stderr={res.stderr!r} benches={benches} "
+            f"report={report.returncode} {report.stderr!r}",
+        )
+        epoch_csv = os.path.join(td, "epoch.csv")
+        write_epoch_csv(epoch_csv, [
+            epoch_row("gpt-5.6-sol", "high", "DeepSWE", "0.90", "alpha", "GPT-5.6 Sol"),
+            epoch_row("gpt-5.6-luna", "low", "DeepSWE", "0.40", "alpha", "GPT-5.6 Luna"),
+        ])
+        res_epoch = subprocess.run(
+            [sys.executable, BENCH_PY, "model", "gpt-5.6-sol",
+             "--config-dir", cfg, "--epoch-csv", epoch_csv, "--json"],
+            capture_output=True, text=True, env=env,
+        )
+        epoch_doc = json.loads(res_epoch.stdout) if res_epoch.returncode == 0 else {}
+        epoch_view = epoch_doc.get("family_view") or []
+        record(
+            "optional local Epoch CSV is evidence and is not mixed with other sources",
+            res_epoch.returncode == 0
+            and epoch_view and all(r["source"] == "epoch" for r in epoch_view)
+            and epoch_view[0]["effort"] == "high"
+            and epoch_view[0]["attributed"] is True
+            and epoch_view[0]["score"] == 0.90
+            and after_lanes == open(lanes_path, encoding="utf-8").read(),
+            f"code={res_epoch.returncode} stderr={res_epoch.stderr!r} view={epoch_view[:1]}",
+        )
+except Exception as e:
+    record("model CLI is read-only, concatenates --effort-rows, and leaves the report CLI intact",
+           False, repr(e))
+
+try:
+    canonical = bench.inspect_model("gemini-3.8-flash-high", INSPECT_LANES, effort_rows=INSPECT_ROWS)
+    record("canonical Model query retains unresolved candidate evidence",
+           bool(canonical["unresolved"])
+           and all(not r["attributed"] for r in canonical["unresolved"]), canonical)
+    unmatched = bench.inspect_model("Grok 4.3", INSPECT_LANES, effort_rows=INSPECT_ROWS)
+    human = bench.format_inspection(unmatched)
+    record("unattributed human evidence exposes cost and uncertainty",
+           "uncertain" in human and "provenance" in human
+           and "source link" in human and "cost basis" in human, human)
+except Exception as e:
+    record("inspection evidence presentation regressions", False, repr(e))
+
 sys.exit(1 if fails else 0)

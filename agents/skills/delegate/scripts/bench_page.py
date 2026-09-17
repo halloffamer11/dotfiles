@@ -12,7 +12,7 @@ Self-contained: inline CSS, one inline script (`assets/bench_page.js`) and the
 data it draws as inline JSON; no remote resource. It is opened as a file://
 URL and may be read with the network off. Every decision in the data (the
 kind of each point, what the pre-screen proposes off, which effort beats
-which) is made here, from `setup_tui` and `bench`; the script only filters
+which) is made here, from `bench`; the script only filters
 what is shown, finds the frontier of it, and lays it out.
 """
 import hashlib
@@ -23,10 +23,21 @@ import os
 from collections import defaultdict
 
 import bench
-from bench import AA_COST_COLUMN, fmt_aa_value, fmt_cost
-from catalog import EFFORTS, resolve_published_model
-from setup_tui import (certain_effort_rows, dominating_row, group_lanes, is_dominated_reason,
-                       lane_order, model_group, propose_enabled)
+from bench import (
+    AA_COST_COLUMN,
+    KIND_DOMINATED,
+    carry_reason,
+    certain_effort_rows,
+    dominating_row,
+    evidence_unavailable,
+    fmt_aa_value,
+    fmt_cost,
+    group_lanes,
+    lane_order,
+    model_group,
+    propose_enabled,
+)
+from catalog import EFFORTS
 
 # A published sweep runs the API's own enum, which starts below the lowest
 # effort a lane can be set to. `none` is a real row and the cheapest one, so a
@@ -41,8 +52,8 @@ NO_LANE = "no lane"
 WEAK_PROVENANCE = ("self-reported",)
 
 ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets")
-SOURCES_PATH = os.path.join(ASSETS, "sources.json")
-BOARDS_PATH = os.path.join(ASSETS, "boards.json")
+SOURCES_PATH = bench.SOURCES_PATH
+BOARDS_PATH = bench.BOARDS_PATH
 SCRIPT_PATH = os.path.join(ASSETS, "bench_page.js")
 
 # Said in place of a description for a board `assets/boards.json` does not
@@ -50,7 +61,7 @@ SCRIPT_PATH = os.path.join(ASSETS, "bench_page.js")
 # written from memory, so a board nobody has fetched a page for says so.
 NO_ABOUT = ("No description on file for this board: nobody has fetched its source's "
             "methodology page into assets/boards.json.")
-ABOUT_FIELDS = ("url", "fetched", "measures", "tasks", "score", "scale", "cost", "speaks_to")
+ABOUT_FIELDS = bench.ABOUT_FIELDS
 
 # The four kinds of point on a plot. A lane is a thing the reader pays for
 # and can dispatch to; the rest is context, and the distinction has to survive
@@ -166,8 +177,12 @@ def _lanes_of_model(lanes_doc, model):
 def _proposals(lanes_doc, effort_rows):
     """The wizard's own pre-screen verdicts, so the page marks exactly what
     the wizard marks. Two implementations of one rule would eventually
-    disagree in front of the person checking the arithmetic."""
-    if not _lanes(lanes_doc) or effort_rows is None:
+    disagree in front of the person checking the arithmetic.
+
+    Returns {name: carry_decision}. `effort_rows is None` (unavailable evidence)
+    is distinct from an empty proposal.
+    """
+    if not _lanes(lanes_doc):
         return {}
     try:
         return propose_enabled(lanes_doc, effort_rows)
@@ -176,42 +191,32 @@ def _proposals(lanes_doc, effort_rows):
 
 
 def _proposed_off(proposals):
-    """{lane name: reason} for lanes the pre-screen would switch off on the
-    strength of the data, not lanes already recorded off or never carried."""
-    return {name: why for name, (on, why) in proposals.items()
-            if not on and is_dominated_reason(why)}
+    """{lane name: display reason} for lanes the pre-screen would switch off on
+    the strength of the data, not lanes already recorded off or never carried."""
+    return {name: carry_reason(decision) for name, decision in (proposals or {}).items()
+            if decision.get("kind") == KIND_DOMINATED}
+
+
+def _decision_for(proposals, names):
+    """The first dominated decision among `names`, else None."""
+    for name in names or ():
+        decision = (proposals or {}).get(name)
+        if decision and decision.get("kind") == KIND_DOMINATED:
+            return decision
+    return None
 
 
 def _load_sources():
-    try:
-        with open(SOURCES_PATH, encoding="utf-8") as f:
-            doc = json.load(f)
-        return doc.get("sources") or {}
-    except (OSError, ValueError):
-        return {}
+    return bench.load_sources()
 
 
 def _load_boards():
-    try:
-        with open(BOARDS_PATH, encoding="utf-8") as f:
-            doc = json.load(f)
-        return doc.get("boards") or {}
-    except (OSError, ValueError):
-        return {}
+    return bench.load_boards()
 
 
 def board_about(source, benchmark, boards=None):
-    """What one board measures, quoted from its source's methodology page, with
-    that page's URL; None when `assets/boards.json` has no entry, or the entry
-    lacks a description or a URL (half a citation is not one)."""
-    if boards is None:
-        boards = _load_boards()
-    entry = ((boards or {}).get(source) or {}).get(benchmark)
-    if not isinstance(entry, dict) or not entry.get("measures") or not entry.get("url"):
-        return None
-    about = {key: entry.get(key) for key in ABOUT_FIELDS}
-    about["also"] = list(entry.get("also") or [])
-    return about
+    """What one board measures, quoted from its source's methodology page."""
+    return bench.board_about(source, benchmark, boards=boards)
 
 
 def _cost_basis(source_meta):
@@ -230,29 +235,41 @@ def _cost_basis(source_meta):
 def _annotate(effort_rows, lanes_doc, proposals):
     """Every row, with the lane model its printed name denotes, the kind of
     point it makes, the lane it belongs to (if one runs that model at that
-    effort), whether its provenance is weak, and which effort dominates it."""
+    effort), whether its provenance is weak, and which effort dominates it.
+
+    Identity, standing, cost basis and version come from `bench.evidence_records`
+    so the HTML table is the same records model inspection prints.
+    """
     off = _proposed_off(proposals)
     annotated = []
-    for row in effort_rows or []:
-        if not isinstance(row, dict):
-            continue
+    for rec in bench.evidence_records(effort_rows, lanes_doc):
+        row = rec.get("row") if isinstance(rec.get("row"), dict) else {}
         item = dict(row)
-        published = row.get("model")
-        lane_model = (resolve_published_model(published, lanes_doc, effort=row.get("effort"))
-                      if lanes_doc else None)
+        lane_model = rec.get("lane_model")
         item["_lane_model"] = lane_model
         item["_model_lanes"] = _lanes_of_model(lanes_doc, lane_model) if lane_model else []
-        item["_lanes"] = _lane_at(lanes_doc, lane_model, row.get("effort")) if lane_model else []
+        item["_lanes"] = list(rec.get("lanes") or [])
         item["_weak"] = bool(row.get("uncertain")) or row.get("provenance") in WEAK_PROVENANCE
         item["_score"] = _num(row.get("score"))
         item["_cost"] = _num(row.get("cost_usd"))
+        item["_identity"] = rec.get("identity")
+        item["_identity_reason"] = rec.get("identity_reason")
+        item["_version"] = rec.get("version")
+        item["_standing"] = rec.get("standing")
+        item["_cost_basis"] = rec.get("cost_basis")
+        item["_direction"] = rec.get("direction")
+        item["_attributed"] = rec.get("attributed")
         if item["_lanes"]:
             item["_kind"] = LANE_OFF if any(name in off for name in item["_lanes"]) else LANE
         elif lane_model:
             item["_kind"] = OWN_OTHER
         else:
             item["_kind"] = COMPARATOR
-        item["_off_reason"] = next((off[n] for n in item["_lanes"] if n in off), None)
+        decision = _decision_for(proposals, item["_lanes"])
+        item["_off_reason"] = carry_reason(decision) if decision else None
+        item["_off_kind"] = decision.get("kind") if decision else None
+        item["_off_source"] = decision.get("source") if decision else None
+        item["_off_competitor"] = decision.get("competitor") if decision else None
         annotated.append(item)
     # Domination is judged on the lane model, exactly as the pre-screen judges
     # it, so two printed names for one lane model compare against each other.
@@ -425,6 +442,8 @@ def _point(r, lanes):
             "plotted": _plotted(r), "kind": r["_kind"], "weak": r["_weak"], "lanes": at,
             "harness": harness, "meter": meter, "tier": min(tiers) if tiers else None,
             "off": r["_off_reason"], "beatenBy": r["_dominated_by"],
+            "carryKind": r.get("_off_kind"), "source": r.get("_off_source"),
+            "competitor": r.get("_off_competitor") or r["_dominated_by"],
             "provenance": provenance, "observed": r.get("observed")}
 
 
@@ -445,11 +464,14 @@ def _lane_list(lanes_doc, bench, items, proposals):
     out = []
     for name in lane_order({"lanes": lanes}, bench):
         lane = lanes[name]
+        decision = (proposals or {}).get(name) or {}
         out.append({"name": name, "harness": lane.get("harness"), "meter": lane.get("meter"),
                     "model": lane.get("model"),
                     "group": model_group(lane), "effort": lane.get("effort"),
                     "tier": lane.get("tier") if isinstance(lane.get("tier"), int) else None,
-                    "carried": _carried(lane), "off": off.get(name), "rows": name in drawn})
+                    "carried": _carried(lane), "off": off.get(name), "rows": name in drawn,
+                    "kind": decision.get("kind"), "source": decision.get("source"),
+                    "competitor": decision.get("competitor")})
     return out
 
 
@@ -573,9 +595,12 @@ def _comparison_section(data):
         about = board["about"]
         name = _esc(board["benchmark"]) + (' <span class="sub">composite</span>' if board["composite"] else "")
         if about:
+            direction = (f'<span class="sub">{_esc(about["direction"])}</span>'
+                         if about.get("direction") else "")
             measures = (f'{_esc(about["measures"])}'
                         f'<span class="sub">{_esc(about["tasks"]) if about["tasks"] else ""}</span>'
                         f'<span class="sub">speaks to {_esc(about["speaks_to"])}</span>'
+                        f'{direction}'
                         f'<a class="sub" href="{_esc(about["url"])}">{_esc(about["url"])}</a>')
             scale, cost = _esc(about["scale"]), _esc(about["cost"])
         else:
@@ -699,8 +724,8 @@ def _rows_block(effort_rows, lanes_doc, proposals):
         return []
     items.sort(key=lambda r: (r.get("source") or "", r.get("benchmark") or "",
                               r["_lane_model"] is None, _model_key(r), _effort_desc(r.get("effort"))))
-    head = ["source", "benchmark", "published as", "lane model", "effort", "score", "cost",
-            "observed", "provenance", "note"]
+    head = ["source", "benchmark", "version", "published as", "lane model", "effort", "score",
+            "cost", "cost basis", "standing", "observed", "provenance", "note"]
     body = ["<p>Where each number came from. A row that names no lane model is the "
             "board's context; a published name that ought to be one of ours needs a "
             "<span class=\"mono\">published_as</span> entry on its lane. Rows with weak "
@@ -714,18 +739,32 @@ def _rows_block(effort_rows, lanes_doc, proposals):
         note = []
         if r.get("uncertain"):
             note.append("uncertain")
+        if r.get("_identity") == "unresolved" and r.get("_identity_reason"):
+            note.append(r["_identity_reason"])
         if r["_dominated_by"]:
             note.append(f"beaten by {r['_dominated_by']}")
         if r["_off_reason"]:
             note.append("proposed off")
+        if not r.get("_attributed") and r.get("_lane_model"):
+            note.append("not attributed to a lane at this effort")
         unit = r.get("score_unit")
+        standing = r.get("_standing") or {}
+        if standing.get("rank") is not None:
+            tied = " tied" if standing.get("tied") else ""
+            standing_cell = (f"{standing['rank']}/{standing.get('n')} "
+                             f"{standing.get('direction')}{tied}")
+        else:
+            standing_cell = f"unknown ({standing.get('direction') or 'unknown'})"
         body.append(f'<tr class="{"weak" if r["_weak"] else ""}{" nolane" if r["_lane_model"] is None else ""}">'
                     f"<td>{src}</td><td>{_esc(r.get('benchmark'))}</td>"
+                    f"<td>{_esc(r.get('_version'))}</td>"
                     f"<td>{_esc(r.get('model'))}</td>"
                     f'<td>{"<span class=mono>" + _esc(r["_lane_model"]) + "</span>" if r["_lane_model"] else NO_LANE}</td>'
                     f"<td>{_esc(r.get('effort'))}</td>"
                     f'<td class="num">{_esc(_fmt_score(r["_score"], unit)) if r["_score"] is not None else _esc(r.get("score"))}</td>'
                     f'<td class="num">{_esc(_fmt_money(r["_cost"])) if r["_cost"] is not None else _esc(r.get("cost_usd"))}</td>'
+                    f"<td>{_esc(r.get('_cost_basis'))}</td>"
+                    f"<td>{_esc(standing_cell)}</td>"
                     f"<td>{_esc(r.get('observed'))}</td>"
                     f'<td class="{"flag" if r.get("provenance") in WEAK_PROVENANCE else ""}">{_esc(r.get("provenance"))}</td>'
                     f"<td>{_esc(', '.join(note)) if note else ''}</td></tr>")
@@ -754,8 +793,9 @@ def _catalog_block(lanes_doc, proposals):
             verdict_cell = ('<span class="quiet">recorded off</span>' if lane.get("enabled") is False
                             else '<span class="quiet">—</span>')
         else:
-            on, why = verdict
-            cls = "" if on else ("off" if is_dominated_reason(why) else "quiet")
+            on = verdict.get("enabled")
+            why = carry_reason(verdict)
+            cls = "" if on else ("off" if verdict.get("kind") == KIND_DOMINATED else "quiet")
             verdict_cell = f'<span class="{cls}">{"carry" if on else "off"}: {_esc(why)}</span>'
         body.append("<tr>"
                     f'<td><span class="mono">{_esc(name)}</span></td>'
@@ -923,7 +963,10 @@ def _header(lanes_doc, effort_rows, proposals):
         names = "; ".join(f'<span class="mono">{_esc(n)}</span>, {_esc(why)}' for n, why in sorted(off.items()))
         out.append(f'<p class="verdict">{_legend_glyph(LANE_OFF)} The pre-screen proposes to '
                    f"switch off {len(off)} lane{'s' if len(off) != 1 else ''}: {names}.</p>")
-    elif effort_rows:
+    elif evidence_unavailable(effort_rows, proposals):
+        out.append(f'<p class="verdict">{_legend_glyph(LANE)} Per-effort evidence is unavailable, '
+                   "so the pre-screen proposes nothing.</p>")
+    elif effort_rows is not None:
         out.append(f'<p class="verdict">{_legend_glyph(LANE)} The pre-screen proposes to switch '
                    "nothing off: no carried lane is beaten by a cheaper effort of its own model.</p>")
     out.append("</header>")

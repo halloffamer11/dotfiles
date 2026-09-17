@@ -262,7 +262,7 @@ def case_routing_edits_keep_other_classes():
         cfg = os.path.join(td, "config")
         discover_path = os.path.join(td, "discover.json")
         write_discover(discover_path, catalog.HARNESSES)
-        answers = "\n" * 6 + "n\n" + "\n" * 6 + "3\n3\n" + "\n" * 2 + "0.3\n\n" + "y\n"
+        answers = "\n" * 6 + "n\n" + "\n" * 6 + "3\n3\n" + "\n" * 2 + "0.3\n\n\n" + "y\n"
         result = run_setup(cfg, discover_path, answers, "--no-bench")
         _lanes, routing = load_written(cfg)
         unchanged = all(
@@ -335,7 +335,9 @@ def case_plain_prints_the_start_facts():
     with tempfile.TemporaryDirectory() as td:
         cfg = os.path.join(td, "config")
         discover_path = os.path.join(td, "discover.json")
-        write_discover(discover_path, catalog.HARNESSES)
+        import discover
+        saved = discover.discover(sample_proposal(catalog.HARNESSES), fixture_dir=fixture_dir)
+        catalog.write_json(discover_path, saved)
         result = subprocess.run(
             [sys.executable, SETUP_PY, "--config-dir", cfg, "--discover-json", discover_path,
              "--fixture-dir", fixture_dir, "--no-bench", "--plain"],
@@ -343,8 +345,7 @@ def case_plain_prints_the_start_facts():
             cwd=DELEGATE_DIR)
         import discover
         facts = setup_tui.start_facts(os.path.join(cfg, "lanes.json"), os.path.join(cfg, "routing.json"),
-                                      None, discover.discover(sample_proposal(catalog.HARNESSES),
-                                                              fixture_dir=fixture_dir), width=10_000)
+                                      None, saved, width=10_000)
         first_prompt = result.stdout.find("tier [")
         positions = [result.stdout.find(line) for line in facts]
         ok = (result.returncode == 0 and len(facts) >= 4
@@ -399,7 +400,203 @@ def case_tiers_from_unreadable_file_writes_nothing():
         return ok, f"code={result.returncode} stderr={result.stderr!r}"
 
 
+def case_no_discover_skips_all_acquisition():
+    """--no-discover must skip discover.discover and never call node."""
+    import setup
+    import discover as discover_mod
+    hits = {"discover": 0, "node": 0}
+    orig_discover = discover_mod.discover
+    orig_run = getattr(setup, "subprocess", None)
+
+    def wrapped_discover(*a, **k):
+        hits["discover"] += 1
+        return orig_discover(*a, **k)
+
+    class Args:
+        no_discover = True
+        discover_json = None
+        fixture_dir = None
+        ads_dir = None
+
+    discover_mod.discover = wrapped_discover
+    try:
+        discovered, data = setup.acquire_discovery({"lanes": {}}, Args())
+    finally:
+        discover_mod.discover = orig_discover
+    return (
+        data == "skipped (--no-discover)"
+        and hits["discover"] == 0
+        and discovered == set(catalog.HARNESSES)
+        and orig_run is None
+    ), f"data={data!r} hits={hits} discovered={discovered} subprocess={orig_run}"
+
+
+def case_one_discovery_path_is_discover():
+    """The default setup path acquires through discover.discover once, never node."""
+    import setup
+    import discover as discover_mod
+    fixtures = os.path.join(HERE, "fixtures", "discover")
+    hits = {"discover": 0, "node": 0}
+    orig_discover = discover_mod.discover
+
+    def wrapped_discover(*a, **k):
+        hits["discover"] += 1
+        return orig_discover(*a, **k)
+
+    class Args:
+        no_discover = False
+        discover_json = None
+        fixture_dir = fixtures
+        ads_dir = None
+
+    discover_mod.discover = wrapped_discover
+    try:
+        discovered, data = setup.acquire_discovery(sample_proposal(catalog.HARNESSES), Args())
+    finally:
+        discover_mod.discover = orig_discover
+    ok = (
+        hits["discover"] == 1
+        and isinstance(data, dict)
+        and "harnesses" in data
+        and all(h in data["harnesses"] for h in ("codex", "agy", "grok", "claude"))
+        and "discover.mjs" not in str(data)
+    )
+    return ok, f"hits={hits} discovered={discovered} harnesses={getattr(data, 'get', lambda *_: None)('harnesses')}"
+
+
+def case_harness_error_keeps_existing_lanes():
+    """A single harness failure is a notice; setup continues and existing lanes stay."""
+    fixture_dir = os.path.join(HERE, "fixtures", "discover")
+    with tempfile.TemporaryDirectory() as td:
+        cfg = os.path.join(td, "config")
+        os.makedirs(cfg)
+        existing = copy.deepcopy(lanes_sample)
+        catalog.write_json(os.path.join(cfg, "lanes.json"), existing)
+        catalog.write_json(os.path.join(cfg, "routing.json"), routing_sample)
+        broken = os.path.join(td, "fixtures")
+        os.makedirs(broken)
+        for name in os.listdir(fixture_dir):
+            src = os.path.join(fixture_dir, name)
+            dst = os.path.join(broken, name)
+            if name == "codex-debug-models.json":
+                with open(dst, "w", encoding="utf-8") as f:
+                    f.write("{not json")
+            else:
+                with open(src, "r", encoding="utf-8") as f:
+                    text = f.read()
+                with open(dst, "w", encoding="utf-8") as f:
+                    f.write(text)
+        result = subprocess.run(
+            [sys.executable, SETUP_PY, "--config-dir", cfg, "--fixture-dir", broken,
+             "--no-bench", "--plain"],
+            input=default_answers(len(lanes_sample["lanes"])),
+            capture_output=True, text=True, cwd=DELEGATE_DIR,
+        )
+        lanes, _routing = load_written(cfg)
+        notice = "discovery error" in result.stdout or "Harness codex: error" in result.stdout
+        ok = (
+            result.returncode == 0
+            and set(lanes["lanes"]) == set(lanes_sample["lanes"])
+            and notice
+        )
+        return ok, (
+            f"code={result.returncode} lanes={set(lanes['lanes'])} "
+            f"notice={notice} stdout={result.stdout[:500]!r} stderr={result.stderr!r}"
+        )
+
+
+def case_plain_collects_bench_in_process():
+    """Plain setup renders collect() in process; it does not spawn bench.py."""
+    import setup
+    fixture = os.path.join(HERE, "fixture", "bench-epoch.csv")
+    spawned = []
+
+    class Args:
+        no_bench = False
+        bench_report = None
+        epoch_csv = fixture
+        effort_rows = None
+
+    buf = []
+    orig_print = setup.print if hasattr(setup, "print") else print
+
+    def capture(*a, **k):
+        buf.append(" ".join(str(x) for x in a))
+
+    import builtins
+    real_print = builtins.print
+    builtins.print = capture
+    try:
+        setup.show_bench(Args(), sample_proposal(catalog.HARNESSES), routing_sample)
+    finally:
+        builtins.print = real_print
+    text = "\n".join(buf)
+    import inspect
+    source = inspect.getsource(setup.show_bench)
+    ok = (
+        "Lane benchmark ranking" in text
+        and "bench.py" not in source
+        and "subprocess" not in source
+        and spawned == []
+    )
+    return ok, f"text={text[:200]!r} source_has_bench={'bench.py' in source}"
+
+
+def case_focused_screen_rejects_plain():
+    with tempfile.TemporaryDirectory() as td:
+        cfg = os.path.join(td, "config")
+        os.makedirs(cfg)
+        catalog.write_json(os.path.join(cfg, "lanes.json"), copy.deepcopy(lanes_sample))
+        catalog.write_json(os.path.join(cfg, "routing.json"), copy.deepcopy(routing_sample))
+        discover_path = os.path.join(td, "discover.json")
+        write_discover(discover_path, catalog.HARNESSES)
+        result = run_setup(cfg, discover_path, "", "--no-bench", "--plain", "--screen", "carry")
+        return (
+            result.returncode == 1
+            and "catalog.py" in result.stderr
+            and "set" in result.stderr
+            and not (result.stdout or "").strip().endswith("wrote"),
+            f"code={result.returncode} stderr={result.stderr!r}",
+        )
+
+
+def case_start_screen_keeps_plain_wizard():
+    with tempfile.TemporaryDirectory() as td:
+        cfg = os.path.join(td, "config")
+        discover_path = os.path.join(td, "discover.json")
+        write_discover(discover_path, catalog.HARNESSES)
+        result = run_setup(
+            cfg, discover_path, default_answers(len(lanes_sample["lanes"])),
+            "--no-bench", "--screen", "start",
+        )
+        wrote = os.path.isfile(os.path.join(cfg, "lanes.json"))
+        return (
+            result.returncode == 0 and wrote,
+            f"code={result.returncode} stdout={result.stdout[-200:]!r}",
+        )
+
+
+def case_saved_discovery_never_probes():
+    import setup
+    from unittest.mock import patch
+    from types import SimpleNamespace
+    with tempfile.TemporaryDirectory() as td:
+        path = os.path.join(td, "discovery.json")
+        for document in (
+            {"discovered": [{"key": "codex"}], "missing": [{"key": "agy"}]},
+            {"harnesses": {"codex": {"status": "ok"}}, "models": [], "unmapped": [], "retired": []},
+        ):
+            catalog.write_json(path, document)
+            args = SimpleNamespace(discover_json=path, no_discover=False, fixture_dir=None)
+            with patch.object(setup.discover, "discover", side_effect=AssertionError("unexpected live probe")) as probe:
+                found, result = setup.acquire_discovery(lanes_sample, args)
+            if found != {"codex"} or probe.called or result["harnesses"]["codex"]["status"] != "ok":
+                return False, repr((found, result))
+    return True, "both saved formats supplied facts without a live acquisition"
+
+
 for name, case in (
+    ("saved discovery never probes", case_saved_discovery_never_probes),
     ("tiers-from applies the page lines", case_tiers_from_applies_the_page_lines),
     ("tiers-from with an unreadable file writes nothing", case_tiers_from_unreadable_file_writes_nothing),
     ("plain prints the start facts", case_plain_prints_the_start_facts),
@@ -415,11 +612,46 @@ for name, case in (
     ("routing edits keep other classes", case_routing_edits_keep_other_classes),
     ("effort rows say the prompt interface has no pre-screen",
      case_effort_rows_says_the_prompt_interface_has_no_prescreen),
+    ("no-discover skips all acquisition", case_no_discover_skips_all_acquisition),
+    ("one discovery path is discover.discover", case_one_discovery_path_is_discover),
+    ("a harness error keeps existing lanes", case_harness_error_keeps_existing_lanes),
+    ("plain collects bench in process", case_plain_collects_bench_in_process),
+    ("focused screen on a pipe names the surgical CLI", case_focused_screen_rejects_plain),
+    ("full start on a pipe still runs the wizard", case_start_screen_keeps_plain_wizard),
 ):
     try:
         ok, detail = case()
     except Exception as e:
         ok, detail = False, repr(e)
     record(name, ok, detail)
+
+try:
+    import setup
+    with tempfile.TemporaryDirectory() as td:
+        cfg = os.path.join(td, "cfg")
+        real = os.path.join(td, "real")
+        os.makedirs(cfg); os.makedirs(real)
+        for name, doc in (("lanes.json", lanes_sample), ("routing.json", routing_sample)):
+            catalog.write_json(os.path.join(real, name), doc)
+            os.symlink(os.path.join(real, name), os.path.join(cfg, name))
+        lp, rp = os.path.join(cfg, "lanes.json"), os.path.join(cfg, "routing.json")
+        before = {p: open(p, "rb").read() for p in (lp, rp)}
+        rev = catalog.catalog_revision(config_dir=cfg)
+        setup.write_focused(cfg, rev, lanes_sample, routing_sample, lanes_sample, routing_sample, lp, rp)
+        record("focused no-op preserves bytes and stow links",
+               all(os.path.islink(p) and open(p, "rb").read() == before[p] for p in (lp, rp)))
+        proposed = copy.deepcopy(routing_sample); proposed["meters"] = False
+        setup.write_focused(cfg, rev, lanes_sample, routing_sample, lanes_sample, proposed, lp, rp)
+        record("focused routing write follows stow link and preserves Lane bytes",
+               os.path.islink(rp) and catalog.load_json(rp)["meters"] is False
+               and open(lp, "rb").read() == before[lp])
+        try:
+            setup.write_focused(cfg, rev, lanes_sample, routing_sample, lanes_sample, routing_sample, lp, rp)
+            stale_rejected = False
+        except catalog.CatalogError:
+            stale_rejected = True
+        record("focused save rejects intervening source changes", stale_rejected)
+except Exception as e:
+    record("focused writes preserve stow and revisions", False, repr(e))
 
 sys.exit(1 if fails else 0)

@@ -734,7 +734,8 @@ def main():
         lines19 = res19.stdout.strip().splitlines()
         ok19 = (
             res19.returncode == 0 and
-            any("flash-high@agy" in line and line.endswith("pick") for line in lines19) and
+            any("luna-low@codex" in line and line.endswith("pick") for line in lines19) and
+            any("flash-high@agy" in line and "unknown meter, sorted last" in line for line in lines19) and
             "delegate: dry run, nothing dispatched" in res19.stdout and
             runs_after19 == runs_before19
         )
@@ -745,16 +746,16 @@ def main():
         dir20 = parse_run_dir_from_stdout(res20.stdout)
         ok20 = (
             res20.returncode == 0 and
-            "flash-high@agy" in res20.stdout and
-            "delegate: dispatching flash-high@agy" in res20.stdout and
+            "luna-low@codex" in res20.stdout and
+            "delegate: dispatching luna-low@codex" in res20.stdout and
             "delegate:" in res20.stdout and
             "delegate-metrics:" in res20.stdout and
             dir20 is not None and os.path.isdir(dir20)
         )
         if ok20:
             disp20 = json.load(open(os.path.join(dir20, "dispatch.json")))
-            ok20 = disp20.get("lane") == "flash-high@agy"
-        record("20. run mechanical dispatches flash-high@agy", ok20, f"rc={res20.returncode} stdout={res20.stdout} stderr={res20.stderr}")
+            ok20 = disp20.get("lane") == "luna-low@codex"
+        record("20. run mechanical dispatches luna-low@codex (agy unknown-last)", ok20, f"rc={res20.returncode} stdout={res20.stdout} stderr={res20.stderr}")
 
         b21 = make_brief("b21.md", f"fake-relay: status=completed final={done_final}\nBrief 21.")
         res21 = run_run(t_env, ["impl", "--brief", b21, "--cwd", cwd, "--meters", healthy_meters, "--tier", "3"])
@@ -1050,6 +1051,66 @@ def main():
             "Writes are authorized inside" in prompt9e_text
         )
         record("33. agy prompt: read-only has new sandbox line and no 'file tools only', --write omits it", ok33)
+
+        # 34. routing.meters off skips automatic probes on named and ranked paths.
+        import usage
+        routing_path = os.path.join(t_env["config_dir"], "routing.json")
+        routing_doc = json.load(open(routing_path))
+        routing_doc["meters"] = False
+        with open(routing_path, "w", encoding="utf-8") as f:
+            json.dump(routing_doc, f, indent=2)
+            f.write("\n")
+        acquire_calls = []
+        orig_acquire = usage.acquire
+        def mark_acquire(*a, **k):
+            acquire_calls.append((a, k))
+            return {}
+        usage.acquire = mark_acquire
+        prev_cache = os.environ.get("DELEGATE_CACHE")
+        os.environ["DELEGATE_CACHE"] = t_env["cache_path"]
+        try:
+            from catalog import load_catalog, meters_enabled
+            cat_off = load_catalog(cwd=cwd, config_dir=t_env["config_dir"])
+            delegate.probe_meters(False, cat_off["routing"])
+            first = list(acquire_calls)
+            meters_doc = delegate.rank.load_usage(cat_off, refresh=True)
+            delegate.probe_meters(False, cat_off["routing"])
+            ok34 = (
+                meters_enabled(cat_off["routing"]) is False
+                and acquire_calls == []
+                and first == []
+                and not os.path.exists(t_env["cache_path"])
+            )
+        finally:
+            usage.acquire = orig_acquire
+            if prev_cache is None:
+                os.environ.pop("DELEGATE_CACHE", None)
+            else:
+                os.environ["DELEGATE_CACHE"] = prev_cache
+        record(
+            "34. meters off skips start/finish probes through dispatch and rank callers",
+            ok34,
+            repr(acquire_calls),
+        )
+
+        routing_doc["meters"] = True
+        with open(routing_path, "w", encoding="utf-8") as f:
+            json.dump(routing_doc, f, indent=2)
+            f.write("\n")
+        acquire_on = []
+        def mark_on(*a, **k):
+            acquire_on.append("acquire")
+            return {}
+        usage.acquire = mark_on
+        try:
+            cat_on = load_catalog(cwd=cwd, config_dir=t_env["config_dir"])
+            delegate.probe_meters(False, cat_on["routing"])
+            ok34b = acquire_on == ["acquire"]
+            delegate.probe_meters(True, cat_on["routing"])
+            ok34b = ok34b and acquire_on == ["acquire"]
+        finally:
+            usage.acquire = orig_acquire
+        record("34b meters on still probes unless --no-probe", ok34b, repr(acquire_on))
 
     if fails > 0:
         print(f"FAIL: {fails} tests failed", file=sys.stderr)

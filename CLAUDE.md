@@ -15,82 +15,75 @@ Machine configuration and agent tooling managed as one Git repository.
 
 ## Active work
 
-**Project dashboard prototype**: branch `worktree/delegate-monitor-herdr`; spec
-`docs/superpowers/specs/2026-09-13-delegate-dashboard-plugin.md`, tickets
-`.scratch/delegate-dashboard-plugin/issues/`. Before changing its TUI, launcher,
-or safe-save behavior, read `tools/delegate-dashboard/CLAUDE.md`. Orin's verdict
-(2026-09-15, tickets 01 and 09): a Herdr plugin is the right host and project Order,
-Gate and Margin give useful steering. Backend tickets 02-04 plus the shared Meter
-validity commits landed on `main` at `2a8e323` (2026-09-15, branch
-`dashboard-backend`, fast-forwarded by Orin), and the installed skill accepts this
-project's `.delegate/routing.json` with its Project order. The prototype UI stays
-on this branch per the spec. A production control surface is not ticketed yet.
-Since `main` at `93655b2` every delegate test script runs from a directory with no
-Git root, so the committed `.delegate/routing.json` here no longer reaches a test.
-Tree closed 2026-09-15: the Herdr worktree and plugin link were removed and the
-13 worker branches deleted; this branch is the record. To use the dashboard again,
-`herdr worktree open --cwd ~/dotfiles --branch worktree/delegate-monitor-herdr`,
-then `make -C <that path> delegate-dashboard` from a project pane relinks the plugin.
+**Herdr dashboard compatibility pass** (2026-09-17): branch
+`worktree/delegate-monitor-herdr`, reopened in its own worktree. Orin approved
+updating this branch from main, showing metering state, aligning project saves
+with the catalog boundary, and verifying the result in Herdr. Before changing
+its model, terminal view, or launcher, read `tools/delegate-dashboard/CLAUDE.md`.
+The accepted prototype verdict is in ticket 09; restart evidence and compatibility
+gaps are in `.scratch/delegate-dashboard-plugin/research/2026-09-16-restart.md`.
+Keep `.delegate/routing.json` test preferences on this branch. Production scope
+and merging the UI into main remain separate decisions. The Rust monitor in
+`tools/delegate-mon/` is separate.
 
-The delegate redesign is the main live thread. Spec
+**Delegate modular batch complete** (2026-09-16): tickets 01–13 landed, all 13
+script suites and full/focused terminal checks passed, and independent review
+findings were fixed. Orin accepted the Class guide; its humanizer redraft landed
+at `a24d20e`. Read `.scratch/delegate-modular/CLAUDE.md` for the implementation
+record and qualified research pointers. Multi-domain scope and the remaining
+consultation steps are still proposals.
+
+**Retained work** (2026-09-16): `.scratch/dotfiles-bootstrap/issues/` holds five
+unimplemented bootstrap and maintenance tickets, separate from the monitor work.
+`prompt.md` is the original modular-research brief, retained as scope history.
+Orin confirmed the global Gate of 0%; it is an intentional configuration choice.
+
+**Project routing backend** (2026-09-15, from the dashboard prototype): a
+project's `.delegate/routing.json` may carry `project_order`, a flat list of carried
+lane names that reorders them inside their global Tiers and never changes a Tier
+(`catalog.load_catalog()`, `catalog.validate_project_routing()`);
+`rank.tier_leaders()` gives one exact-Tier leader per Tier; `rank.meter_observations()`
+owns Meter cache validity. Spec
+`docs/superpowers/specs/2026-09-13-delegate-dashboard-plugin.md`; tickets
+`.scratch/delegate-dashboard-plugin/issues/`, of which 02-04 are this backend and
+carry their Landed notes here. Orin's verdict, 2026-09-15: a Herdr plugin is the
+right host for a persistent delegation control surface, and project Order, Gate and
+Margin give useful manual steering. The prototype UI, tickets 05-09 with their live
+evidence, and the verdict record on tickets 01 and 09 stay on branch
+`worktree/delegate-monitor-herdr`, as the spec requires. Its worktree was reopened for the compatibility pass. A
+production control surface is not ticketed yet.
+
+**Delegate redesign follow-ups:** spec
 `docs/superpowers/specs/2026-09-08-delegate-redesign.md`; tickets in
 `.scratch/delegate-redesign/issues/`, each carrying its own decisions and a
 "Landed" note; skill context `agents/skills/delegate/CLAUDE.md`. Tickets 01-19 and
 22-28 are landed, and the boxes left unticked there are Orin's own confirmations,
 which each ticket's Status line names.
 
-**Delegate browser use** is the second thread, on branch `worktree/silver-river-1847`
-(not merged): tickets 01-07 in `.scratch/delegate-browser/issues/`. Goal: the dispatch
-path lets workers use a browser a harness already has — a disposable browser
-everywhere, and the Helium "GenAI" agent profile through the Playwright extension — on
-the Mac and omarchy. No new config file, flag or ranking change; machine setup happens
-in conversation with Orin. Ticket 01 is done: the runner `scripts/browser_probes.py`,
-the prompt changes, and the Mac baseline table, with a 2026-09-12 retest beneath it.
+**Delegate browser follow-ups:** the former `worktree/silver-river-1847` work is
+merged into `main`; that local branch is closed. Tickets 01–07 in
+`.scratch/delegate-browser/issues/` own remaining setup and parity work. Before
+changing browser dispatch, read the browser section of
+`agents/skills/delegate/CLAUDE.md` and
+`.scratch/delegate-browser/research/2026-09-10-browser-routes.md` for the proven
+Mac behavior and outstanding Grok, native Claude, and Omarchy work.
 
-State after 2026-09-12, each row proven against Playwright's own snapshots rather
-than a worker's marker: **agy** passes; **codex** passes through a home of
-delegate's own (`~/.local/share/delegate/codex-home`, built by
-`make delegate-codex-home`), which holds one MCP server, so a worker never sees
-Gmail, `codex-cli`, `node_repl`, hooks or `~/.codex/AGENTS.md` — ticket 03 is done on the
-Mac, proven through the normal dispatch path in a read-only run and a write run,
-and only the omarchy setup remains; **grok** has a browser
-on write runs only, because its built-in `read-only` sandbox kills every stdio MCP
-server on macOS, and the proven fix is a custom sandbox profile, which needs a
-relay change (ticket 04); **claude** lanes are native since ticket 22, so ticket 02
-is rescoped to the session's own config and a restart. Facts and setup rules:
-`.scratch/delegate-browser/research/2026-09-10-browser-routes.md`.
-
-**Ticket 22 landed on `main` as `71e285c`** (2026-09-11), on top of `ea5430b`: each
-class has a floor and a ceiling (`routing.json` `classes`), no class reaches tier 4,
-`run --tier` raises the floor for one job, and Claude lanes run natively as the
-`lane-*` agents in `agents/agents/`.
-
-**Landed on `main` at `d53e5af`** (2026-09-13): tickets 18, 19 and 24-28 on top of
-22 and 23. The chain was `bench-aa-effort-slugs` (18, 24), then `t19-efforts-and-rows`,
-`t25-wizard-pages`, `t26-page-tiers`, `t27-page-first`, `t28-tier-order`; the last four
-worktrees and branches are removed, and `main` merged the browser thread on the way.
-Orin's wizard run (2026-09-13, ticket 28's run note) wrote the repo catalog: 18 lanes
-on, each with a tier and an `order`, 25 off; `scout` is floor 1 / ceiling 2. The live
-`~/.config/delegate/{lanes,routing}.json` are stow links into the repo since the same
-day (the plain files it replaced sit in `~/.config/delegate/_pre-stow-2026-09-13/`,
-unused), `make skills` linked the 16 `lane-*` agents, and `rank.py impl` through the
-installed skill reads the new tiers and orders. `make delegate-wizard` runs the wizard
-on the repo catalog with the accepted rows from any directory
-(`make -C <checkout> delegate-wizard`; `WIZARD_ARGS` adds flags such as
-`--tiers-from <file>`).
+**Live configuration:** `~/.config/delegate/{lanes,routing}.json` are stow links
+into this repo since 2026-09-13. The replaced plain files in
+`~/.config/delegate/_pre-stow-2026-09-13/` are unused. Orin's Tier and Order choices
+are recorded in ticket 28; current values belong to the catalog. From any directory,
+`make -C <checkout> delegate-wizard` edits that catalog with the accepted benchmark
+rows; `WIZARD_ARGS` adds setup flags. For historical implementation and validation,
+read the redesign tickets rather than reconstructing deleted worker branches.
 
 **Open, in priority order:**
 
-1. **Housekeeping**: the worktree `~/.herdr/worktrees/dotfiles/delegate-lane-catalog`
-   (branch `bench-aa-effort-slugs`) and the worktree and branch `t28-tier-order` are
-   merged and can be removed; so are the branches `delegate-lane-catalog` and
-   `effort-data-tooling`.
-2. **Provisional figures**: the `PROVISIONAL` notes on the generated lanes still say
+1. **Provisional figures**: the `PROVISIONAL` notes on the generated lanes still say
    "Confirm in the wizard". The tiers are now Orin's; `meter_weight` and `timeout` on
    those lanes are still copies, and `astra-high@codex` has `price` null with the note
    "not sourced" (`6e0f0b1` quoted `10 / 1 / 12.5 / 50` without a source). Find the
    source before pasting the figures, then reword the notes.
-3. **Carry-rule limit**: the carry page never proposes an agy flash lane off, because
+2. **Carry-rule limit**: the carry page never proposes an agy flash lane off, because
    each agy effort is a separate model name (ticket 19).
 
 **Waiting on Orin** (nothing else blocks on these):

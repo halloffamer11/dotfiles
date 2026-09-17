@@ -18,24 +18,29 @@ Two ledgers exist and they are not the same file:
                 knows this, so only the lead writes it.
 Run ledger path: $DELEGATE_RUNS else ~/.cache/delegate/runs.jsonl.
 """
-import argparse, json, os, re, shutil, subprocess, sys, time
+import argparse, json, os, re, shutil, sys, time
 from collections import Counter
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 
 try:
-    from catalog import load_catalog, CatalogError, HARNESSES
+    from catalog import load_catalog, CatalogError, HARNESSES, meters_enabled
 except ImportError:
-    from .catalog import load_catalog, CatalogError, HARNESSES
+    from .catalog import load_catalog, CatalogError, HARNESSES, meters_enabled
 
 try:
     from rank import rank
 except ImportError:
     from .rank import rank
 
+try:
+    import usage
+except ImportError:
+    from . import usage
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUNS = os.environ.get("DELEGATE_RUNS") or os.path.expanduser("~/.cache/delegate/runs.jsonl")
-CACHE = os.environ.get("DELEGATE_CACHE") or os.path.expanduser("~/.cache/delegate/usage.json")
+CACHE = usage.get_cache_path()
 # Flag file: while it exists, `statusline` prints no rows.
 SWITCH = os.environ.get("DELEGATE_STATUSLINE_SWITCH") or os.path.expanduser("~/.cache/delegate/statusline.off")
 VERDICTS = ("clean", "findings", "partial", "failed")
@@ -130,18 +135,12 @@ def ignored(lane_row, by_meter):
     return not by_meter.get(lane_row["lane"]) and lane_row["harness"] != "claude"
 
 
-def usage_doc(refresh=False, max_age_min=None):
-    cmd = [sys.executable, os.path.join(HERE, "usage.py")]
+def usage_doc(refresh=False, max_age_min=None, routing=None):
     if refresh:
-        cmd.append("--refresh")
-    if max_age_min is not None:
-        cmd += ["--max-age-min", str(max_age_min)]
-    p = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
-    try:
-        return json.loads(p.stdout)
-    except Exception:
-        with open(CACHE) as f:      # a probe that failed is not a reason to print nothing
-            return json.load(f)
+        return usage.acquire(refresh=True, max_age_min=max_age_min, timeout=180)
+    if routing is not None and not meters_enabled(routing):
+        return usage.load_cached()
+    return usage.acquire(refresh=refresh, max_age_min=max_age_min, timeout=180)
 
 
 def month_cell(price_month):
@@ -165,18 +164,25 @@ def plan_row(lane_row, meters):
 
 def cmd_limits(a):
     catalog = load_catalog_or_die(a.config_dir)
-    doc = usage_doc(a.refresh, a.max_age_min)
+    routing = catalog.get("routing", {})
+    metering = meters_enabled(routing)
+    doc = usage_doc(a.refresh, a.max_age_min, routing=routing)
+    gate = routing.get("gate", 0.1)
+    obs_map = usage.observations(doc) or {}
     by_meter = models_by_meter(catalog)
-    lanes = sorted(doc["lanes"], key=lambda L: (L.get("remaining_weekly") is None,
-                                                -(L.get("remaining_weekly") or 0)))
+    lanes = sorted((dict(L, lane=name, harness=L.get("harness", name.split("-", 1)[0]))
+                    for name, L in obs_map.items()),
+                   key=lambda L: (L.get("remaining_weekly") is None,
+                                  -(L.get("remaining_weekly") or 0)))
     skipped = [L["lane"] for L in lanes if ignored(L, by_meter)]
     shown = [L for L in lanes
              if (a.all or not ignored(L, by_meter))
-             and (not a.eligible or L.get("status") == "ok")]
+             and (not a.eligible or not metering or usage.eligible(obs_map.get(L["lane"]), gate))]
     rows = [[L["lane"], model_cell(L, by_meter), pct(L.get("remaining_weekly")),
              pct(L.get("remaining_5h")), when(L.get("reset_weekly")), when(L.get("reset_5h"))]
             for L in shown]
-    age = int((time.time() - doc["probed_at"]) / 60)
+    stamp = doc.get("probed_at")
+    age = int((time.time() - stamp) / 60) if isinstance(stamp, (int, float)) else None
     print("**Current limits:**\n")
     print(md_table(["Lane", "Model", "Weekly", "5h", "Weekly reset", "5h reset"], rows))
     plan_rows = []
@@ -203,7 +209,12 @@ def cmd_limits(a):
         print(f"\nWeekly reset unread for: {', '.join(unknown)}.")
     if skipped and not a.all:
         print(f"\nIgnored, no lane spends them: {', '.join(skipped)}.")
-    print(f"\nProbed {age} min ago. A meter under 10% remaining is skipped by rank.py.")
+    gate_pct = f"{int(round(gate * 100))}%"
+    age_label = f"{age} min ago" if age is not None else "at an unknown time"
+    if metering:
+        print(f"\nProbed {age_label}. A meter under {gate_pct} remaining is skipped by rank.py.")
+    else:
+        print(f"\nCached {age_label}. Metering is off; ranking does not skip by Gate.")
 
 
 # ---------------------------------------------------------------- cost
@@ -532,15 +543,14 @@ def cmd_statusline(a):
     c = get_colors(no_color)
     catalog = load_catalog_or_die(a.config_dir)
 
-    cache_path = os.environ.get("DELEGATE_CACHE") or CACHE
+    cache_path = usage.get_cache_path()
     if not os.path.exists(cache_path):
         return
-    try:
-        with open(cache_path, "r", encoding="utf-8") as f:
-            usage = json.load(f)
-    except Exception:
+    usage_doc = usage.load_cached(cache_path)
+    obs_map = usage.observations(usage_doc)
+    if obs_map is None:
         return
-    if not isinstance(usage, dict) or not isinstance(usage.get("lanes"), list):
+    if not isinstance(usage_doc, dict) or not isinstance(usage_doc.get("lanes"), list):
         return
 
     now = time.time()
@@ -548,11 +558,12 @@ def cmd_statusline(a):
     routing = catalog.get("routing", {})
     classes = routing.get("classes", {})
     gate_threshold = routing.get("gate", 0.10)
+    metering = meters_enabled(routing)
 
     won_by_meter = {}
     for cls in classes:
         try:
-            rows = rank(cls, catalog, usage, present)
+            rows = rank(cls, catalog, usage_doc, present)
         except Exception:
             continue
         if rows and rows[0].get("pick"):
@@ -597,7 +608,7 @@ def cmd_statusline(a):
         except Exception:
             return
 
-    by_meter = {L["lane"]: L for L in usage.get("lanes", []) if isinstance(L, dict) and "lane" in L}
+    by_meter = {L["lane"]: L for L in usage_doc.get("lanes", []) if isinstance(L, dict) and "lane" in L}
     all_meters = catalog.get("meters", {})
     catalog_order = list(all_meters.keys())
 
@@ -611,6 +622,8 @@ def cmd_statusline(a):
     sorted_meters = sorted(catalog_order, key=sort_key)
 
     out_lines = []
+    if not metering:
+        out_lines.append(f"{c['DIM']}meters off{c['R']}")
     for m_key in sorted_meters:
         m_def = all_meters.get(m_key, {})
         lbl = get_meter_label(m_key, m_def, all_meters)
@@ -624,7 +637,7 @@ def cmd_statusline(a):
         if model_remw is not None:
             remw = model_remw
 
-        is_gated = (remw is not None and remw <= gate_threshold) or (u_row.get("status") == "unavailable")
+        is_gated = metering and not usage.eligible(obs_map.get(m_key, u_row), gate_threshold)
 
         won_tiers = won_by_meter.get(m_key, set())
         badge_str = format_badge(won_tiers, c)

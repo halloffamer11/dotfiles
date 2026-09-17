@@ -1,6 +1,6 @@
 {
   "version": "delegate-boards.v1",
-  "note": "What each benchmark board measures, for the benchmark page (ticket 25). `measures`, `tasks` and `score` are quoted from the page named in `url`, fetched on `fetched`; a quote may be cut at a sentence boundary but is never reworded. `scale` says what the number on the plot is, read from the row's own field. `cost` is the basis in sources.json. `speaks_to` is the wizard's reading of the quoted description against the job classes, not the source's claim. A board with no entry is shown with no description and says so.",
+  "note": "What each benchmark board measures, for the benchmark page (ticket 25) and model inspection (ticket 12). `measures`, `tasks` and `score` are quoted from the page named in `url`, fetched on `fetched`; a quote may be cut at a sentence boundary but is never reworded. `scale` says what the number on the plot is, read from the row's own field. `cost` is the basis in sources.json. `direction` is curated and is never inferred for a board with no entry. `speaks_to` is curated relevance of the quoted description to coding work, knowledge work and API-workflow evidence; it is not the source's claim, and it does not name a routing Domain or a Class that does not exist. A board with no entry is shown with no description and says so.",
   "boards": {
     "aa": {
       "Artificial Analysis Intelligence Index": {
@@ -11,7 +11,8 @@
         "score": "Intelligence Index is calculated as a weighted average across four categories: Agents (30%), Coding (20%), Scientific Reasoning (20%) and General (30%).",
         "scale": "index, 0 to 100",
         "cost": "per task: the cost of running the Intelligence Index",
-        "speaks_to": "no one class: a composite, shown and never counted by the carry rule"
+        "direction": "higher-is-better",
+        "speaks_to": "composite across reasoning, knowledge, maths and programming; shown and never counted by the carry rule. Quoted category weights sit beside the source caution that the weighting is unpublished. Neither is a coding, knowledge or API-workflow score"
       },
       "AutomationBench": {
         "url": "https://artificialanalysis.ai/methodology/intelligence-benchmarking",
@@ -21,7 +22,8 @@
         "score": "For the headline score, a task receives 0 if the model violates any guardrail. If no guardrails are violated, the task receives the percentage of objectives the model completed. Errored tasks also score 0.",
         "scale": "share of objectives completed, 0 to 1",
         "cost": "per task: the Intelligence Index's cost, the same on every AA board",
-        "speaks_to": "mechanical and impl: multi-step tool calls against a spec"
+        "direction": "higher-is-better",
+        "speaks_to": "API-workflow relevance: REST-tool SaaS workflows, not GUI computer use. Adjacent to mechanical and impl only as multi-step tool calls against a spec; not a routing Domain or Class"
       },
       "AA-LCR": {
         "url": "https://artificialanalysis.ai/methodology/intelligence-benchmarking",
@@ -31,7 +33,8 @@
         "score": "Model responses are evaluated using GPT-5.6 Luna (medium) as an equality checker with pass@1 scoring",
         "scale": "share of questions answered correctly, 0 to 1",
         "cost": "per task: the Intelligence Index's cost, the same on every AA board",
-        "speaks_to": "scout and review: reasoning over a large body of text"
+        "direction": "higher-is-better",
+        "speaks_to": "Knowledge relevance: long-document reasoning. Coding work: scout and review at most"
       },
       "Omniscience": {
         "url": "https://artificialanalysis.ai/methodology/intelligence-benchmarking",
@@ -41,7 +44,8 @@
         "score": "Models are scored using the AA-Omniscience Index, which assigns points for correct answers, subtracts points for hallucinated responses, and keeps abstentions neutral, rewarding abstentions over incorrect guesses",
         "scale": "AA-Omniscience Index, below zero when wrong answers outnumber right ones",
         "cost": "per task: the Intelligence Index's cost, the same on every AA board",
-        "speaks_to": "scout and review: a wrong fact stated with confidence is the failure it counts"
+        "direction": "higher-is-better",
+        "speaks_to": "Knowledge relevance: factual reliability and hallucination (42 topics; not a finance, investing or supply-chain split). Coding work: scout and review at most — a wrong fact stated with confidence is the failure it counts"
       },
       "GDPval": {
         "url": "https://artificialanalysis.ai/methodology/intelligence-benchmarking",
@@ -51,7 +55,8 @@
         "score": "Pairwise Grading – A judge sampled from a panel of three frontier LLM judges blindly ranks two submissions for the same task, each created by a different model. The Elo scale is anchored to human expert deliverables at 1000.",
         "scale": "Elo normalized as clamp((Elo - 500) / 2000), 0 to 1",
         "cost": "per task: the Intelligence Index's cost, the same on every AA board",
-        "speaks_to": "impl: finished deliverables judged against each other, not tests"
+        "direction": "higher-is-better",
+        "speaks_to": "Knowledge relevance: professional deliverables pairwise-graded. Coding work: adjacent to impl as finished files judged against each other, not tests"
       },
       "Terminal-Bench 2.1": {
         "url": "https://artificialanalysis.ai/methodology/intelligence-benchmarking",
@@ -61,7 +66,8 @@
         "score": "Each task ships with a verification suite that the agent must satisfy by interacting with the terminal — tasks are considered successful only if every test passes",
         "scale": "share of tasks passed, 0 to 1",
         "cost": "per task: the Intelligence Index's cost, the same on every AA board",
-        "speaks_to": "impl and hard-impl: agentic work in a shell, graded by tests"
+        "direction": "higher-is-better",
+        "speaks_to": "Coding relevance: agentic shell work graded by tests; the task set also spans operations and science, so it is not a pure coding axis. Coding work: impl and hard-impl"
       },
       "GPQA Diamond": {
         "url": "https://artificialanalysis.ai/methodology/intelligence-benchmarking",
@@ -71,7 +77,8 @@
         "score": "4 option multiple choice format. Regex-based answer extraction with pass@1 scoring",
         "scale": "share of questions answered correctly, 0 to 1",
         "cost": "per task: the Intelligence Index's cost, the same on every AA board",
-        "speaks_to": "review, at most: reasoning with no tools and no code"
+        "direction": "higher-is-better",
+        "speaks_to": "Knowledge relevance: scientific multiple-choice with no tools and no code. Coding work: review at most"
       },
       "MMMU-Pro": {
         "url": "https://artificialanalysis.ai/methodology/intelligence-benchmarking",
@@ -81,7 +88,8 @@
         "score": "Multiple Choice (10 options). Regex extraction, pass@1",
         "scale": "share of questions answered correctly, 0 to 1",
         "cost": "per task: the Intelligence Index's cost, the same on every AA board",
-        "speaks_to": "none: it reads images, and a delegate job is text"
+        "direction": "higher-is-better",
+        "speaks_to": "Knowledge relevance: multimodal understanding of images and text. It does not directly measure coding or API-workflow performance."
       },
       "IFBench": {
         "url": "https://artificialanalysis.ai/methodology/intelligence-benchmarking",
@@ -91,7 +99,8 @@
         "score": "Our score represents the prompt level accuracy (average across all questions and repeats)",
         "scale": "prompt-level accuracy, 0 to 1",
         "cost": "per task: the Intelligence Index's cost, the same on every AA board",
-        "speaks_to": "mechanical: doing exactly what the brief says"
+        "direction": "higher-is-better",
+        "speaks_to": "Coding relevance: following precise instructions in a single turn. Coding work: mechanical — doing exactly what the brief says"
       }
     },
     "tbench": {
@@ -107,7 +116,8 @@
         "score": "Resolution rate of Terminal-Bench 4.0 tasks. The whiskers span the 95% confidence interval.",
         "scale": "resolution rate, percent",
         "cost": "whole run, not per task; the leaderboard does not say so, and sources.json records it",
-        "speaks_to": "impl and hard-impl: an agent and a model scored as a pair (\"To test an agent and model, pass --agent and --model\")"
+        "direction": "higher-is-better",
+        "speaks_to": "Coding relevance: an agent and a model scored as a pair (\"To test an agent and model, pass --agent and --model\"); the task set is not a pure coding axis. Coding work: impl and hard-impl"
       }
     },
     "swerb": {
@@ -119,7 +129,8 @@
         "score": "S(τ) = 1[migration happened] · 1[every check passes] · (0.4 + 0.6 · s/6) ∈ {0} ∪ [0.4, 1]. Behavioural Tests: 130,118 checks recorded from the original. All of them, or the run scores zero.",
         "scale": "score out of 100",
         "cost": "per task",
-        "speaks_to": "hard-impl: hours-long work on a whole repository"
+        "direction": "higher-is-better",
+        "speaks_to": "Coding relevance: whole-repository migrations. Coding work: hard-impl — hours-long work on a whole repository"
       }
     }
   }

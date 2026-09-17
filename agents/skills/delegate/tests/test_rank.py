@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """test_rank.py — unit and CLI tests for rank.py. Run: python3 tests/test_rank.py"""
 import copy
+import inspect
 import json
 import os
 import shutil
@@ -22,6 +23,7 @@ RANK_PY = os.path.join(DELEGATE_DIR, "rank.py")
 sys.path.insert(0, DELEGATE_DIR)
 import catalog
 import rank
+import usage
 
 fails = 0
 
@@ -366,8 +368,8 @@ with tempfile.TemporaryDirectory() as td:
     record("case 8 CLI everything vetoed", cli8_ok)
 
     # -------------------------------------------------------------
-    # 9. mechanical (1-2): tier 1 holds flash-high@agy and luna-low@codex
-    # Part A: equal paces -> the tie falls to lane name, so flash wins
+    # 9. mechanical (1-2): tier 1 holds flash-high@agy and luna-low@codex.
+    # agy combined Remaining/Pace are unknown, so flash sorts last and cannot steal.
     m9a = [
         meter("codex", weekly=1.00, five_h=1.00, pace=1.00, status="ok"),
         meter("agy-gemini", weekly=1.00, five_h=1.00, pace=1.00, status="ok"),
@@ -376,9 +378,14 @@ with tempfile.TemporaryDirectory() as td:
     ]
     doc9a = write_meters_doc(meters_path, m9a)
     rows9a = rank.rank("mechanical", cat, doc9a, ALL_HARNESSES)
-    mech9a_ok = (rows9a[0]["lane"] == "flash-high@agy" and rows9a[0]["pick"] is True)
+    flash9a = next(r for r in rows9a if r["lane"] == "flash-high@agy")
+    mech9a_ok = (
+        rows9a[0]["lane"] == "luna-low@codex" and rows9a[0]["pick"] is True
+        and flash9a["eligible"] is True and flash9a["pace"] is None
+        and flash9a["reason"] == "unknown meter, sorted last"
+    )
 
-    # Part B: with agy pace 3.27 flash is pick either way
+    # Part B: invented agy pace 3.27 cannot steal the pick
     m9b = [
         meter("codex", weekly=0.55, five_h=0.55, pace=0.75, status="ok"),
         meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
@@ -387,9 +394,12 @@ with tempfile.TemporaryDirectory() as td:
     ]
     doc9b = write_meters_doc(meters_path, m9b)
     rows9b = rank.rank("mechanical", cat, doc9b, ALL_HARNESSES)
-    mech9b_ok = (rows9b[0]["lane"] == "flash-high@agy" and rows9b[0]["pick"] is True)
+    mech9b_ok = (
+        rows9b[0]["lane"] == "luna-low@codex" and rows9b[0]["pick"] is True
+        and rows9b[0]["reason"] == "pick"
+    )
 
-    # Part C: with luna pace 3.60 and flash 3.27, luna leads its tier on pace
+    # Part C: luna still leads on its own known pace
     m9c = [
         meter("codex", weekly=0.90, five_h=0.90, pace=3.60, status="ok"),
         meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
@@ -403,7 +413,7 @@ with tempfile.TemporaryDirectory() as td:
         rows9c[0]["pick"] is True and
         rows9c[0]["reason"] == "pick"
     )
-    record("case 9 rank() mechanical tie-break and pace order", mech9a_ok and mech9b_ok and mech9c_ok)
+    record("case 9 rank() mechanical agy unknown-last, no invented-pace steal", mech9a_ok and mech9b_ok and mech9c_ok)
 
     res9 = subprocess.run(
         [sys.executable, RANK_PY, "mechanical", "--config-dir", cfg_dir, "--meters", meters_path, "--harnesses", ALL_HARNESSES_ARG],
@@ -719,6 +729,7 @@ with tempfile.TemporaryDirectory() as td:
         tier_cat["lanes"][lane_name]["order"] = order
 
     tier_meters = {
+        "probed_at": 1700000000,
         "lanes": [
             meter("codex", weekly=0.80, five_h=0.80, pace=0.80, status="ok"),
             meter("grok", weekly=0.80, pace=0.90, status="ok"),
@@ -727,7 +738,7 @@ with tempfile.TemporaryDirectory() as td:
         ]
     }
     previews20 = rank.tier_leaders(tier_cat, tier_meters, ALL_HARNESSES)
-    expected_leaders20 = ["flash-high@agy", "grok46-high@grok", "sol-high@codex", "fable-xhigh@claude"]
+    expected_leaders20 = ["luna-low@codex", "grok46-high@grok", "sol-high@codex", "fable-xhigh@claude"]
     shape20_ok = (
         [preview["tier"] for preview in previews20] == [1, 2, 3, 4]
         and [preview["leader"] for preview in previews20] == expected_leaders20
@@ -873,5 +884,172 @@ with tempfile.TemporaryDirectory() as td:
                all(row["r"] is None and row["pace"] is None
                    and row["meter_status"] == "unknown" for row in observed21))
         json.dumps(observed21, allow_nan=False)
+
+    record("rank.rank has no unused effort parameter",
+           "effort" not in inspect.signature(rank.rank).parameters)
+    record("rank.meter_observations re-exports usage.observations",
+           rank.meter_observations is usage.observations
+           or rank.meter_observations({"lanes": []}) == usage.observations({"lanes": []}))
+
+    # 22. Remaining equal to Gate is eligible; cached status is not a veto.
+    m22 = [
+        meter("codex", weekly=0.10, five_h=0.10, pace=0.75, status="unavailable"),
+        meter("grok", weekly=1.00, pace=0.90, status="ok"),
+        meter("claude-fable", weekly=0.70, five_h=0.70, pace=0.85, status="ok"),
+        meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
+    ]
+    doc22 = write_meters_doc(meters_path, m22)
+    rows22 = rank.rank("impl", cat, doc22, ALL_HARNESSES)
+    terra22 = next(r for r in rows22 if r["lane"] == "terra-high@codex")
+    record("case 22 r equal to gate is eligible and status is ignored",
+           terra22["eligible"] is True and terra22["reason"] in ("eligible", "pick", "unknown meter, sorted last"))
+
+    # Project Gate override: r=0.20 passes global 0.10 and fails project 0.50.
+    fake_git_gate = os.path.join(td, "repo-gate")
+    os.makedirs(fake_git_gate)
+    open(os.path.join(fake_git_gate, ".git"), "w").close()
+    p_gate = os.path.join(fake_git_gate, ".delegate")
+    os.makedirs(p_gate)
+    catalog.write_json(os.path.join(p_gate, "routing.json"), {"gate": 0.5})
+    cat_gate = catalog.load_catalog(cwd=fake_git_gate, config_dir=cfg_dir)
+    m_gate = [
+        meter("codex", weekly=0.20, five_h=0.20, pace=0.75, status="ok"),
+        meter("grok", weekly=1.00, pace=0.90, status="ok"),
+        meter("claude-fable", weekly=0.70, five_h=0.70, pace=0.85, status="ok"),
+        meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
+    ]
+    doc_gate = write_meters_doc(meters_path, m_gate)
+    rows_global = rank.rank("impl", cat, doc_gate, ALL_HARNESSES)
+    rows_project = rank.rank("impl", cat_gate, doc_gate, ALL_HARNESSES)
+    terra_global = next(r for r in rows_global if r["lane"] == "terra-high@codex")
+    terra_project = next(r for r in rows_project if r["lane"] == "terra-high@codex")
+    record("case 22 project gate overrides global gate at meter granularity",
+           terra_global["eligible"] is True
+           and terra_project["eligible"] is False
+           and "vetoed:gate" in terra_project["reason"]
+           and "gate 50%" in terra_project["reason"])
+
+    # 23. agy remains eligible unknown-last; picked when measured alternatives are unavailable.
+    m23 = [
+        meter("codex", weekly=0.05, five_h=0.05, pace=0.75, status="unavailable"),
+        meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
+        meter("grok", weekly=0.05, pace=0.05, status="unavailable"),
+        meter("claude-fable", weekly=0.70, five_h=0.70, pace=0.85, status="ok"),
+    ]
+    doc23 = write_meters_doc(meters_path, m23)
+    rows23 = rank.rank("mechanical", cat, doc23, ALL_HARNESSES)
+    flash23 = next(r for r in rows23 if r["lane"] == "flash-high@agy")
+    record("case 23 agy is picked when measured alternatives are gated; windows stay on the row",
+           rows23[0]["lane"] == "flash-high@agy" and rows23[0]["pick"] is True
+           and flash23["r"] is None and flash23["pace"] is None
+           and flash23["remaining_weekly"] == 0.61
+           and flash23["eligible"] is True)
+
+    # 24. Cache path and cached-only tiers: no vendor probe.
+    record("load_cached_usage uses usage.get_cache_path",
+           rank.load_cached_usage.__doc__ is not None)
+    missing_cache24 = os.path.join(td, "missing-usage-24.json")
+    os.environ["DELEGATE_CACHE"] = missing_cache24
+    probed24 = []
+    orig_probe = usage.probe
+    origs = (usage.probe_codex, usage.probe_agy, usage.probe_claude, usage.probe_grok)
+    def mark_probe(*a, **k):
+        probed24.append("probe")
+        return orig_probe(*a, **k)
+    def boom_vendor(*a, **k):
+        probed24.append("vendor")
+        return [usage.lane("codex", None, note="stub")]
+    usage.probe = mark_probe
+    usage.probe_codex = usage.probe_agy = usage.probe_claude = usage.probe_grok = boom_vendor
+    try:
+        cached24 = rank.load_cached_usage()
+        record("load_cached_usage on missing cache is {} and does not probe",
+               cached24 == {} and probed24 == [])
+        previews24 = rank.tier_leaders(tier_cat, cached24, ALL_HARNESSES)
+        record("tier_leaders with missing cache does not probe",
+               probed24 == [] and all(
+                   row["r"] is None and row["pace"] is None
+                   for preview in previews24 for row in preview["rows"]
+               ))
+    finally:
+        usage.probe = orig_probe
+        usage.probe_codex, usage.probe_agy, usage.probe_claude, usage.probe_grok = origs
+        os.environ.pop("DELEGATE_CACHE", None)
+
+    # 25. routing.meters off: Tier/Order/name only, no Gate, no steal, no probe.
+    cat_off = copy.deepcopy(cat)
+    cat_off["routing"]["meters"] = False
+    cat_off["lanes"]["terra-high@codex"]["order"] = 1
+    cat_off["lanes"]["grok46-high@grok"]["order"] = 2
+    m_off = [
+        meter("codex", weekly=0.05, five_h=0.05, pace=0.10, status="ok"),
+        meter("grok", weekly=1.00, pace=2.00, status="ok"),
+        meter("claude-fable", weekly=0.70, five_h=0.70, pace=0.85, status="ok"),
+        meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
+    ]
+    doc_off = write_meters_doc(meters_path, m_off)
+    rows_off = rank.rank("impl", cat_off, doc_off, ALL_HARNESSES)
+    terra_off = next(r for r in rows_off if r["lane"] == "terra-high@codex")
+    grok_off = next(r for r in rows_off if r["lane"] == "grok46-high@grok")
+    luna_off = next(r for r in rows_off if r["lane"] == "luna-low@codex")
+    fable_off = next(r for r in rows_off if r["lane"] == "fable-xhigh@claude")
+    record(
+        "case 25 meters off ranks by Tier, Order and name; Gate and Margin are ignored",
+        rows_off[0]["lane"] == "terra-high@codex" and rows_off[0]["reason"] == "pick"
+        and terra_off["eligible"] is True and "vetoed:gate" not in terra_off["reason"]
+        and grok_off["reason"] == "eligible" and "stolen" not in grok_off["reason"]
+        and luna_off["reason"].startswith("vetoed:floor")
+        and fable_off["reason"].startswith("vetoed:ceiling"),
+        repr([(r["lane"], r["reason"]) for r in rows_off[:6]]),
+    )
+    rows_on = rank.rank("impl", cat, doc_off, ALL_HARNESSES)
+    terra_on = next(r for r in rows_on if r["lane"] == "terra-high@codex")
+    record(
+        "case 25b meters on restores Gate veto",
+        terra_on["eligible"] is False and "vetoed:gate" in terra_on["reason"],
+        terra_on["reason"],
+    )
+
+    probed25 = []
+    orig_acquire = usage.acquire
+    def mark_acquire(*a, **k):
+        probed25.append("acquire")
+        return orig_acquire(*a, **k)
+    usage.acquire = mark_acquire
+    missing25 = os.path.join(td, "missing-usage-25.json")
+    os.environ["DELEGATE_CACHE"] = missing25
+    try:
+        loaded_off = rank.load_usage(cat_off, refresh=True)
+        loaded_again = rank.load_usage(cat_off, refresh=True)
+        record(
+            "case 25c load_usage with meters off never probes, even on refresh, including a later caller",
+            loaded_off == {} and loaded_again == {} and probed25 == []
+            and not os.path.exists(missing25),
+            repr(probed25),
+        )
+        loaded_on = rank.load_usage(cat, meters_path=meters_path, refresh=True)
+        record(
+            "case 25d explicit meters file is still loaded when metering is on",
+            loaded_on.get("lanes") and probed25 == [],
+            repr(probed25),
+        )
+    finally:
+        usage.acquire = orig_acquire
+        os.environ.pop("DELEGATE_CACHE", None)
+
+    fake_git_m = os.path.join(td, "repo-meters")
+    os.makedirs(fake_git_m)
+    open(os.path.join(fake_git_m, ".git"), "w").close()
+    os.makedirs(os.path.join(fake_git_m, ".delegate"))
+    catalog.write_json(os.path.join(fake_git_m, ".delegate", "routing.json"), {"meters": False})
+    cat_proj = catalog.load_catalog(cwd=fake_git_m, config_dir=cfg_dir)
+    rows_proj = rank.rank("impl", cat_proj, doc_off, ALL_HARNESSES)
+    terra_proj = next(r for r in rows_proj if r["lane"] == "terra-high@codex")
+    record(
+        "case 25e project meters false skips Gate on a cache-below-gate meter",
+        catalog.meters_enabled(cat_proj["routing"]) is False
+        and terra_proj["eligible"] is True,
+        terra_proj["reason"],
+    )
 
 sys.exit(1 if fails else 0)

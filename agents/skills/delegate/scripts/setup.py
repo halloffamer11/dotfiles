@@ -4,7 +4,6 @@ import argparse
 import copy
 import json
 import os
-import subprocess
 import sys
 import tempfile
 
@@ -20,53 +19,93 @@ class SetupAbort(Exception):
     """The operator ended interactive input before confirming a write."""
 
 
-def default_ads_dir():
-    return os.path.expanduser(os.environ.get("ADS_DIR", "~/.local/share/delegate/ads"))
+def present_from_discover_doc(doc):
+    """Harness names present in a --discover-json fixture.
+
+    Accepts the ADS `{discovered, missing}` shape used by existing tests, or
+    the `discover.discover` result `{harnesses: {name: {status, ...}}}`.
+    """
+    if not isinstance(doc, dict):
+        raise CatalogError("discovery failed: expected a JSON object")
+    if isinstance(doc.get("discovered"), list) and isinstance(doc.get("missing"), list):
+        found, missing = {}, {}
+        for item in doc["discovered"]:
+            if isinstance(item, dict) and item.get("key") in HARNESSES:
+                found[item["key"]] = item
+        for item in doc["missing"]:
+            if isinstance(item, dict) and item.get("key") in HARNESSES:
+                missing[item["key"]] = item
+        for harness in HARNESSES:
+            if harness in found:
+                item = found[harness]
+                print(
+                    f"discovered {harness}: version={item.get('version', 'unknown')} "
+                    f"authenticated={item.get('authenticated', None)}"
+                )
+            elif harness in missing:
+                item = missing[harness]
+                print(f"missing {harness}: {item.get('binary', harness)}")
+        return set(found), False
+    if isinstance(doc.get("harnesses"), dict):
+        found = {
+            name for name, info in doc["harnesses"].items()
+            if isinstance(info, dict) and info.get("status") == "ok"
+        }
+        return found, True
+    raise CatalogError("discovery failed: expected discovered and missing lists")
+
+
+def acquire_discovery(lanes_doc, args):
+    """One discovery result for setup. Never shells out to discover.mjs.
+
+    `--discover-json` is a fixture, not a live probe. `--no-discover` skips
+    every live acquisition. A missing or failing harness is a notice: this
+    function does not raise on a missing binary.
+    Returns (discovered_set, discovery_data).
+    """
+    present = None
+    fixture_result = None
+    if args.discover_json:
+        doc = load_json(args.discover_json)
+        present, is_discover_result = present_from_discover_doc(doc)
+        if is_discover_result:
+            fixture_result = doc
+        else:
+            # The legacy snapshot contains Harness facts only; do not turn
+            # absent model facts into permission for a live discovery call.
+            fixture_result = {
+                "harnesses": {name: {"status": "ok" if name in present else "missing"}
+                              for name in HARNESSES},
+                "models": [], "unmapped": [], "retired": [],
+                "model_facts_available": False,
+            }
+    if args.no_discover:
+        discovered = present if present is not None else set(HARNESSES)
+        return discovered, "skipped (--no-discover)"
+    if fixture_result is not None:
+        return present, fixture_result
+    try:
+        discovery = discover.discover(
+            lanes_doc,
+            present=present,
+            fixture_dir=args.fixture_dir,
+        )
+    except Exception as e:
+        discovered = present if present is not None else set(HARNESSES)
+        return discovered, str(e)
+    discovered = {
+        name for name, info in (discovery.get("harnesses") or {}).items()
+        if isinstance(info, dict) and info.get("status") == "ok"
+    }
+    if present is not None:
+        discovered = present
+    return discovered, discovery
 
 
 def read_discovery(args):
-    if args.discover_json:
-        doc = load_json(args.discover_json)
-    else:
-        ads_dir = os.path.expanduser(args.ads_dir or default_ads_dir())
-        script = os.path.join(ads_dir, "skills", "delegate-setup", "scripts", "discover.mjs")
-        try:
-            result = subprocess.run(
-                ["node", script], capture_output=True, text=True, check=False
-            )
-        except OSError as e:
-            raise CatalogError(f"discovery failed: {e}") from e
-        if result.returncode != 0:
-            message = result.stderr.strip() or result.stdout.strip() or f"exit {result.returncode}"
-            raise CatalogError(f"discovery failed: {message}")
-        try:
-            doc = json.loads(result.stdout)
-        except json.JSONDecodeError as e:
-            raise CatalogError(f"discovery failed: invalid JSON: {e}") from e
-
-    if not isinstance(doc, dict) or not isinstance(doc.get("discovered"), list) or not isinstance(doc.get("missing"), list):
-        raise CatalogError("discovery failed: expected discovered and missing lists")
-
-    found = {}
-    missing = {}
-    for item in doc["discovered"]:
-        if isinstance(item, dict) and item.get("key") in HARNESSES:
-            found[item["key"]] = item
-    for item in doc["missing"]:
-        if isinstance(item, dict) and item.get("key") in HARNESSES:
-            missing[item["key"]] = item
-
-    for harness in HARNESSES:
-        if harness in found:
-            item = found[harness]
-            print(
-                f"discovered {harness}: version={item.get('version', 'unknown')} "
-                f"authenticated={item.get('authenticated', None)}"
-            )
-        elif harness in missing:
-            item = missing[harness]
-            print(f"missing {harness}: {item.get('binary', harness)}")
-    return set(found)
+    """Compatibility wrapper: harness names only, from a fixture or a live probe."""
+    discovered, _discovery = acquire_discovery({"lanes": {}}, args)
+    return discovered
 
 
 def load_or_propose(config_dir, discovered):
@@ -104,6 +143,21 @@ def load_or_propose(config_dir, discovered):
     return lanes_doc, routing_doc, lanes_path, routing_path
 
 
+def note_undiscovered_lanes(lanes_doc, discovery_data):
+    """A missing or failing harness is a notice; existing lanes stay."""
+    if not isinstance(discovery_data, dict):
+        return
+    harnesses = discovery_data.get("harnesses") or {}
+    for name, lane in lanes_doc["lanes"].items():
+        info = harnesses.get(lane["harness"]) if isinstance(harnesses.get(lane["harness"]), dict) else {}
+        status = info.get("status")
+        if status == "missing":
+            print(f"{name}: {lane['harness']} CLI not found; the lane stays but rank.py will veto it")
+        elif status == "error":
+            err = info.get("error") or "unknown error"
+            print(f"{name}: {lane['harness']} discovery error ({err}); the lane stays")
+
+
 def show_bench(args, lanes_doc, routing_doc):
     if args.no_bench:
         return
@@ -115,30 +169,20 @@ def show_bench(args, lanes_doc, routing_doc):
             print(f"bench: {e}")
         return
 
-    with tempfile.TemporaryDirectory() as config_dir:
-        write_json(os.path.join(config_dir, "lanes.json"), lanes_doc)
-        write_json(os.path.join(config_dir, "routing.json"), routing_doc)
-        command = [sys.executable, os.path.join(os.path.dirname(__file__), "bench.py"), "--config-dir", config_dir]
-        if args.epoch_csv:
-            command.extend(["--epoch-csv", args.epoch_csv])
-        for path in args.effort_rows or ():
-            command.extend(["--effort-rows", path])
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
-        if result.returncode != 0:
-            print((result.stderr or result.stdout or f"bench: exit {result.returncode}").rstrip())
-            return
-        report_path = None
-        for line in result.stdout.splitlines():
-            if line.startswith("bench: wrote "):
-                report_path = line[len("bench: wrote "):]
-        if not report_path:
-            print((result.stderr or result.stdout or "bench: did not report an output file").rstrip())
-            return
-        try:
-            with open(report_path, "r", encoding="utf-8") as f:
-                print(f.read(), end="")
-        except OSError as e:
-            print(f"bench: {e}")
+    effort_rows, effort_message = load_effort_rows(args.effort_rows)
+    if effort_message:
+        print(effort_message)
+        return
+    try:
+        data = bench.collect(
+            lanes_doc,
+            epoch_csv=args.epoch_csv,
+            effort_rows=effort_rows,
+        )
+    except bench.BenchError as e:
+        print(f"bench: {e}")
+        return
+    print(bench.format_collection(data, effort_rows=effort_rows), end="")
 
 
 def read_answer(prompt):
@@ -195,6 +239,7 @@ def show_routing(routing_doc):
         print(f"classes.{name}: floor={cls_info['floor']} ceiling={cls_info['ceiling']}")
     print(f"margin: {routing_doc['margin']}")
     print(f"gate: {routing_doc['gate']}")
+    print(f"meters: {'on' if catalog.meters_enabled(routing_doc) else 'off'}")
 
 
 def ask_routing(routing_doc):
@@ -209,6 +254,15 @@ def ask_routing(routing_doc):
         cls_info["ceiling"] = c
     routing_doc["margin"] = ask_fraction("margin", routing_doc["margin"])
     routing_doc["gate"] = ask_fraction("gate", routing_doc["gate"])
+    current = "on" if catalog.meters_enabled(routing_doc) else "off"
+    answer = read_answer(f"meters [{current}]: ").strip().lower()
+    if answer in ("off", "false", "n", "no"):
+        routing_doc["meters"] = False
+    elif answer in ("on", "true", "y", "yes"):
+        if "meters" not in routing_doc:
+            pass
+        else:
+            routing_doc["meters"] = True
 
 
 def load_effort_rows(paths):
@@ -263,11 +317,29 @@ def confirm_and_write(lanes_doc, routing_doc, lanes_path, routing_path):
     print(f"wrote {routing_path}")
 
 
+def write_focused(config_dir, revision, original_lanes, original_routing,
+                  lanes, routing, lanes_path, routing_path):
+    """Check the sources again and preserve links and unchanged document bytes."""
+    if catalog.catalog_revision(config_dir=config_dir) != revision:
+        raise CatalogError("intervening edit: catalog sources changed; reopen the focused screen")
+    validate_lanes(lanes, lanes_path)
+    validate_routing(routing, routing_path)
+    written = False
+    for path, old, new in ((lanes_path, original_lanes, lanes),
+                           (routing_path, original_routing, routing)):
+        if old != new:
+            catalog._write_preserving_link(path, new)
+            print(f"wrote {path}")
+            written = True
+    if not written:
+        print("nothing changed; nothing written")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Interactively create or revise a delegate catalog.")
     parser.add_argument("--config-dir", default=catalog.CONFIG_DIR, help="directory for lanes.json and routing.json")
-    parser.add_argument("--ads-dir", default=None, help="ADS checkout containing discover.mjs")
-    parser.add_argument("--discover-json", default=None, help="saved discovery JSON instead of node discovery")
+    parser.add_argument("--ads-dir", default=None, help="unused; kept so existing callers still parse")
+    parser.add_argument("--discover-json", default=None, help="saved discovery JSON instead of probing harnesses")
     parser.add_argument("--plain", action="store_true", help="use the prompt-driven interface")
     bench_group = parser.add_mutually_exclusive_group()
     bench_group.add_argument("--bench-report", default=None, help="existing benchmark report to display")
@@ -283,25 +355,41 @@ def main(argv=None):
                              "same lines from the clipboard")
     parser.add_argument("--no-discover", action="store_true", help="skip model discovery")
     parser.add_argument("--fixture-dir", default=None, help="fixture directory for harness discovery")
+    parser.add_argument(
+        "--screen",
+        default="start",
+        choices=("start", "carry", "tier1", "tier2", "tier3", "tier4", "review", "routing"),
+        help="enter one setup screen; start is the full wizard",
+    )
     args = parser.parse_args(argv)
 
     try:
-        config_dir = os.path.abspath(os.path.expanduser(args.config_dir))
-        tier_lines = read_tier_lines(args.tiers_from) if args.tiers_from else None
-        discovered = read_discovery(args)
-        lanes_doc, routing_doc, lanes_path, routing_path = load_or_propose(config_dir, discovered)
         plain = args.plain or not sys.stdin.isatty() or not sys.stdout.isatty()
-        # Discovery shells out to three harness CLIs. It reports drift at the
-        # moment the human is already deciding tiers, and it must never be
-        # able to stop them getting there: any failure becomes the reason
-        # string the start facts print. Both interfaces print the same facts.
-        if args.no_discover:
-            discovery_data = "skipped (--no-discover)"
+        if args.screen != "start" and plain:
+            raise CatalogError(
+                f"--screen {args.screen} needs a terminal; "
+                "use catalog.py set, range, or order for non-interactive edits"
+            )
+        config_dir = os.path.abspath(os.path.expanduser(args.config_dir))
+        focused_revision = catalog.catalog_revision(config_dir=config_dir) if args.screen != "start" else None
+        tier_lines = read_tier_lines(args.tiers_from) if args.tiers_from else None
+        existing = os.path.isfile(os.path.join(config_dir, "lanes.json"))
+        # Start from the editable catalog, acquire once, then filter only a
+        # first-time proposal. Existing catalog decisions survive probe errors.
+        lanes_doc, routing_doc, lanes_path, routing_path = load_or_propose(
+            config_dir, set(HARNESSES)
+        )
+        discovered, discovery_data = acquire_discovery(lanes_doc, args)
+        if not existing:
+            lanes_doc, routing_doc, lanes_path, routing_path = load_or_propose(
+                config_dir, discovered
+            )
         else:
-            try:
-                discovery_data = discover.discover(lanes_doc, fixture_dir=args.fixture_dir)
-            except Exception as e:
-                discovery_data = str(e)
+            note_undiscovered_lanes(lanes_doc, discovery_data)
+        # Discovery reports drift at the moment the human is already deciding
+        # tiers, and it must never be able to stop them getting there: any
+        # failure becomes the reason string the start facts print. Both
+        # interfaces print the same facts.
         if plain:
             # the prompt-driven interface writes no benchmark page; it prints
             # the report instead, so the page line says (not written)
@@ -361,6 +449,7 @@ def main(argv=None):
                 bench_page_path=page_path,
                 effort_rows=effort_rows,
                 discovery=discovery_data,
+                focus=None if args.screen == "start" else args.screen,
             )
             if tier_lines is not None:
                 summary = wizard.apply_tier_lines(tier_lines)
@@ -372,10 +461,14 @@ def main(argv=None):
                 result_lanes, result_routing = result
                 validate_lanes(result_lanes, lanes_path)
                 validate_routing(result_routing, routing_path)
-                write_json(lanes_path, result_lanes)
-                write_json(routing_path, result_routing)
-                print(f"wrote {lanes_path}")
-                print(f"wrote {routing_path}")
+                if args.screen != "start":
+                    write_focused(config_dir, focused_revision, lanes_doc, routing_doc,
+                                  result_lanes, result_routing, lanes_path, routing_path)
+                else:
+                    write_json(lanes_path, result_lanes)
+                    write_json(routing_path, result_routing)
+                    print(f"wrote {lanes_path}")
+                    print(f"wrote {routing_path}")
     except SetupAbort:
         return 130
     except CatalogError as e:

@@ -51,12 +51,13 @@ def data():
     return bench.collect(copy.deepcopy(LANES), epoch_csv=FIXTURE)
 
 
-def wizard(bench_data=True, message="", effort_rows=None, lanes=None, discovery=None):
+def wizard(bench_data=True, message="", effort_rows=None, lanes=None, discovery=None,
+           focus=None):
     return Wizard(copy.deepcopy(lanes if lanes is not None else LANES),
                   copy.deepcopy(ROUTING),
                   data() if bench_data else None, DISCOVERED,
                   "/tmp/lanes.json", "/tmp/routing.json", message,
-                  effort_rows=effort_rows, discovery=discovery)
+                  effort_rows=effort_rows, discovery=discovery, focus=focus)
 
 
 def start(w):
@@ -514,7 +515,7 @@ try:
            and "sol-high@codex" not in t_incoming
            and prefixes == ["tier 1", "tier 2", "tier 3", "tier 4"]
            # the explanation moved beside the table: one per setting, headed by it
-           and set(panels) == {f"{c} {k}" for c in catalog.CLASSES for k in ("floor", "ceiling")} | {"margin", "gate"}
+           and set(panels) == {f"{c} {k}" for c in catalog.CLASSES for k in ("floor", "ceiling")} | {"margin", "gate", "meters"}
            and panels["scout floor"][0] == "scout floor: 2"
            and any("lowest tier" in p for p in panels["scout floor"])
            and any("highest tier" in p for p in panels["review ceiling"])
@@ -522,7 +523,8 @@ try:
            and any("luna-low@codex" in p for p in panels["mechanical ceiling"])
            and not any("sol-high@codex" in p for p in panels["review ceiling"])
            and panels["margin"][0] == "margin: 0.2" and any("pace" in p.lower() for p in panels["margin"])
-           and panels["gate"][0] == "gate: 0.1" and any("10% remaining" in p for p in panels["gate"]),
+           and panels["gate"][0] == "gate: 0.1" and any("10% remaining" in p for p in panels["gate"])
+           and panels["meters"][0] == "meters: on" and any("Tier, Order" in p for p in panels["meters"]),
            repr(panels))
     w.handle("enter")
     confirm_legend = w.view().get("legend") or []
@@ -531,6 +533,7 @@ try:
            and any("classes:" in line for line in confirm_legend)
            and any(line.startswith("margin 0.2 ") for line in confirm_legend)
            and any(line.startswith("gate 0.1 ") for line in confirm_legend)
+           and any(line.startswith("meters on") for line in confirm_legend)
            and any("10% remaining" in line for line in confirm_legend)
            and all(len(line) <= 79 for line in confirm_legend))
     w.handle("y")
@@ -1670,6 +1673,17 @@ def groups_of(names, doc):
 
 
 try:
+    record("policy helpers on setup_tui are aliases of bench",
+           setup_tui.propose_enabled is bench.propose_enabled
+           and setup_tui.group_lanes is bench.group_lanes
+           and setup_tui.lane_order is bench.lane_order
+           and setup_tui.dominating_effort is bench.dominating_effort
+           and setup_tui.model_group is bench.model_group)
+except Exception as e:
+    record("policy helpers on setup_tui are aliases of bench", False, repr(e))
+
+
+try:
     doc = sweep_lanes()
     names = ["fable-low@claude", "sol-high@codex", "fable-max@claude", "flash-high@agy",
              "flash-low@agy", "sol-low@codex"]
@@ -2107,5 +2121,138 @@ try:
            not faults and grid[0].startswith("Order each tier"), repr(faults))
 except Exception as e:
     record("54 the review page renders a section per tier", False, repr(e))
+
+try:
+    model = LANES["lanes"]["sol-high@codex"]["model"]
+    lanes = copy.deepcopy(LANES)
+    extra = copy.deepcopy(lanes["lanes"]["sol-high@codex"])
+    extra["effort"] = "low"
+    extra["tier"] = 2
+    extra.pop("enabled", None)
+    lanes["lanes"]["sol-low@codex"] = extra
+    rows = [
+        {"source": "t", "model": model, "effort": "high", "benchmark": "b",
+         "score": 9.0, "cost_usd": 1.0, "uncertain": False, "composite": False},
+        {"source": "t", "model": model, "effort": "low", "benchmark": "b",
+         "score": 1.0, "cost_usd": 1.0, "uncertain": False, "composite": False},
+    ]
+    full = wizard(lanes=lanes, effort_rows=rows)
+    focused = wizard(lanes=lanes, effort_rows=rows, focus="carry")
+    record(
+        "55 focused carry starts from catalog decisions and does not apply unseen proposals",
+        focused.screen == "prescreen"
+        and focused._enabled["sol-low@codex"] is True
+        and full._enabled["sol-low@codex"] is False
+        and focused._enabled["sol-high@codex"] is True,
+        repr((full._enabled.get("sol-low@codex"), focused._enabled.get("sol-low@codex"))),
+    )
+    focused.handle("enter")
+    record("55b focused carry enter reviews chosen edits on confirm",
+           focused.screen == "confirm", focused.screen)
+    focused.handle("y")
+    written, routing = focused.result()
+    record(
+        "55c focused enter without edits preserves carry and does not write meters",
+        written["lanes"]["sol-low@codex"].get("enabled", True) is True
+        and written["lanes"]["sol-high@codex"]["tier"] == LANES["lanes"]["sol-high@codex"]["tier"]
+        and "meters" not in routing
+        and routing["gate"] == ROUTING["gate"]
+        and routing["margin"] == ROUTING["margin"],
+        repr(written["lanes"]["sol-low@codex"]),
+    )
+except Exception as e:
+    record("55 focused carry starts from catalog decisions", False, repr(e))
+
+try:
+    w = wizard(focus="tier3")
+    record("56 focused tier3 opens that page on current assignments",
+           w.screen == "tier" and w.tier == 3, (w.screen, w.tier))
+    before = dict(w._assigned)
+    w.handle("enter")
+    record("56b focused tier enter goes to confirm", w.screen == "confirm", w.screen)
+    w.handle("y")
+    lanes, _routing = w.result()
+    record(
+        "56c focused untouched tier choices keep catalog tiers",
+        all(lanes["lanes"][name]["tier"] == LANES["lanes"][name]["tier"]
+            for name in LANES["lanes"]),
+        repr({n: lanes["lanes"][n]["tier"] for n in LANES["lanes"]}),
+    )
+    _ = before
+except Exception as e:
+    record("56 focused tier3 opens that page on current assignments", False, repr(e))
+
+try:
+    w = wizard(focus="routing")
+    record("57 focused routing starts on the routing screen",
+           w.screen == "routing", w.screen)
+    for _ in range(len(catalog.CLASSES) * 2 + 2):
+        w.handle("down")
+    w.handle("space")
+    record("57b space/x flips meters with the established marker",
+           not w._meters_on() and w.routing_doc.get("meters") is False, w.routing_doc.get("meters"))
+    w.handle("enter")
+    w.handle("y")
+    _lanes, routing = w.result()
+    record("57c focused routing writes meters false and keeps Gate/Margin",
+           routing.get("meters") is False
+           and routing["gate"] == ROUTING["gate"]
+           and routing["margin"] == ROUTING["margin"],
+           repr(routing.get("meters")),
+    )
+except Exception as e:
+    record("57 focused routing starts on the routing screen", False, repr(e))
+
+try:
+    w = wizard(focus="review")
+    w.handle("enter")
+    record("58 focused review skips routing and confirms chosen edits",
+           w.screen == "confirm", w.screen)
+    w.handle("b")
+    record("58b confirm back returns to the focused review screen",
+           w.screen == "review", w.screen)
+except Exception as e:
+    record("58 focused review skips routing", False, repr(e))
+
+for focus in ("carry", "tier1", "tier2", "tier3", "tier4", "review", "routing"):
+    try:
+        source = copy.deepcopy(LANES)
+        first = next(iter(source["lanes"]))
+        source["lanes"][first]["enabled"] = True
+        w = wizard(lanes=source, focus=focus)
+        w.handle("enter")
+        record(f"59 {focus} no-op confirmation says nothing will be written",
+               any("Nothing will be written" in str(row["cells"]) for row in w.view()["rows"]))
+        w.handle("y")
+        record(f"59 {focus} no-op preserves all Lane fields and routing",
+               w.result() == (source, ROUTING), w.result())
+    except Exception as e:
+        record(f"59 {focus} focused no-op", False, repr(e))
+try:
+    w = wizard(focus="routing")
+    w.cursor = len(catalog.CLASSES) * 2 + 2
+    w.handle("space")
+    w.handle("enter")
+    preview = w.view()
+    w.handle("y")
+    record("60 routing-only focused save leaves every Lane field unchanged",
+           w.result()[0] == LANES and all(row["cells"][0] in ("meters", "file", "target")
+                                        for row in preview["rows"]), preview)
+    w = wizard(focus="tier3")
+    name = next(n for n, lane in LANES["lanes"].items()
+                if lane["tier"] == 3 and lane.get("enabled", True))
+    move_to(w, name)
+    w.handle("space")
+    w.handle("enter")
+    w.handle("y")
+    result = w.result()[0]
+    record("61 focused Tier unmark demotes one Tier and appends at its end",
+           result["lanes"][name]["tier"] == 2
+           and catalog._carried_in_tier(result["lanes"], 2)[-1] == name, result)
+    record("61 untouched Tiers keep their original records",
+           all(result["lanes"][n] == lane for n, lane in LANES["lanes"].items()
+               if lane["tier"] not in (2, 3)))
+except Exception as e:
+    record("focused edit preservation regressions", False, repr(e))
 
 sys.exit(1 if fails else 0)

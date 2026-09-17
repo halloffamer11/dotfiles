@@ -306,8 +306,8 @@ except Exception as e:
 try:
     page = bench_page.render(None, ASTRA, SWEEP)
     proposals = setup_tui.propose_enabled(ASTRA, SWEEP)
-    off = sorted(name for name, (on, _why) in proposals.items()
-                 if not on and setup_tui.is_dominated_reason(_why))
+    off = sorted(name for name, decision in proposals.items()
+                 if not decision["enabled"] and setup_tui.is_dominated_reason(decision))
     struck = [p for p in board_named(data_of(page), "Terminal-Bench 4.0")["points"] if p["kind"] == "lane_off"]
     verdict = re.search(r'<p class="verdict">(.*?)</p>', page, re.S).group(1)
     finding = board_named(data_of(page), "Terminal-Bench 4.0")["finding"]
@@ -316,6 +316,8 @@ try:
     record("the page marks what the wizard marks, names it at the top, and shows the arithmetic",
            off == ["astra-xhigh@codex"] and len(struck) == 1 and struck[0]["effort"] == "xhigh"
            and struck[0]["off"] == "high wins on tbench" and struck[0]["beatenBy"] == "high"
+           and struck[0]["carryKind"] == "dominated" and struck[0]["source"] == "tbench"
+           and struck[0]["competitor"] == "high"
            and "astra-xhigh@codex" in verdict and "high wins on tbench" in verdict
            and "scores the same as high" in finding and "$81.1 more (+4%)" in finding
            and f'<p class="finding">{finding}</p>' in page
@@ -327,6 +329,20 @@ try:
            f"off={off} struck={struck} verdict={verdict[:120]!r} order={order[:6]}")
 except Exception as e:
     record("the page marks what the wizard marks, names it at the top, and shows the arithmetic",
+           False, repr(e))
+
+try:
+    missing = bench_page.render(None, LANES, None)
+    empty = bench_page.render(None, LANES, [])
+    record("unavailable evidence and an empty proposal stay distinct in the HTML header",
+           "Per-effort evidence is unavailable" in missing
+           and "proposes nothing" in missing
+           and "nothing off" not in missing
+           and "The pre-screen proposes to switch nothing off" in empty
+           and "Per-effort evidence is unavailable" not in empty,
+           f"missing_has_verdict={'verdict' in missing} empty_has_nothing={'nothing off' in empty}")
+except Exception as e:
+    record("unavailable evidence and an empty proposal stay distinct in the HTML header",
            False, repr(e))
 
 try:
@@ -732,6 +748,9 @@ try:
            and by_name["astra-ultra@codex"]["carried"] is False
            and by_name["astra-xhigh@codex"]["carried"] is True
            and by_name["astra-xhigh@codex"]["off"] == "high wins on tbench"
+           and by_name["astra-xhigh@codex"]["kind"] == "dominated"
+           and by_name["astra-xhigh@codex"]["source"] == "tbench"
+           and by_name["astra-xhigh@codex"]["competitor"] == "high"
            and by_name["astra-high@codex"]["off"] is None
            and by_name["astra-high@codex"]["rows"] is True
            # fable is on no board of this sweep, so it can be no dot
@@ -740,7 +759,8 @@ try:
            and by_name["astra-high@codex"]["harness"] == "codex"
            and by_name["astra-high@codex"]["tier"] == doc["lanes"]["astra-high@codex"]["tier"]
            # ticket 27 added the lane's meter, which colour is now drawn from
-           and set(lanes[0]) == {"name", "harness", "meter", "model", "group", "effort", "tier", "carried", "off", "rows"},
+           and set(lanes[0]) == {"name", "harness", "meter", "model", "group", "effort", "tier",
+                                "carried", "off", "rows", "kind", "source", "competitor"},
            repr(lanes[:3]))
     key = data["catalogKey"]
     other = copy.deepcopy(doc)
@@ -1081,5 +1101,68 @@ try:
                page[page.find('id="plots"'):][:400])
 except Exception as e:
     record("27 the page's off, copy, sensitivity, beaten-by and meter colour, under node", False, repr(e))
+
+
+# --- ticket 12: HTML uses the same evidence records ---------------------------
+try:
+    rows = [
+        {"source": "aa", "model": "gpt-5.6-sol", "effort": "high",
+         "benchmark": "Terminal-Bench 2.1", "score": 0.80, "cost_usd": 0.81,
+         "uncertain": False, "observed": "2026-09-11", "provenance": "unlabelled",
+         "url": "https://example.invalid/aa"},
+        {"source": "tbench", "model": "GPT-5.6 Sol", "effort": "high",
+         "benchmark": "Terminal-Bench 4.0", "score": 39.9, "score_unit": "%",
+         "cost_usd": 100.0, "uncertain": False, "observed": "2026-09-03",
+         "provenance": "unlabelled", "url": "https://example.invalid/tbench"},
+        {"source": "aa", "model": "Grok 4.3", "effort": "none",
+         "benchmark": "Omniscience", "score": 29.5, "cost_usd": 1.24,
+         "uncertain": True, "observed": "2026-09-11", "provenance": "unlabelled"},
+        {"source": "x", "model": "gpt-5.6-sol", "effort": "high",
+         "benchmark": "Nobody's board", "score": 9.0, "cost_usd": 1.0,
+         "uncertain": False, "observed": "2026-09-11", "provenance": "unlabelled"},
+    ]
+    records = bench.evidence_records(rows, LANES)
+    page = bench_page.render(None, LANES, rows)
+    about = bench.board_about("aa", "AutomationBench")
+    tb = bench.board_about("tbench", "Terminal-Bench 4.0")
+    index = bench.board_about("aa", "Artificial Analysis Intelligence Index")
+    record(
+        "HTML rows carry shared standing, cost basis, version and unresolved identity",
+        any(r["version"] == "2.1" and "Intelligence Index" in (r["cost_basis"] or "")
+            for r in records)
+        and any(r["version"] == "4.0" and "whole run" in (r["cost_basis"] or "")
+                for r in records)
+        and any(r["identity"] == "unresolved" and r["uncertain"] for r in records)
+        and "cost basis" in page and "standing" in page
+        and "2.1" in page and "4.0" in page
+        and ("unknown (" in page or "no catalog model" in page),
+        page[page.find('<table class="rows">'):page.find('<table class="rows">') + 800]
+        if '<table class="rows">' in page else page[:400],
+    )
+    record(
+        "speaks_to names coding, knowledge and API-workflow relevance without new Classes",
+        about is not None and "API-workflow relevance" in about["speaks_to"]
+        and "not a routing Domain or Class" in about["speaks_to"]
+        and "Knowledge relevance" in bench.board_about("aa", "Omniscience")["speaks_to"]
+        and "Coding relevance" in tb["speaks_to"]
+        and "composite across reasoning, knowledge, maths and programming" in index["speaks_to"]
+        and "knowledge-scout" not in about["speaks_to"]
+        and about["measures"].startswith("It tests whether models can complete realistic SaaS")
+        and about["fetched"] == "2026-09-12"
+        and index["fetched"] == "2026-09-12"
+        and index["score"].startswith("Intelligence Index is calculated as a weighted average"),
+        str({"auto": about["speaks_to"], "tb": tb["speaks_to"]}),
+    )
+    record(
+        "quoted methodology is preserved and direction is labelled, never inferred",
+        about["direction"] == "higher-is-better"
+        and tb["direction"] == "higher-is-better"
+        and bench.board_about("t", "Nobody's board") is None
+        and bench.board_direction("t", "Nobody's board") == bench.DIRECTION_UNKNOWN
+        and "higher-is-better" in page,
+        str(about.get("direction")),
+    )
+except Exception as e:
+    record("ticket 12 HTML shared evidence records", False, repr(e))
 
 sys.exit(1 if fails else 0)

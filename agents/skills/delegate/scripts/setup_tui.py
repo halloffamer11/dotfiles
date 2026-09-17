@@ -1,12 +1,50 @@
 #!/usr/bin/env python3
 """Selectable terminal setup UI for delegate catalogs."""
 import copy
+import os
 import subprocess
 import textwrap
 
-from bench import EPOCH_BENCHMARKS, fmt_aa_value, fmt_cost
-from catalog import (CLASSES, EFFORTS, HARNESSES, normalize_name, resolve_published_model,
-                     strip_effort_suffix)
+from bench import (
+    EPOCH_BENCHMARKS,
+    KIND_DOMINATED,
+    KIND_NO_ROWS,
+    KIND_RECORDED,
+    KIND_UNAVAILABLE,
+    KIND_ULTRA,
+    NO_DATA_REASON,
+    NO_ROWS_REASON,
+    NOT_DOMINATED_REASON,
+    ULTRA_REASON,
+    bench_order_key,
+    carry_reason,
+    certain_effort_rows,
+    dominated_reason,
+    dominating_effort,
+    dominating_row,
+    effort_rank,
+    fmt_aa_value,
+    fmt_cost,
+    group_lanes,
+    is_dominated_reason,
+    lane_order,
+    model_group,
+    propose_enabled,
+    recorded_reason,
+    resolve_effort_rows,
+    unmatched_message,
+)
+from catalog import (
+    CLASSES,
+    HARNESSES,
+    TIER_LINE_VALUES,
+    apply_tier_lines_to_doc,
+    meters_enabled,
+    parse_tier_lines,
+    tier_lines_summary,
+    unnamed_carried,
+    write_order_from_lines,
+)
 
 # These render as single lines in an 80-column terminal, where anything past
 # column 79 is clipped. Keep each one under that; a legend cut mid-sentence
@@ -24,7 +62,7 @@ TIER_FOOTER = f"↑/↓/j/k: move  {FLIP_KEYS}  enter: next  b: back  o: bench  
 REVIEW_FOOTER = "j/k: cursor  J/K: move lane  1-4: tier  v: paste  enter: next  b: back  q: quit"
 REVIEW_MOVE_LEGEND = "J/K or shift-↑/↓ moves a lane inside its tier; 1-4 moves it to that tier's end."
 REVIEW_ORDER_LEGEND = "Ranking tries 1 first; a lane lower down runs if its pace beats 1's by margin."
-ROUTING_FOOTER = "↑/↓ or j/k: move  +/-: adjust  enter: confirm  b: back  q: quit"
+ROUTING_FOOTER = "j/k: move  +/-: adjust  space/x: meters  enter: confirm  b: back  q: quit"
 PRESCREEN_FOOTER = f"↑/↓ or j/k: move  {FLIP_KEYS}  enter: continue  b: back  q: quit"
 NO_DATA_MESSAGE = "No per-effort data was supplied, so nothing else could be judged."
 CONFIRM_OFF_LEGEND = "off: written with enabled: false.  On lanes omit the key."
@@ -38,10 +76,6 @@ DOMINATED_LEGEND = "X wins on S: effort X scores ≥ at ≤ cost on most of sour
 ABSENCE_LEGEND = "Absence of data is not evidence against a lane, so those stay on."
 RECORDED_LEGEND = '"in the catalog": you recorded that already; the pre-screen leaves it.'
 ULTRA_LEGEND = "ultra: no source scores it, and auto-delegation breaks the worker preamble."
-NO_ROWS_REASON = "no rows for this lane"
-NO_DATA_REASON = "no per-effort data"
-NOT_DOMINATED_REASON = "not dominated"
-ULTRA_REASON = "ultra, never carried"
 
 
 def hidden_legend(taken, off):
@@ -58,9 +92,7 @@ def hidden_legend(taken, off):
     return f"Not listed: {', '.join(parts)}." if parts else ""
 
 
-# --- tier lines: the benchmark page's decisions, pasted (ticket 27) -------------
-
-TIER_LINE_VALUES = {"1": 1, "2": 2, "3": 3, "4": 4, "off": "off"}
+# --- tier lines: catalog owns the parser; these names stay for callers ------
 
 
 class ClipboardError(Exception):
@@ -78,113 +110,6 @@ def read_clipboard():
     if result.returncode != 0:
         raise ClipboardError(f"pbpaste failed (exit {result.returncode})")
     return result.stdout
-
-
-def parse_tier_lines(text, lanes_doc):
-    """Read `<lane> <1-4|off>` lines, as the benchmark page's "Copy as lines"
-    writes them. The one parser for the review page's `v` and for
-    `setup.py --tiers-from`.
-
-    Returns a dict: `decided` {lane: tier or "off"} in the order first named,
-    where the last line for a lane wins; `repeated`, the lanes named more than
-    once; `unknown`, names that are no lane in this catalog; `bad`, the line
-    numbers that are not a name and one of 1-4 or off; and `refused`, ultra
-    lanes a line tried to carry, since an ultra lane is never carried
-    (ticket 15). Blank lines are skipped.
-    """
-    lanes = (lanes_doc or {}).get("lanes") or {}
-    out = {"decided": {}, "repeated": [], "unknown": [], "bad": [], "refused": []}
-    for number, raw in enumerate((text or "").splitlines(), 1):
-        parts = raw.split()
-        if not parts:
-            continue
-        if len(parts) != 2 or parts[1].lower() not in TIER_LINE_VALUES:
-            out["bad"].append(number)
-            continue
-        name, value = parts[0], TIER_LINE_VALUES[parts[1].lower()]
-        if name not in lanes:
-            if name not in out["unknown"]:
-                out["unknown"].append(name)
-            continue
-        if value != "off" and (lanes[name] or {}).get("effort") == "ultra":
-            if name not in out["refused"]:
-                out["refused"].append(name)
-            continue
-        if name in out["decided"] and name not in out["repeated"]:
-            out["repeated"].append(name)
-        out["decided"][name] = value
-    return out
-
-
-def unnamed_carried(parsed, carried):
-    """The carried lanes a set of lines does not name. They go off: "if it's not
-    in the tier list, it's not used" (Orin, 2026-09-12; ticket 28).
-
-    Lines that name no lane in the catalog decide nothing, so they switch nothing
-    off: a clipboard holding the wrong text must not empty the catalog."""
-    if not parsed["decided"]:
-        return []
-    return [name for name in carried if name not in parsed["decided"]]
-
-
-def tier_lines_summary(parsed, dropped=()):
-    """The one line that says what a set of tier lines did: how many lanes took
-    a tier, how many went off by a line, how many carried lanes went off because
-    no line named them (`dropped`), then any lane named twice, any name the
-    catalog does not know, and any line not read."""
-    decided = parsed["decided"]
-    tiers = sum(1 for value in decided.values() if value != "off")
-    if decided:
-        parts = [f"{tiers} took a tier", f"{len(decided) - tiers} went off",
-                 f"{len(dropped)} not named, so off"]
-    else:
-        parts = ["no line names a lane in this catalog, so nothing changed"]
-    if parsed["repeated"]:
-        parts.append("named twice, last line kept: " + ", ".join(parsed["repeated"]))
-    if parsed["unknown"]:
-        parts.append("unknown, ignored: " + ", ".join(parsed["unknown"]))
-    if parsed["refused"]:
-        parts.append("ultra, never carried, ignored: " + ", ".join(parsed["refused"]))
-    if parsed["bad"]:
-        parts.append("not <lane> <1-4|off>, ignored: line " + ", ".join(str(n) for n in parsed["bad"]))
-    return "Lines: " + "; ".join(parts) + "."
-
-
-def apply_tier_lines_to_doc(lanes_doc, parsed):
-    """The prompt-driven interface's form of the same lines: a tier line sets
-    the lane's tier and carries it, an off line records it off, and a carried
-    lane no line names is recorded off (ticket 28). Returns those lanes."""
-    carried = [name for name, lane in lanes_doc["lanes"].items() if lane.get("enabled", True)]
-    dropped = unnamed_carried(parsed, carried)
-    for name in dropped:
-        lanes_doc["lanes"][name]["enabled"] = False
-    for name, value in parsed["decided"].items():
-        lane = lanes_doc["lanes"][name]
-        if value == "off":
-            lane["enabled"] = False
-        else:
-            lane["tier"] = value
-            lane.pop("enabled", None)
-    return dropped
-
-
-def write_order_from_lines(lanes_doc, parsed):
-    """`--plain` has no review page, so the lines' order inside each tier is the
-    order written: each carried lane a line named gets `order`, its place in its
-    tier from 1, counted on the tier it holds after the prompts. A lane not
-    carried loses any `order` it had. Lines that name no lane change nothing."""
-    if not parsed["decided"]:
-        return
-    placed = {}
-    for name in parsed["decided"]:
-        lane = lanes_doc["lanes"][name]
-        if not lane.get("enabled", True):
-            continue
-        placed[lane["tier"]] = placed.get(lane["tier"], 0) + 1
-        lane["order"] = placed[lane["tier"]]
-    for lane in lanes_doc["lanes"].values():
-        if not lane.get("enabled", True):
-            lane.pop("order", None)
 
 
 def fit_line(line, width=80):
@@ -230,11 +155,24 @@ def discovery_notices(discovery, width=80):
         return [fit_line("Model discovery: did not run", width)]
     if isinstance(discovery, str):
         return [fit_line(f"Model discovery: did not run: {discovery}", width)]
+    if not isinstance(discovery, dict):
+        return [fit_line("Model discovery: did not run", width)]
+    if discovery.get("error") and "harnesses" not in discovery:
+        return [fit_line(f"Model discovery: did not run: {discovery['error']}", width)]
+    notices = []
+    if discovery.get("model_facts_available") is False:
+        notices.append(fit_line("Model discovery: saved Harness facts only; model facts unavailable", width))
+    for name, info in (discovery.get("harnesses") or {}).items():
+        if not isinstance(info, dict):
+            continue
+        status = info.get("status")
+        if status == "missing":
+            notices.append(fit_line(f"Harness {name}: missing", width))
+        elif status == "error":
+            err = info.get("error") or "unknown error"
+            notices.append(fit_line(f"Harness {name}: error: {err}", width))
     unmapped = discovery.get("unmapped") or []
     retired = discovery.get("retired") or []
-    if not unmapped and not retired:
-        return [fit_line("Model discovery: no drift", width)]
-    notices = []
     if unmapped:
         notices.append(list_line("Models with no lane", [
             f"{m.get('harness', '')} {m.get('slug', '')}".strip() for m in unmapped
@@ -243,6 +181,8 @@ def discovery_notices(discovery, width=80):
         notices.append(list_line("Lanes with retired models", [
             f"{r.get('lane', '')} ({r.get('model', '')})" for r in retired
         ], width))
+    if not notices:
+        return [fit_line("Model discovery: no drift", width)]
     return notices
 
 
@@ -257,275 +197,6 @@ def start_facts(lanes_path, routing_path, page_path, discovery, width=80):
         fit_line(f"Benchmark page: {page_path or '(not written)'}", width),
         *discovery_notices(discovery, width),
     ]
-
-
-def model_group(lane):
-    """The model a lane is grouped under. An agy slug family
-    (`gemini-3.8-flash-high`, `-low`) is one model at several efforts, so the
-    effort suffix comes off first (ticket 26)."""
-    return strip_effort_suffix(normalize_name((lane or {}).get("model")))[0]
-
-
-def effort_rank(effort):
-    """Most effort first: ultra, max, xhigh, high, medium, low; a stranger last."""
-    try:
-        return -EFFORTS.index(effort)
-    except ValueError:
-        return 1
-
-
-def group_lanes(names, lanes_doc):
-    """`names` regrouped by model: each group sits where its first lane sat,
-    and lists its efforts from most to least (ticket 26, item 1).
-
-    The order `names` arrives in is the page's own (benchmark order on a tier
-    page, tier on the review page, the catalog on the carry page), and it
-    decides only where each group goes. Inside a group the effort decides, so
-    `fable-max` is read before `fable-low` on every page and every table.
-    """
-    lanes = (lanes_doc or {}).get("lanes") or {}
-    groups = {}
-    for name in names:
-        groups.setdefault(model_group(lanes.get(name)), []).append(name)
-    out = []
-    for members in groups.values():
-        out.extend(sorted(members, key=lambda n: effort_rank((lanes.get(n) or {}).get("effort"))))
-    return out
-
-
-def bench_order_key(bench, name, lanes_doc=None):
-    """A lane's place by Epoch rank, or AA rank if its group has no Epoch; measured
-    lanes first, then by name. This is the order the tier pages open in and
-    the order the benchmark page lists lanes in, so it lives in one place."""
-    rec = ((bench or {}).get("lanes") or {}).get(name) if bench else None
-    mean = rec.get("mean") if rec else None
-    if mean is None and rec:
-        lanes = (lanes_doc or {}).get("lanes") or {}
-        group = model_group(lanes.get(name))
-        has_epoch = any(model_group(lane) == group
-                        and ((bench or {}).get("lanes", {}).get(other) or {}).get("mean") is not None
-                        for other, lane in lanes.items())
-        if not has_epoch:
-            mean = (rec.get("aa") or {}).get("mean")
-    return (mean is None, mean if mean is not None else 0, name)
-
-
-def lane_order(lanes_doc, bench):
-    """Every lane in the order a tier page lists them: benchmark order, then
-    grouped by model with efforts most to least."""
-    names = sorted((lanes_doc or {}).get("lanes") or {}, key=lambda n: bench_order_key(bench, n, lanes_doc))
-    return group_lanes(names, lanes_doc)
-
-
-def dominated_reason(effort, source):
-    """The reason for a lane another effort dominates: `high wins on aa`.
-
-    It names the source because two sources can disagree about one lane, and it
-    is not "dominated by high (tbench)" because that is 26 places and the `why`
-    column has 21 at 80 columns; `medium wins on tbench`, the longest, is 21.
-    """
-    return f"{effort} wins on {source}"
-
-
-def is_dominated_reason(why):
-    """Whether a proposal's reason is the data switching the lane off."""
-    return isinstance(why, str) and " wins on " in why
-
-
-def recorded_reason(enabled):
-    """The reason shown for a lane whose `enabled` the human already wrote."""
-    return f"{'on' if enabled else 'off'} in the catalog"
-
-
-def resolve_effort_rows(lanes_doc, effort_rows):
-    """Returns (rows keyed by catalog model, published names that name no lane).
-
-    A source prints a model however it pleases: `gpt-5.6-luna` from SWE Refactor
-    Bench, `GPT-6 Astra` from Terminal-Bench and Artificial Analysis. Every
-    comparison below is against `lane["model"]`, so each row is re-keyed to the
-    lane model its printed name denotes, and the catalog owns that mapping
-    (`catalog.resolve_published_model`). A row naming no lane model is dropped
-    rather than reported per lane: the leaderboards carry GLM-5.3, Opus 4.8,
-    Sonnet 5 and a dozen others that are nobody's lane, and one line naming them
-    all is what a human needs to spot a `published_as` they still owe us.
-    """
-    resolved, unmatched = [], []
-    for row in effort_rows or []:
-        if not isinstance(row, dict):
-            continue
-        model = resolve_published_model(row.get("model"), lanes_doc, effort=row.get("effort"))
-        if model is None:
-            name = row.get("model")
-            if isinstance(name, str) and name.strip() and name not in unmatched:
-                unmatched.append(name)
-            continue
-        if model == row.get("model"):
-            resolved.append(row)
-        else:
-            copied = dict(row)
-            copied["model"] = model
-            resolved.append(copied)
-    return resolved, unmatched
-
-
-def unmatched_message(unmatched, width=79):
-    """One line naming the published models no lane runs, or "" for none."""
-    if not unmatched:
-        return ""
-    head = "no lane runs these, ignored: "
-    shown = []
-    for name in unmatched:
-        candidate = shown + [name]
-        more = len(unmatched) - len(candidate)
-        tail = f" +{more} more" if more else ""
-        if len(head + ", ".join(candidate) + tail) > width:
-            break
-        shown.append(name)
-    if not shown:
-        count = len(unmatched)
-        phrase = "name matches" if count == 1 else "names match"
-        return f"{count} published {phrase} no lane; each is too long to print here"
-    more = len(unmatched) - len(shown)
-    return head + ", ".join(shown) + (f" +{more} more" if more else "")
-
-
-def certain_effort_rows(effort_rows):
-    """Rows that may dominate. Uncertain rows inform nothing: they must not
-    dominate another lane, and they are not evidence against the lane they name.
-
-    A row at an effort no lane can select is dropped for the same reason. The
-    benchmark harnesses drive the API enum, which runs `none` to `max`, so every
-    published sweep carries a `none` row — and no lane can be configured at
-    `none`. Letting one dominate would switch off a real lane on the strength of
-    a setting that cannot be chosen, which is exactly what it did to
-    luna-low@codex: equal score to `none` at a tenth of a cent more.
-
-    A `composite` row is a reader's figure, not evidence: Artificial Analysis
-    does not publish the weighting of its Intelligence Index, so it is shown and
-    never counted.
-    """
-    certain = []
-    for row in effort_rows or []:
-        if not isinstance(row, dict) or row.get("uncertain") or row.get("composite"):
-            continue
-        if not row.get("model") or not row.get("effort"):
-            continue
-        if row["effort"] not in EFFORTS:
-            continue
-        score, cost = row.get("score"), row.get("cost_usd")
-        if isinstance(score, bool) or isinstance(cost, bool):
-            continue
-        if not isinstance(score, (int, float)) or not isinstance(cost, (int, float)):
-            continue
-        certain.append(row)
-    return certain
-
-
-def _beats(other, row):
-    """At least the score for no more money, and strictly better in one of the two."""
-    return (other["score"] >= row["score"] and other["cost_usd"] <= row["cost_usd"]
-            and (other["score"] > row["score"] or other["cost_usd"] < row["cost_usd"]))
-
-
-def dominating_effort(model, effort, source, certain):
-    """The effort of `model` that dominates `effort` inside one source, or None.
-
-    Dominated means another effort of the same model beats it on more than half
-    of the benchmarks that source scored both on. A source with one benchmark —
-    Terminal-Bench, SWE Refactor Bench — comes down to that one comparison.
-    Artificial Analysis scores eight components off the same runs, and losing
-    one noisy component in eight is not reason enough to switch a lane off: on
-    the live page of 2026-09-11 that reading proposed twelve lanes off, nine of
-    them on a single component.
-    """
-    mine, theirs = {}, {}
-    for row in certain:
-        if row.get("model") != model or row.get("source") != source:
-            continue
-        if row.get("effort") == effort:
-            mine.setdefault(row.get("benchmark"), row)
-        else:
-            theirs.setdefault(row["effort"], {}).setdefault(row.get("benchmark"), row)
-    for other_effort, board in theirs.items():
-        shared = [benchmark for benchmark in mine if benchmark in board]
-        wins = sum(1 for benchmark in shared if _beats(board[benchmark], mine[benchmark]))
-        if shared and 2 * wins > len(shared):
-            return other_effort
-    return None
-
-
-def dominating_row(row, certain):
-    """The dominating effort's point on this row's own board, or None.
-
-    The judgement belongs to the effort over its whole source
-    (`dominating_effort`), so every point of a dominated effort is marked on
-    every board of that source, including a board where it happens to score
-    higher: the lane is off over the source, not over one chart.
-
-    Public because the benchmark page draws this rule: a point it shows hollow
-    has to be a point the pre-screen switched a lane off over, and two
-    implementations of one rule would eventually disagree in front of a human
-    trying to check the wizard's arithmetic.
-    """
-    other = dominating_effort(row.get("model"), row.get("effort"), row.get("source"), certain)
-    if other is None:
-        return None
-    board = (row.get("source"), row.get("benchmark"))
-    return next((r for r in certain
-                 if r.get("model") == row.get("model") and r.get("effort") == other
-                 and (r.get("source"), r.get("benchmark")) == board), None)
-
-
-def _first_domination(lane, certain):
-    """(effort, source) of the first source in which another effort dominates
-    this lane, else None."""
-    sources = []
-    for row in certain:
-        if row.get("model") == lane["model"] and row.get("effort") == lane["effort"]:
-            if row.get("source") not in sources:
-                sources.append(row.get("source"))
-    for source in sources:
-        other = dominating_effort(lane["model"], lane["effort"], source, certain)
-        if other is not None:
-            return other, source
-    return None
-
-
-def propose_enabled(lanes_doc, effort_rows):
-    """Ticket-15 pre-screen rule. Returns {name: (enabled, reason)}."""
-    rows, _unmatched = resolve_effort_rows(lanes_doc, effort_rows)
-    certain = certain_effort_rows(rows)
-    supplied = bool(effort_rows)
-    out = {}
-    for name, lane in lanes_doc["lanes"].items():
-        if lane.get("effort") == "ultra":
-            out[name] = (False, ULTRA_REASON)
-            continue
-        if "enabled" in lane:
-            # An explicit `enabled` is a decision the human already recorded. The
-            # pre-screen proposes for lanes that have no decision yet; it does not
-            # undo one. Silently switching a lane back on would put it in front of
-            # the ranker again without anyone saying so.
-            enabled = bool(lane["enabled"])
-            out[name] = (enabled, recorded_reason(enabled))
-            continue
-        found = _first_domination(lane, certain)
-        if found is not None:
-            other, source = found
-            out[name] = (False, dominated_reason(other, source))
-            continue
-        if not supplied:
-            out[name] = (True, NO_DATA_REASON)
-        elif not any(
-            not row.get("uncertain")
-            and row.get("model") == lane["model"]
-            and row.get("effort") == lane["effort"]
-            for row in rows
-        ):
-            out[name] = (True, NO_ROWS_REASON)
-        else:
-            out[name] = (True, NOT_DOMINATED_REASON)
-    return out
 
 
 # The run in order, for the marker on every screen. Tier is four screens, counted
@@ -549,7 +220,8 @@ class Wizard:
 
     def __init__(self, lanes_doc, routing_doc, bench, discovered,
                  lanes_path, routing_path, initial_message="",
-                 bench_page_path=None, effort_rows=None, discovery=None, clipboard=None):
+                 bench_page_path=None, effort_rows=None, discovery=None, clipboard=None,
+                 focus=None):
         # read only when `v` is pressed on the review page (ticket 27)
         self._clipboard = clipboard or read_clipboard
         self._original_lanes = copy.deepcopy(lanes_doc)
@@ -563,6 +235,7 @@ class Wizard:
         self.lanes_path = lanes_path
         self.routing_path = routing_path
         self.bench_page_path = bench_page_path
+        self.focus = None if focus in (None, "start") else focus
         self.screen = "start"
         self.tier = None
         self.cursor = 0
@@ -575,9 +248,17 @@ class Wizard:
         self._line_order = {}
         self._width = 80
         _rows, self._unmatched = resolve_effort_rows(self.lanes_doc, effort_rows)
-        proposals = propose_enabled(self.lanes_doc, effort_rows)
-        self._enabled = {name: enabled for name, (enabled, _) in proposals.items()}
-        self._reasons = {name: reason for name, (_, reason) in proposals.items()}
+        self._proposals = propose_enabled(self.lanes_doc, effort_rows)
+        self._reasons = {name: carry_reason(decision) for name, decision in self._proposals.items()}
+        # A focused screen starts from the catalog as it stands and never
+        # applies carry proposals the operator has not seen.
+        if self.focus:
+            self._enabled = {
+                name: lane.get("enabled", True)
+                for name, lane in self.lanes_doc["lanes"].items()
+            }
+        else:
+            self._enabled = {name: decision["enabled"] for name, decision in self._proposals.items()}
         # The catalog is the starting state of a rerun. A lane that the carry
         # page proposes off keeps its tier here, so switching it back on restores
         # the catalog default instead of making the operator place it from
@@ -592,6 +273,8 @@ class Wizard:
             }
             for tier in range(1, 5)
         }
+        if self.focus:
+            self._enter_focus()
 
     def result(self):
         return self._result
@@ -655,6 +338,36 @@ class Wizard:
         self.message = ""
         self._arrange_review()
 
+    def _go_confirm(self):
+        self.screen = "confirm"
+        self.cursor = 0
+        self.message = ""
+
+    def _enter_focus(self):
+        """Open the named focused screen on current catalog decisions."""
+        if self.focus == "carry":
+            self._enter_prescreen()
+        elif self.focus in ("tier1", "tier2", "tier3", "tier4"):
+            self._enter_tier(int(self.focus[-1]))
+        elif self.focus == "review":
+            self._enter_review()
+        elif self.focus == "routing":
+            self.screen = "routing"
+            self.tier = None
+            self.cursor = 0
+            self.message = ""
+
+    def _back_from_confirm(self):
+        if self.focus == "carry":
+            self._enter_prescreen()
+        elif self.focus in ("tier1", "tier2", "tier3", "tier4"):
+            self._enter_tier(int(self.focus[-1]))
+        elif self.focus == "review":
+            self._enter_review()
+        else:
+            self.screen = "routing"
+            self.cursor = 0
+
     def _start_key(self, name):
         """Where a lane first sits in its tier: the order of the lines applied,
         then an `order` the catalog already gives it at this tier, then
@@ -663,7 +376,8 @@ class Wizard:
         line = self._line_order.get(name)
         original = self._original_lanes["lanes"][name]
         kept = original.get("order") if original.get("tier") == self._assigned.get(name) else None
-        return (line is None, line or 0, kept is None, kept or 0, *self._bench_order(name))
+        moved = self.focus and original["tier"] != self._assigned.get(name)
+        return (bool(moved), line is None, line or 0, kept is None, kept or 0, *self._bench_order(name))
 
     def _arrange_review(self):
         """Each tier's order, 4 to 1. A lane already ordered in its tier keeps
@@ -831,8 +545,13 @@ class Wizard:
             elif key in ("x", "space") and names:
                 self._toggle_enabled(names[min(self.cursor, len(names) - 1)])
             elif key == "enter":
-                self._enter_tier(4)
+                if self.focus:
+                    self._go_confirm()
+                else:
+                    self._enter_tier(4)
             elif key == "b":
+                if self.focus:
+                    return
                 self.screen = "discovery"
                 self.cursor = 0
                 self.message = ""
@@ -851,11 +570,15 @@ class Wizard:
                 name = self._active_name()
                 if name:
                     if name in self._marks[self.tier]:
+                        if self.focus and self.tier == 1:
+                            self.message = "Tier 1 is the lowest Tier; use carry to turn a Lane off."
+                            return
                         self._marks[self.tier].remove(name)
                     else:
                         self._marks[self.tier].add(name)
             elif key == "enter":
-                if self.tier == 1 and any(name not in self._marks[1] for name in active):
+                if (self.tier == 1 and not self.focus
+                        and any(name not in self._marks[1] for name in active)):
                     self.message = "every lane needs a tier"
                     return
                 # A marked lane takes this tier. An unmarked lane that used to
@@ -863,14 +586,21 @@ class Wizard:
                 # assignments remain as that lane's editable default.
                 for name in active:
                     if self._assigned.get(name) == self.tier:
-                        del self._assigned[name]
+                        if self.focus:
+                            self._assigned[name] = max(1, self.tier - 1)
+                        else:
+                            del self._assigned[name]
                 for name in active:
                     if name in self._marks[self.tier]:
                         self._assigned[name] = self.tier
-                if self.tier > 1:
+                if self.focus:
+                    self._go_confirm()
+                elif self.tier > 1:
                     self._enter_tier(self.tier - 1)
                 else:
                     self._enter_review()
+            elif key == "b" and self.focus:
+                return
             elif key == "b" and self.tier < 4:
                 previous = self.tier + 1
                 self._enter_tier(previous)
@@ -890,38 +620,49 @@ class Wizard:
             elif key == "v":
                 self._paste_tier_lines()
             elif key == "enter":
-                self.screen = "routing"
-                self.cursor = 0
-                self.message = ""
+                if self.focus:
+                    self._go_confirm()
+                else:
+                    self.screen = "routing"
+                    self.cursor = 0
+                    self.message = ""
             elif key == "b":
+                if self.focus:
+                    return
                 self._enter_tier(1)
             return
         if self.screen == "routing":
-            count = len(CLASSES) * 2 + 2
+            count = len(CLASSES) * 2 + 3
+            meters_idx = len(CLASSES) * 2 + 2
             if key == "up":
                 self.cursor = (self.cursor - 1) % count
             elif key == "down":
                 self.cursor = (self.cursor + 1) % count
-            elif key in ("plus", "minus"):
-                delta = 1 if key == "plus" else -1
-                if self.cursor < len(CLASSES) * 2:
-                    cls_idx = self.cursor // 2
-                    is_ceiling = (self.cursor % 2 == 1)
-                    name = CLASSES[cls_idx]
-                    cls_info = self.routing_doc["classes"][name]
-                    if is_ceiling:
-                        cls_info["ceiling"] = min(4, max(cls_info["floor"], cls_info["ceiling"] + delta))
+            elif key in ("plus", "minus", "x", "space"):
+                if self.cursor == meters_idx:
+                    self._set_meters(not self._meters_on())
+                elif key in ("plus", "minus"):
+                    delta = 1 if key == "plus" else -1
+                    if self.cursor < len(CLASSES) * 2:
+                        cls_idx = self.cursor // 2
+                        is_ceiling = (self.cursor % 2 == 1)
+                        name = CLASSES[cls_idx]
+                        cls_info = self.routing_doc["classes"][name]
+                        if is_ceiling:
+                            cls_info["ceiling"] = min(4, max(cls_info["floor"], cls_info["ceiling"] + delta))
+                        else:
+                            cls_info["floor"] = min(cls_info["ceiling"], max(1, cls_info["floor"] + delta))
                     else:
-                        cls_info["floor"] = min(cls_info["ceiling"], max(1, cls_info["floor"] + delta))
-                else:
-                    name = "margin" if self.cursor == len(CLASSES) * 2 else "gate"
-                    old = self.routing_doc[name]
-                    self.routing_doc[name] = round(min(1.0, max(0.0, old + delta * 0.05)), 2)
+                        name = "margin" if self.cursor == len(CLASSES) * 2 else "gate"
+                        old = self.routing_doc[name]
+                        self.routing_doc[name] = round(min(1.0, max(0.0, old + delta * 0.05)), 2)
             elif key == "enter":
                 self.screen = "confirm"
                 self.cursor = 0
                 self.message = ""
             elif key == "b":
+                if self.focus:
+                    return
                 # back to the review page, with every tier it holds intact
                 self._enter_review()
             return
@@ -930,7 +671,8 @@ class Wizard:
             # window: at 80x24 eleven of twenty items showed, and the nine out
             # of sight included both file paths and every routing value. A
             # confirm screen you cannot read to the end is not one.
-            count = len(self.lanes_doc["lanes"]) + len(CLASSES) * 2 + 4
+            count = (len(self._focus_rows()) if self.focus else
+                     len(self.lanes_doc["lanes"]) + len(CLASSES) * 2 + 5)
             if key == "up":
                 self.cursor = (self.cursor - 1) % count
                 return
@@ -938,6 +680,10 @@ class Wizard:
                 self.cursor = (self.cursor + 1) % count
                 return
             if key == "y":
+                if self.focus:
+                    self._result = (self._focused_lanes(), copy.deepcopy(self.routing_doc))
+                    self.screen = "done"
+                    return
                 result_lanes = copy.deepcopy(self._original_lanes)
                 self._arrange_review()
                 for name, lane in result_lanes["lanes"].items():
@@ -959,8 +705,73 @@ class Wizard:
                 self._result = None
                 self.screen = "quit"
             elif key == "b":
-                self.screen = "routing"
-                self.cursor = 0
+                self._back_from_confirm()
+
+    def _focused_lanes(self):
+        """Preserve untouched records and materialize only changed decisions."""
+        result = copy.deepcopy(self._original_lanes)
+        if self.focus == "routing":
+            return result
+        self._arrange_review()
+        for name, lane in result["lanes"].items():
+            original = self._original_lanes["lanes"][name]
+            lane["tier"] = self._final_tier(name)
+            if self._enabled[name] != original.get("enabled", True):
+                if self._enabled[name]:
+                    lane.pop("enabled", None)
+                else:
+                    lane["enabled"] = False
+                    lane.pop("order", None)
+        for tier in range(1, 5):
+            original_names = [name for name, lane in self._original_lanes["lanes"].items()
+                              if lane["tier"] == tier and lane.get("enabled", True)]
+            original_names.sort(key=lambda name: (
+                self._original_lanes["lanes"][name].get("order") is None,
+                self._original_lanes["lanes"][name].get("order", 0),
+                *self._bench_order(name)))
+            current = self._tier_order[tier]
+            if current != original_names:
+                for order, name in enumerate(current, 1):
+                    result["lanes"][name]["order"] = order
+        return result
+
+    def _focus_rows(self):
+        """The actual focused edits, including their Order consequences."""
+        rows = []
+        def add(name, old, new):
+            rows.append({"cells": [name, "", f"{old} → {new}"],
+                         "marked": False, "dimmed": False, "tag": ""})
+        result = self._focused_lanes()
+        for name, lane in result["lanes"].items():
+            original = self._original_lanes["lanes"][name]
+            for field in ("tier", "order", "enabled"):
+                if lane.get(field) != original.get(field):
+                    add(f"{name}.{field}", original.get(field, "unset"), lane.get(field, "unset"))
+        for name in CLASSES:
+            for field in ("floor", "ceiling"):
+                old = self._original_routing["classes"][name][field]
+                new = self.routing_doc["classes"][name][field]
+                if old != new:
+                    add(f"classes.{name}.{field}", old, new)
+        for field in ("gate", "margin", "meters"):
+            old, new = self._original_routing.get(field), self.routing_doc.get(field)
+            if old != new:
+                add(field, ("on (default)" if old is None else "on" if old else "off")
+                    if field == "meters" else old,
+                    ("on" if new else "off") if field == "meters" else new)
+        for path, changed in ((self.lanes_path, result != self._original_lanes),
+                              (self.routing_path, self.routing_doc != self._original_routing)):
+            if changed:
+                rows.append({"cells": ["file", "", path], "marked": False,
+                             "dimmed": False, "tag": ""})
+                resolved = os.path.realpath(path)
+                if resolved != os.path.abspath(path):
+                    rows.append({"cells": ["target", "", resolved], "marked": False,
+                                 "dimmed": False, "tag": ""})
+        if not rows:
+            rows.append({"cells": ["No changes", "", "Nothing will be written"],
+                         "marked": False, "dimmed": False, "tag": ""})
+        return rows
 
     def _bench_columns(self):
         """The benchmark columns worth their width: the ones some lane on this
@@ -1035,17 +846,17 @@ class Wizard:
         off a short window to explain a case that is not on screen, so each line
         is earned by a reason that is actually shown.
         """
-        reasons = [self._reasons[name] for name in self._lane_names()]
+        kinds = [self._proposals[name]["kind"] for name in self._lane_names()]
         lines = [DOMINATED_LEGEND]
-        if any(r in (NO_ROWS_REASON, NO_DATA_REASON) for r in reasons):
+        if any(kind in (KIND_NO_ROWS, KIND_UNAVAILABLE) for kind in kinds):
             lines.append(ABSENCE_LEGEND)
         # a `published_as` still owed to us shows up here and nowhere else
         ignored = unmatched_message(self._unmatched, self._width - 1) if self.effort_rows else ""
         if ignored:
             lines.append(ignored)
-        if any(r == ULTRA_REASON for r in reasons):
+        if any(kind == KIND_ULTRA for kind in kinds):
             lines.append(ULTRA_LEGEND)
-        if any(r.endswith("in the catalog") for r in reasons):
+        if any(kind == KIND_RECORDED for kind in kinds):
             lines.append(RECORDED_LEGEND)
         return lines
 
@@ -1095,6 +906,8 @@ class Wizard:
 
     def _margin_legend(self):
         value = self.routing_doc["margin"]
+        if not self._meters_on():
+            return [f"margin {value} is stored; metering is off."]
         return [
             f"margin {value} — a lane further down the order takes the job instead of",
             f"  the top pick only when its pace beats the pick's by more than {value}.",
@@ -1102,11 +915,31 @@ class Wizard:
 
     def _gate_legend(self):
         value = self.routing_doc["gate"]
+        if not self._meters_on():
+            return [f"gate {value} is stored; metering is off."]
         percent = f"{value * 100:g}%"
         return [
             f"gate {value} — a lane is skipped outright once its meter drops below",
             f"  {percent} remaining, however capable it is.",
         ]
+
+    def _meters_on(self):
+        return meters_enabled(self.routing_doc)
+
+    def _set_meters(self, enabled):
+        if enabled:
+            if "meters" not in self._original_routing:
+                self.routing_doc.pop("meters", None)
+            else:
+                self.routing_doc["meters"] = True
+        else:
+            self.routing_doc["meters"] = False
+
+    def _meters_legend(self):
+        state = "on" if self._meters_on() else "off"
+        if self._meters_on():
+            return ["meters on — ranking uses Gate and Margin. Off is Tier, Order and name only."]
+        return [f"meters {state} — ranking is Tier, Order and name only. Gate and Margin stay stored."]
 
     def _routing_settings(self):
         values = []
@@ -1115,7 +948,8 @@ class Wizard:
             values.append((name, "floor", cls_info["floor"]))
             values.append((name, "ceiling", cls_info["ceiling"]))
         values.extend([(None, "margin", self.routing_doc["margin"]),
-                       (None, "gate", self.routing_doc["gate"])])
+                       (None, "gate", self.routing_doc["gate"]),
+                       (None, "meters", "on" if self._meters_on() else "off")])
         return values
 
     def _routing_panel(self):
@@ -1148,6 +982,9 @@ class Wizard:
                                   + (f": {', '.join(admitted)}." if admitted else "."))
             paragraphs.append("A job sent to a lane by name skips the range.")
             return paragraphs
+        if kind in ("gate", "margin") and not self._meters_on():
+            return [f"{kind}: {value}", "Stored only while metering is off.",
+                    "Ranking uses Tier, Order and Lane name. Turn meters on to use Gate and Margin."]
         if kind == "margin":
             return [
                 f"margin: {value}",
@@ -1156,11 +993,20 @@ class Wizard:
                 "Pace is unspent quota against time left in the week; above 1.0 the "
                 "quota will expire unused.",
             ]
+        if kind == "meters":
+            return [
+                f"meters: {value}",
+                "When on, ranking uses Gate and Margin, and dispatch probes Remaining "
+                "at the start and finish of a job.",
+                "When off, ranking is Tier, Order and lane name only. Cached Remaining "
+                "may still show. Gate and Margin stay stored.",
+            ]
         return [
             f"gate: {value}",
             f"A lane is skipped outright once its meter drops below {value * 100:g}% "
             "remaining, however capable it is.",
-            "Remaining is the lower of the meter's 5-hour and weekly fractions.",
+            "For shared spend, Remaining is the lower Window fraction. "
+            "agy's combined Remaining is unknown.",
         ]
 
     def _step_marker(self):
@@ -1172,7 +1018,11 @@ class Wizard:
         if self.screen in ("done", "quit"):
             return ""
         here = f"tier{self.tier}" if self.screen == "tier" else self.screen
-        parts = [f"[{label}]" if key == here else label for key, label in STEPS]
+        steps = STEPS
+        if self.focus:
+            focus_key = "prescreen" if self.focus == "carry" else self.focus
+            steps = tuple((key, label) for key, label in STEPS if key in (focus_key, "confirm"))
+        parts = [f"[{label}]" if key == here else label for key, label in steps]
         return " · ".join(parts)
 
     def _discovery_notices(self):
@@ -1198,12 +1048,29 @@ class Wizard:
                 body=body,
             )
         if self.screen == "discovery":
+            harnesses = (self.discovery.get("harnesses")
+                         if isinstance(self.discovery, dict) else None) or {}
+            rows = []
+            for name in HARNESSES:
+                info = harnesses.get(name) if isinstance(harnesses.get(name), dict) else None
+                if info is not None:
+                    status = info.get("status") or "missing"
+                    if status == "ok":
+                        label, found = "found", True
+                    elif status == "error":
+                        err = info.get("error") or "unknown error"
+                        label, found = f"error: {err}", False
+                    else:
+                        label, found = "missing", False
+                else:
+                    found = name in self.discovered
+                    label = "found" if found else "missing"
+                rows.append({"cells": [name, label], "marked": False, "dimmed": not found,
+                             "cursor": False, "tag": ""})
             return self._frame(
                 "discovery", "Delegate setup: discovery",
                 columns=["harness", "status"],
-                rows=[{"cells": [name, "found" if name in self.discovered else "missing"],
-                       "marked": False, "dimmed": name not in self.discovered,
-                       "cursor": False, "tag": ""} for name in HARNESSES],
+                rows=rows,
                 footer="any key: continue  b: back  q: quit",
             )
         if self.screen == "prescreen":
@@ -1258,7 +1125,9 @@ class Wizard:
                 # The tier definition belongs where the decision is made, but it
                 # and the key hints together overflow an 80-column footer, and a
                 # truncated footer loses the keys.
-                legend=self._tier_legend(),
+                legend=[*self._tier_legend(), *(
+                    ["Unmarking moves a Lane down one Tier; Enter reviews the changes."]
+                    if self.focus and self.tier > 1 else [])],
             )
         if self.screen == "review":
             epoch_names, aa_names = self._bench_columns()
@@ -1284,7 +1153,8 @@ class Wizard:
                         "cursor": name == here, "tag": "",
                     })
             off = [name for name in self.lanes_doc["lanes"] if not self._enabled[name]]
-            legend = [REVIEW_MOVE_LEGEND, REVIEW_ORDER_LEGEND]
+            legend = [REVIEW_MOVE_LEGEND, REVIEW_ORDER_LEGEND if self._meters_on()
+                      else "Metering is off. Ranking uses Tier, Order and Lane name."]
             if off:
                 legend.append(self._drift_line("Not carried, keeps its catalog tier", off))
             return self._frame(
@@ -1294,7 +1164,9 @@ class Wizard:
                 legend=legend,
             )
         if self.screen == "routing":
-            rows = [{"cells": [f"{cls} {kind}" if cls else kind, str(value)], "marked": False,
+            rows = [{"cells": [f"{cls} {kind}" if cls else kind,
+                               ("[x] on" if self._meters_on() else "[ ] off") if kind == "meters" else str(value)],
+                     "marked": kind == "meters" and self._meters_on(),
                      "dimmed": False, "cursor": i == self.cursor, "tag": ""}
                     for i, (cls, kind, value) in enumerate(self._routing_settings())]
             return self._frame(
@@ -1327,9 +1199,13 @@ class Wizard:
             for name in ("margin", "gate"):
                 rows.append({"cells": [name, "", str(self.routing_doc[name])], "marked": False,
                              "dimmed": False, "tag": ""})
+            rows.append({"cells": ["meters", "", "on" if self._meters_on() else "off"],
+                         "marked": False, "dimmed": False, "tag": ""})
             for path in (self.lanes_path, self.routing_path):
                 rows.append({"cells": ["file", "", path], "marked": False,
                              "dimmed": False, "tag": ""})
+            if self.focus:
+                rows = self._focus_rows()
             for index, row in enumerate(rows):
                 row["cursor"] = index == self.cursor
             return self._frame(
@@ -1339,8 +1215,9 @@ class Wizard:
                 # a path is the one value here that will not fit a 24-place cell,
                 # and `/Users/dreiss/.config/de…` is not a path anyone can check
                 elastic="value",
-                legend=[CLASSES_LEGEND, *self._margin_legend(),
-                        *self._gate_legend(), CONFIRM_OFF_LEGEND],
+                legend=(["Only the listed changes will be written."] if self.focus else
+                        [CLASSES_LEGEND, *self._margin_legend(),
+                         *self._gate_legend(), *self._meters_legend(), CONFIRM_OFF_LEGEND]),
             )
         return self._frame(self.screen, "Delegate setup")
 

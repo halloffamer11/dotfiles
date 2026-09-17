@@ -93,7 +93,9 @@ How much of its meter one job on a lane uses, compared with other lanes. It feed
 One quota period of a meter: 5-hour or weekly.
 
 **Remaining**:
-The lower of a meter's two window fractions still unspent.
+The fraction of a Meter still unspent, using the lower Window fraction when both
+Windows constrain the same spend. Remaining is unknown when their combined bound
+is not established, even if individual Window readings are available.
 _Avoid_: r (in prose)
 
 **Gate**:
