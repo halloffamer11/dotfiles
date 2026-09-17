@@ -1,7 +1,7 @@
 {
   "version": "delegate-routing.v1",
-  "gate": 0.0,
-  "margin": 0.5,
+  "gate": 0.1,
+  "margin": 0.2,
   "project_order": [
     "luna-high@codex",
     "luna-max@codex",
