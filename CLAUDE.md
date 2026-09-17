@@ -15,16 +15,15 @@ Machine configuration and agent tooling managed as one Git repository.
 
 ## Active work
 
-**Herdr dashboard compatibility pass** (2026-09-17): branch
-`worktree/delegate-monitor-herdr`, reopened in its own worktree. Orin approved
-updating this branch from main, showing metering state, aligning project saves
-with the catalog boundary, and verifying the result in Herdr. Before changing
-its model, terminal view, or launcher, read `tools/delegate-dashboard/CLAUDE.md`.
-The accepted prototype verdict is in ticket 09; restart evidence and compatibility
-gaps are in `.scratch/delegate-dashboard-plugin/research/2026-09-16-restart.md`.
-Keep `.delegate/routing.json` test preferences on this branch. Production scope
-and merging the UI into main remain separate decisions. The Rust monitor in
-`tools/delegate-mon/` is separate.
+**Next session: dashboard compatibility WIP** (2026-09-17). Resume branch
+`worktree/delegate-monitor-herdr` in `/private/tmp/delegate-monitor-herdr`. The
+Git worktree exists; its Herdr workspace is closed. Read its `tools/delegate-dashboard/CLAUDE.md` and
+`.scratch/delegate-dashboard-plugin/issues/10-current-backend-compatibility.md`.
+Main was merged into the prototype at `70cf9bb`; partial model edits are kept,
+with two failing dashboard checks. Both workers are stopped. Orin approved the
+compatibility pass and a delegate-selected TUI fallback after Claude Opus returned
+403; agy/Grok remain authorized. Keep the branch's project policy off main.
+Production scope, UI integration into main, and the Rust monitor remain separate.
 
 **Delegate modular batch complete** (2026-09-16): tickets 01–13 landed, all 13
 script suites and full/focused terminal checks passed, and independent review

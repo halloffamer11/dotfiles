@@ -3,7 +3,10 @@
 
 The model resolves one Git project during construction, reads only cached Meter
 observations, and delegates every eligibility and leader decision to
-``rank.tier_leaders``.  It never imports or executes ``usage.py``.
+``rank.tier_leaders``.  It never imports or executes ``usage.py``.  Gate, Margin,
+and Project-order saves go through ``catalog.edit_catalog`` with ``scope='project'``,
+cached meters, and the construction-time harness set.  Direct catalog writes are
+not a dashboard save path.
 """
 
 from __future__ import annotations
@@ -306,6 +309,7 @@ class DashboardModel:
             )
 
         routing = effective["routing"]
+        meters_on = catalog.meters_enabled(routing)
         self._revision += 1
         state = {
             "prototype": True,
@@ -324,6 +328,11 @@ class DashboardModel:
                     "value": routing["margin"],
                     "display": f"{_percentage_text(routing['margin'])}%",
                     "source": sources.get("margin"),
+                },
+                "meters": {
+                    "value": meters_on,
+                    "display": "on" if meters_on else "off",
+                    "source": sources.get("meters"),
                 },
             },
             "usage": {
@@ -404,22 +413,22 @@ class DashboardModel:
             return "project routing path resolves to a global delegate policy file"
         return None
 
-    def save_project_policy(
-        self,
-        proposed: dict[str, Any],
-        *,
-        expected_policy_bytes: bytes | None | object = _CURRENT_POLICY,
-    ) -> bool:
-        """Validate and atomically save a complete proposed project document.
+    def _cached_meters_doc(self) -> dict[str, Any]:
+        """Return the pinned Meter cache without probing vendors."""
+        meters, _status, _detail, _signature = self._load_meters()
+        return meters
 
-        Global lane and routing documents are re-read immediately before
-        validation so a stale refresh snapshot cannot authorize a now-invalid
-        save. The final byte check prevents the ordinary stale-editor overwrite.
-        There is intentionally no broad filesystem lock in this prototype, so
-        another writer can still race between that last check and the atomic
-        rename.
-        """
-        proposal = copy.deepcopy(proposed)
+    def _catalog_edit_kwargs(self) -> dict[str, Any]:
+        return {
+            "scope": "project",
+            "cwd": str(self.project_root),
+            "config_dir": str(self.config_dir) if self.config_dir is not None else None,
+            "present": self.present,
+            "meters": self._cached_meters_doc(),
+        }
+
+    def _validate_project_proposal(self, proposal: dict[str, Any]) -> str | None:
+        """Validate a complete project document against freshly read globals."""
         try:
             global_lanes, _ = self._load_json_snapshot(self.global_lanes_path)
             global_routing, _ = self._load_json_snapshot(self.global_routing_path)
@@ -432,9 +441,45 @@ class DashboardModel:
                 global_source=str(self.global_routing_path),
             )
         except (DashboardError, catalog.CatalogError) as exc:
-            self._set_save_state("error", f"Not saved: {exc}")
-            return False
+            return str(exc)
+        return None
 
+    def _supported_project_operation(
+        self,
+        current: dict[str, Any],
+        proposal: dict[str, Any],
+    ) -> tuple[str, dict[str, Any]] | tuple[None, None]:
+        """Map a complete proposal to one catalog set of Gate or Margin.
+
+        Project order, Class ranges, and other keys are not written through
+        this method. ``move_lane`` is the Order path.
+        """
+        if not isinstance(proposal, dict):
+            return None, None
+        baseline = current or {}
+        changed = [
+            key
+            for key in (set(baseline) | set(proposal)) - {"version"}
+            if baseline.get(key) != proposal.get(key)
+        ]
+        if changed == ["gate"] and "gate" in proposal:
+            return "set", {"field": "routing.gate", "value": proposal["gate"]}
+        if changed == ["margin"] and "margin" in proposal:
+            return "set", {"field": "routing.margin", "value": proposal["margin"]}
+        if not changed and "gate" in proposal:
+            return "set", {"field": "routing.gate", "value": proposal["gate"]}
+        if not changed and "margin" in proposal:
+            return "set", {"field": "routing.margin", "value": proposal["margin"]}
+        return None, None
+
+    def _apply_catalog_edit(
+        self,
+        op: str,
+        *,
+        expected_policy_bytes: bytes | None | object = _CURRENT_POLICY,
+        **edit_kwargs: Any,
+    ) -> bool:
+        """Preview and apply one project catalog edit; refuse symlink targets."""
         unsafe = self._unsafe_policy_target()
         if unsafe is not None:
             self._set_save_state("error", f"Not saved: {unsafe}")
@@ -458,9 +503,46 @@ class DashboardModel:
             )
             return False
 
+        kwargs = {**self._catalog_edit_kwargs(), **edit_kwargs}
         try:
-            catalog.write_json(str(self.project_policy_path), proposal)
+            preview = catalog.edit_catalog(op, apply=False, **kwargs)
+        except catalog.CatalogError as exc:
+            self._set_save_state("error", f"Not saved: {exc}")
+            return False
+
+        try:
+            current_raw = self._read_optional_bytes(self.project_policy_path)
         except OSError as exc:
+            self._set_save_state("error", f"Not saved: cannot recheck project policy: {exc}")
+            return False
+        if current_raw != expected:
+            self.refresh()
+            self._set_save_state(
+                "conflict",
+                "Conflict: project routing changed externally; reloaded it. Repeat the action to save.",
+            )
+            return False
+
+        if preview.get("noop"):
+            self._set_save_state("saved", "Saved project policy.")
+            return True
+
+        try:
+            catalog.edit_catalog(
+                op,
+                apply=True,
+                expect=preview["revision"],
+                **kwargs,
+            )
+        except catalog.CatalogError as exc:
+            message = str(exc)
+            if "intervening edit" in message:
+                self.refresh()
+                self._set_save_state(
+                    "conflict",
+                    "Conflict: catalog sources changed during save; reloaded. Repeat the action to save.",
+                )
+                return False
             self._set_save_state("error", f"Not saved: {exc}")
             return False
 
@@ -470,6 +552,38 @@ class DashboardModel:
             return False
         self._set_save_state("saved", "Saved project policy.")
         return True
+
+    def save_project_policy(
+        self,
+        proposed: dict[str, Any],
+        *,
+        expected_policy_bytes: bytes | None | object = _CURRENT_POLICY,
+    ) -> bool:
+        """Validate a complete proposal and apply one supported project set.
+
+        Supported writes are Gate and Margin. Project order uses ``move_lane``.
+        Class ranges and other keys are rejected after validation, so this is
+        not a general document writer. Globals are re-read immediately before
+        validation. The project-byte check is not a filesystem lock.
+        """
+        proposal = copy.deepcopy(proposed)
+        error = self._validate_project_proposal(proposal)
+        if error is not None:
+            self._set_save_state("error", f"Not saved: {error}")
+            return False
+
+        op, edit_kwargs = self._supported_project_operation(self._project_doc, proposal)
+        if op is None or edit_kwargs is None:
+            self._set_save_state(
+                "error",
+                "Not saved: dashboard writes are Gate, Margin, or one Project order move.",
+            )
+            return False
+        return self._apply_catalog_edit(
+            op,
+            expected_policy_bytes=expected_policy_bytes,
+            **edit_kwargs,
+        )
 
     def begin_percentage_edit(self, field: str) -> PercentageEdit:
         """Capture a Gate or Margin edit, including its conflict baseline."""
@@ -483,7 +597,7 @@ class DashboardModel:
         )
 
     def save_percentage_edit(self, edit: PercentageEdit, text: str) -> bool:
-        """Validate and save a percentage edit through the project-policy seam."""
+        """Validate and save a percentage edit through catalog.edit_catalog."""
         if not isinstance(edit, PercentageEdit) or edit.field not in ("gate", "margin"):
             self._set_save_state("error", "Not saved: invalid percentage edit.")
             return False
@@ -497,9 +611,15 @@ class DashboardModel:
         if not proposal:
             proposal["version"] = catalog.ROUTING_VERSION
         proposal[edit.field] = fraction
-        return self.save_project_policy(
-            proposal,
+        error = self._validate_project_proposal(proposal)
+        if error is not None:
+            self._set_save_state("error", f"Not saved: {error}")
+            return False
+        return self._apply_catalog_edit(
+            "set",
             expected_policy_bytes=edit.policy_bytes,
+            field=f"routing.{edit.field}",
+            value=fraction,
         )
 
     def move_lane(self, lane_name: str, direction: int) -> bool:
@@ -528,15 +648,8 @@ class DashboardModel:
             )
             return False
 
-        complete_order = []
-        for tier in self.state["tiers"]:
-            names = [row["lane"] for row in tier["rows"]]
-            if tier is selected_tier:
-                names[selected_index], names[destination] = names[destination], names[selected_index]
-            complete_order.extend(names)
-
-        proposal = copy.deepcopy(self._project_doc)
-        if not proposal:
-            proposal["version"] = catalog.ROUTING_VERSION
-        proposal["project_order"] = complete_order
-        return self.save_project_policy(proposal)
+        return self._apply_catalog_edit(
+            "order",
+            lane=lane_name,
+            position=destination + 1,
+        )
