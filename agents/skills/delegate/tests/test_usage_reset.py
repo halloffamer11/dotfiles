@@ -267,6 +267,24 @@ def main():
         assert_true(usage.eligible(low, 0.0) and not usage.eligible(low, 0.1),
                     "the effective Gate alone determines low-Meter eligibility")
 
+    for stamp in (None, float("nan"), "yesterday", True):
+        doc = {"lanes": [{"lane": "codex", "r": 0.5}], "probed_at": stamp}
+        assert_true(usage.observations(doc) is None, "envelope needs a finite timestamp")
+    assert_true(usage.observations({"codex": {"r": 0.5}}) is not None,
+                "legacy bare maps remain timestamp-free")
+    for field in ("remaining_5h", "remaining_weekly_model", "reset_5h", "reset_weekly", "reset_binding"):
+        for bad in ("bad", float("nan"), True, -1):
+            doc = {"probed_at": time.time(), "lanes": [
+                {"lane": "codex", "r": 0.5, field: bad}]}
+            assert_true(usage.observations(doc) is None,
+                        f"malformed {field} must invalidate the entire document")
+    with tempfile.TemporaryDirectory() as td:
+        path = os.path.join(td, "bad-display.json")
+        with open(path, "w") as f:
+            json.dump({"probed_at": time.time(), "lanes": [
+                {"lane": "codex", "r": 0.5, "reset_5h": "bad"}]}, f)
+        assert_true(usage.load_cached(path) == {}, "cached viewers reject invalid display data")
+
     print("PASS: all test_usage_reset tests passed")
     sys.exit(0)
 

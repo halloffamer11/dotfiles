@@ -729,6 +729,7 @@ with tempfile.TemporaryDirectory() as td:
         tier_cat["lanes"][lane_name]["order"] = order
 
     tier_meters = {
+        "probed_at": 1700000000,
         "lanes": [
             meter("codex", weekly=0.80, five_h=0.80, pace=0.80, status="ok"),
             meter("grok", weekly=0.80, pace=0.90, status="ok"),

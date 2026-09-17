@@ -117,7 +117,7 @@ def observations(document):
     if not isinstance(document, dict):
         return None
     if "lanes" in document:
-        if not _valid_meter_number(document.get("probed_at")):
+        if document.get("probed_at") is None or not _valid_meter_number(document["probed_at"]):
             return None
         if not isinstance(document["lanes"], list):
             return None
@@ -140,8 +140,12 @@ def observations(document):
             return None
         if not _valid_meter_number(observation.get("pace")):
             return None
-        if not _valid_meter_number(observation.get("remaining_weekly"), fraction=True):
-            return None
+        for field in ("remaining_weekly", "remaining_5h", "remaining_weekly_model"):
+            if not _valid_meter_number(observation.get(field), fraction=True):
+                return None
+        for field in ("reset_5h", "reset_weekly", "reset_binding"):
+            if not _valid_meter_number(observation.get(field)):
+                return None
         if "status" in observation and not isinstance(observation["status"], str):
             return None
     out = {}
