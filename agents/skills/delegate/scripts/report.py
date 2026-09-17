@@ -33,9 +33,11 @@ try:
 except ImportError:
     from .rank import rank
 
+import usage as meter_usage
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUNS = os.environ.get("DELEGATE_RUNS") or os.path.expanduser("~/.cache/delegate/runs.jsonl")
-CACHE = os.environ.get("DELEGATE_CACHE") or os.path.expanduser("~/.cache/delegate/usage.json")
+CACHE = meter_usage.get_cache_path()
 # Flag file: while it exists, `statusline` prints no rows.
 SWITCH = os.environ.get("DELEGATE_STATUSLINE_SWITCH") or os.path.expanduser("~/.cache/delegate/statusline.off")
 VERDICTS = ("clean", "findings", "partial", "failed")
@@ -532,7 +534,7 @@ def cmd_statusline(a):
     c = get_colors(no_color)
     catalog = load_catalog_or_die(a.config_dir)
 
-    cache_path = os.environ.get("DELEGATE_CACHE") or CACHE
+    cache_path = meter_usage.get_cache_path()
     if not os.path.exists(cache_path):
         return
     try:

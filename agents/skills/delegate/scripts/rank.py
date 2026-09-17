@@ -65,6 +65,7 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 import catalog
+import usage
 from catalog import CatalogError, CLASSES, HARNESSES, load_catalog
 
 
@@ -344,11 +345,7 @@ def load_cached_usage(cache_path=None):
     """Read the usage cache without invoking usage.py or any vendor probe."""
     path = cache_path
     if path is None:
-        path = (
-            os.environ.get("DELEGATE_CACHE")
-            or os.environ.get("CONSULT_CACHE")
-            or os.path.expanduser("~/.cache/delegate/usage.json")
-        )
+        path = usage.get_cache_path()
     try:
         with open(path, "r", encoding="utf-8") as f:
             doc = json.load(f)
