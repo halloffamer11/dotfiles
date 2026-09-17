@@ -1670,6 +1670,17 @@ def groups_of(names, doc):
 
 
 try:
+    record("policy helpers on setup_tui are aliases of bench",
+           setup_tui.propose_enabled is bench.propose_enabled
+           and setup_tui.group_lanes is bench.group_lanes
+           and setup_tui.lane_order is bench.lane_order
+           and setup_tui.dominating_effort is bench.dominating_effort
+           and setup_tui.model_group is bench.model_group)
+except Exception as e:
+    record("policy helpers on setup_tui are aliases of bench", False, repr(e))
+
+
+try:
     doc = sweep_lanes()
     names = ["fable-low@claude", "sol-high@codex", "fable-max@claude", "flash-high@agy",
              "flash-low@agy", "sol-low@codex"]

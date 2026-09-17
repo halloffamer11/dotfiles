@@ -306,8 +306,8 @@ except Exception as e:
 try:
     page = bench_page.render(None, ASTRA, SWEEP)
     proposals = setup_tui.propose_enabled(ASTRA, SWEEP)
-    off = sorted(name for name, (on, _why) in proposals.items()
-                 if not on and setup_tui.is_dominated_reason(_why))
+    off = sorted(name for name, decision in proposals.items()
+                 if not decision["enabled"] and setup_tui.is_dominated_reason(decision))
     struck = [p for p in board_named(data_of(page), "Terminal-Bench 4.0")["points"] if p["kind"] == "lane_off"]
     verdict = re.search(r'<p class="verdict">(.*?)</p>', page, re.S).group(1)
     finding = board_named(data_of(page), "Terminal-Bench 4.0")["finding"]
@@ -316,6 +316,8 @@ try:
     record("the page marks what the wizard marks, names it at the top, and shows the arithmetic",
            off == ["astra-xhigh@codex"] and len(struck) == 1 and struck[0]["effort"] == "xhigh"
            and struck[0]["off"] == "high wins on tbench" and struck[0]["beatenBy"] == "high"
+           and struck[0]["carryKind"] == "dominated" and struck[0]["source"] == "tbench"
+           and struck[0]["competitor"] == "high"
            and "astra-xhigh@codex" in verdict and "high wins on tbench" in verdict
            and "scores the same as high" in finding and "$81.1 more (+4%)" in finding
            and f'<p class="finding">{finding}</p>' in page
@@ -327,6 +329,20 @@ try:
            f"off={off} struck={struck} verdict={verdict[:120]!r} order={order[:6]}")
 except Exception as e:
     record("the page marks what the wizard marks, names it at the top, and shows the arithmetic",
+           False, repr(e))
+
+try:
+    missing = bench_page.render(None, LANES, None)
+    empty = bench_page.render(None, LANES, [])
+    record("unavailable evidence and an empty proposal stay distinct in the HTML header",
+           "Per-effort evidence is unavailable" in missing
+           and "proposes nothing" in missing
+           and "nothing off" not in missing
+           and "The pre-screen proposes to switch nothing off" in empty
+           and "Per-effort evidence is unavailable" not in empty,
+           f"missing_has_verdict={'verdict' in missing} empty_has_nothing={'nothing off' in empty}")
+except Exception as e:
+    record("unavailable evidence and an empty proposal stay distinct in the HTML header",
            False, repr(e))
 
 try:
@@ -732,6 +748,9 @@ try:
            and by_name["astra-ultra@codex"]["carried"] is False
            and by_name["astra-xhigh@codex"]["carried"] is True
            and by_name["astra-xhigh@codex"]["off"] == "high wins on tbench"
+           and by_name["astra-xhigh@codex"]["kind"] == "dominated"
+           and by_name["astra-xhigh@codex"]["source"] == "tbench"
+           and by_name["astra-xhigh@codex"]["competitor"] == "high"
            and by_name["astra-high@codex"]["off"] is None
            and by_name["astra-high@codex"]["rows"] is True
            # fable is on no board of this sweep, so it can be no dot
@@ -740,7 +759,8 @@ try:
            and by_name["astra-high@codex"]["harness"] == "codex"
            and by_name["astra-high@codex"]["tier"] == doc["lanes"]["astra-high@codex"]["tier"]
            # ticket 27 added the lane's meter, which colour is now drawn from
-           and set(lanes[0]) == {"name", "harness", "meter", "model", "group", "effort", "tier", "carried", "off", "rows"},
+           and set(lanes[0]) == {"name", "harness", "meter", "model", "group", "effort", "tier",
+                                "carried", "off", "rows", "kind", "source", "competitor"},
            repr(lanes[:3]))
     key = data["catalogKey"]
     other = copy.deepcopy(doc)

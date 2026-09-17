@@ -615,4 +615,132 @@ record(
     f"order={bench.LANE_EFFORT_ORDER} efforts={catalog.EFFORTS}",
 )
 
+
+# --- carry policy: structured decisions beside collect() ----------------------
+CARRY_LANES = {
+    "version": "delegate-lanes.v1",
+    "lanes": {
+        "luna-low@codex": {"harness": "codex", "model": "gpt-5.6-luna", "effort": "low",
+                           "tier": 1, "meter": "codex"},
+        "luna-medium@codex": {"harness": "codex", "model": "gpt-5.6-luna", "effort": "medium",
+                              "tier": 1, "meter": "codex"},
+        "luna-high@codex": {"harness": "codex", "model": "gpt-5.6-luna", "effort": "high",
+                            "tier": 1, "meter": "codex"},
+        "sol-high@codex": {"harness": "codex", "model": "gpt-5.6-sol", "effort": "high",
+                           "tier": 2, "meter": "codex"},
+    },
+}
+
+
+def carry_row(effort, benchmark, score, cost, source="aa", **extra):
+    row = {"model": "gpt-5.6-luna", "effort": effort, "benchmark": benchmark,
+           "score": score, "cost_usd": cost, "uncertain": False, "source": source}
+    row.update(extra)
+    return row
+
+
+try:
+    rows = [
+        carry_row("medium", "b1", 0.6, 1.0), carry_row("high", "b1", 0.5, 2.0),
+        carry_row("medium", "b2", 0.6, 1.0), carry_row("high", "b2", 0.5, 2.0),
+        carry_row("medium", "b3", 0.4, 1.0), carry_row("high", "b3", 0.5, 2.0),
+        carry_row("low", "b1", 0.7, 0.5), carry_row("low", "b2", 0.1, 0.5),
+        carry_row("low", "b3", 0.1, 0.5),
+    ]
+    proposals = bench.propose_enabled(CARRY_LANES, rows)
+    high, medium, low = (proposals[f"luna-{e}@codex"] for e in ("high", "medium", "low"))
+    record(
+        "dominating_effort is same-source majority, returned as kind/source/competitor",
+        high == {"lane": "luna-high@codex", "enabled": False, "kind": "dominated",
+                 "source": "aa", "competitor": "medium"}
+        and medium["kind"] == "not_dominated" and medium["enabled"] is True
+        and low["kind"] == "not_dominated"
+        and bench.carry_reason(high) == "medium wins on aa"
+        and proposals["sol-high@codex"]["kind"] == "no_rows",
+        str({k: proposals[k] for k in ("luna-high@codex", "luna-medium@codex", "luna-low@codex")}),
+    )
+except Exception as e:
+    record("dominating_effort is same-source majority, returned as kind/source/competitor",
+           False, repr(e))
+
+try:
+    rows = [
+        carry_row("medium", "b1", 0.6, 1.0), carry_row("high", "b1", 0.5, 2.0),
+        carry_row("medium", "b2", 0.4, 1.0), carry_row("high", "b2", 0.5, 2.0),
+        carry_row("medium", "index", 50.0, 1.0, composite=True),
+        carry_row("high", "index", 40.0, 2.0, composite=True),
+    ]
+    high = bench.propose_enabled(CARRY_LANES, rows)["luna-high@codex"]
+    record(
+        "the AA composite is shown and never counted in domination",
+        high["kind"] == "not_dominated" and high["enabled"] is True,
+        str(high),
+    )
+except Exception as e:
+    record("the AA composite is shown and never counted in domination", False, repr(e))
+
+try:
+    none_rows = bench.propose_enabled(CARRY_LANES, None)
+    empty_rows = bench.propose_enabled(CARRY_LANES, [])
+    record(
+        "unavailable evidence and an empty proposal remain distinct",
+        all(d["kind"] == "unavailable" for d in none_rows.values())
+        and bench.evidence_unavailable(None, none_rows)
+        and not bench.evidence_unavailable([], empty_rows)
+        and all(d["kind"] == "no_rows" for d in empty_rows.values())
+        and bench.carry_reason(none_rows["luna-low@codex"]) == "no per-effort data"
+        and bench.carry_reason(empty_rows["luna-low@codex"]) == "no rows for this lane",
+        f"none={none_rows['luna-low@codex']} empty={empty_rows['luna-low@codex']}",
+    )
+except Exception as e:
+    record("unavailable evidence and an empty proposal remain distinct", False, repr(e))
+
+try:
+    tied = [
+        carry_row("high", "b", 5.0, 2.0, source="t"),
+        carry_row("medium", "b", 5.0, 2.0, source="t"),
+    ]
+    cheaper = [
+        carry_row("high", "b", 5.0, 2.0, source="t"),
+        carry_row("medium", "b", 5.0, 1.5, source="t"),
+    ]
+    tied_p = bench.propose_enabled(CARRY_LANES, tied)
+    cheap_p = bench.propose_enabled(CARRY_LANES, cheaper)
+    record(
+        "equal score at equal cost does not dominate; a cheaper equal score does",
+        tied_p["luna-high@codex"]["kind"] == "not_dominated"
+        and tied_p["luna-medium@codex"]["kind"] == "not_dominated"
+        and cheap_p["luna-high@codex"]["kind"] == "dominated"
+        and cheap_p["luna-high@codex"]["competitor"] == "medium"
+        and cheap_p["luna-high@codex"]["source"] == "t",
+        str({"tied": tied_p["luna-high@codex"], "cheap": cheap_p["luna-high@codex"]}),
+    )
+except Exception as e:
+    record("equal score at equal cost does not dominate; a cheaper equal score does",
+           False, repr(e))
+
+try:
+    with tempfile.TemporaryDirectory() as td:
+        csv_path = os.path.join(td, "epoch.csv")
+        write_epoch_csv(csv_path, [epoch_row("gpt-6-astra", "high", "DeepSWE", "0.58")])
+        items = bench.build_epoch_section(
+            bench.catalog_models(ATTRIB_LANES["lanes"]),
+            bench.match_epoch_rows(
+                bench.load_epoch(csv_path),
+                bench.catalog_models(ATTRIB_LANES["lanes"]),
+            ),
+        )
+        data = bench.collect(ATTRIB_LANES, epoch_csv=csv_path)
+        text = bench.format_collection(data)
+    record(
+        "collect does not build a discarded display table; markdown is rendered later",
+        isinstance(items, list) and items and "model" in items[0]
+        and text.startswith("# Lane benchmark ranking")
+        and "| Lane(s) |" in text,
+        f"type={type(items).__name__} head={text[:80]!r}",
+    )
+except Exception as e:
+    record("collect does not build a discarded display table; markdown is rendered later",
+           False, repr(e))
+
 sys.exit(1 if fails else 0)

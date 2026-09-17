@@ -28,7 +28,7 @@ import catalog
 # Reconciling a source's printed model name against a lane model is the
 # catalog's own knowledge; both this report and the setup pre-screen read it
 # from there rather than keeping a second copy.
-from catalog import CatalogError, normalize_name, strip_effort_suffix
+from catalog import CatalogError, EFFORTS, normalize_name, resolve_published_model, strip_effort_suffix
 
 EPOCH_URL = "https://epoch.ai/data/eci_benchmarks.csv"
 DEFAULT_OUT_DIR = "~/.cache/delegate/bench/"
@@ -428,27 +428,7 @@ def build_epoch_section(models, matched):
                 "gap": mean is None,
             }
         )
-    items = sort_report_rows(items)
-    headers = [
-        "Lane(s)",
-        "Model",
-        "Effort used",
-        *EPOCH_BENCHMARKS,
-        "Mean rank",
-    ]
-    rows = []
-    for item in items:
-        figures = item["figures"]
-        rows.append(
-            [
-                item["lanes"],
-                item["model"],
-                effort_used_label(figures, item["lane_effort"]),
-                *[fmt_pct(figures[b]["performance"] if b in figures else None) for b in EPOCH_BENCHMARKS],
-                item["mean_s"],
-            ]
-        )
-    return items, md_table(headers, rows)
+    return sort_report_rows(items)
 
 
 def load_effort_rows(paths):
@@ -724,6 +704,336 @@ def build_lane_section(lanes_doc, collected_models, aa_skipped, aa_scores=None, 
     return lanes, aa_names
 
 
+# --- carry and display-order policy (consumed by TUI and HTML) ----------------
+# Renderers own wording. Decisions carry kind/source/competitor so HTML never
+# has to parse a reason phrase.
+
+NO_ROWS_REASON = "no rows for this lane"
+NO_DATA_REASON = "no per-effort data"
+NOT_DOMINATED_REASON = "not dominated"
+ULTRA_REASON = "ultra, never carried"
+
+KIND_DOMINATED = "dominated"
+KIND_RECORDED = "recorded"
+KIND_ULTRA = "ultra"
+KIND_UNAVAILABLE = "unavailable"
+KIND_NO_ROWS = "no_rows"
+KIND_NOT_DOMINATED = "not_dominated"
+
+
+def model_group(lane):
+    """The model a lane is grouped under. An agy slug family
+    (`gemini-3.8-flash-high`, `-low`) is one model at several efforts, so the
+    effort suffix comes off first (ticket 26)."""
+    return strip_effort_suffix(normalize_name((lane or {}).get("model")))[0]
+
+
+def effort_rank(effort):
+    """Most effort first: ultra, max, xhigh, high, medium, low; a stranger last."""
+    try:
+        return -EFFORTS.index(effort)
+    except ValueError:
+        return 1
+
+
+def group_lanes(names, lanes_doc):
+    """`names` regrouped by model: each group sits where its first lane sat,
+    and lists its efforts from most to least (ticket 26, item 1).
+
+    The order `names` arrives in is the page's own (benchmark order on a tier
+    page, tier on the review page, the catalog on the carry page), and it
+    decides only where each group goes. Inside a group the effort decides, so
+    `fable-max` is read before `fable-low` on every page and every table.
+    """
+    lanes = (lanes_doc or {}).get("lanes") or {}
+    groups = {}
+    for name in names:
+        groups.setdefault(model_group(lanes.get(name)), []).append(name)
+    out = []
+    for members in groups.values():
+        out.extend(sorted(members, key=lambda n: effort_rank((lanes.get(n) or {}).get("effort"))))
+    return out
+
+
+def bench_order_key(bench, name, lanes_doc=None):
+    """A lane's place by Epoch rank, or AA rank if its group has no Epoch; measured
+    lanes first, then by name. This is the order the tier pages open in and
+    the order the benchmark page lists lanes in, so it lives in one place."""
+    rec = ((bench or {}).get("lanes") or {}).get(name) if bench else None
+    mean = rec.get("mean") if rec else None
+    if mean is None and rec:
+        lanes = (lanes_doc or {}).get("lanes") or {}
+        group = model_group(lanes.get(name))
+        has_epoch = any(model_group(lane) == group
+                        and ((bench or {}).get("lanes", {}).get(other) or {}).get("mean") is not None
+                        for other, lane in lanes.items())
+        if not has_epoch:
+            mean = (rec.get("aa") or {}).get("mean")
+    return (mean is None, mean if mean is not None else 0, name)
+
+
+def lane_order(lanes_doc, bench):
+    """Every lane in the order a tier page lists them: benchmark order, then
+    grouped by model with efforts most to least."""
+    names = sorted((lanes_doc or {}).get("lanes") or {}, key=lambda n: bench_order_key(bench, n, lanes_doc))
+    return group_lanes(names, lanes_doc)
+
+
+def dominated_reason(effort, source):
+    """The reason for a lane another effort dominates: `high wins on aa`.
+
+    It names the source because two sources can disagree about one lane, and it
+    is not "dominated by high (tbench)" because that is 26 places and the `why`
+    column has 21 at 80 columns; `medium wins on tbench`, the longest, is 21.
+    """
+    return f"{effort} wins on {source}"
+
+
+def is_dominated_reason(why):
+    """Whether a proposal's reason is the data switching the lane off.
+
+    Compatibility alias: renderers should read `kind`, not parse this prose.
+    A decision dict is accepted so old callers can pass either form.
+    """
+    if isinstance(why, dict):
+        return why.get("kind") == KIND_DOMINATED
+    return isinstance(why, str) and " wins on " in why
+
+
+def recorded_reason(enabled):
+    """The reason shown for a lane whose `enabled` the human already wrote."""
+    return f"{'on' if enabled else 'off'} in the catalog"
+
+
+def carry_decision(lane, enabled, kind, source=None, competitor=None):
+    """One structured carry verdict. Renderers turn this into wording."""
+    return {
+        "lane": lane,
+        "enabled": enabled,
+        "kind": kind,
+        "source": source,
+        "competitor": competitor,
+    }
+
+
+def carry_reason(decision):
+    """Display prose for one carry decision. HTML must not parse this back."""
+    if not isinstance(decision, dict):
+        return NOT_DOMINATED_REASON
+    kind = decision.get("kind")
+    if kind == KIND_DOMINATED:
+        return dominated_reason(decision.get("competitor"), decision.get("source"))
+    if kind == KIND_RECORDED:
+        return recorded_reason(bool(decision.get("enabled")))
+    if kind == KIND_ULTRA:
+        return ULTRA_REASON
+    if kind == KIND_UNAVAILABLE:
+        return NO_DATA_REASON
+    if kind == KIND_NO_ROWS:
+        return NO_ROWS_REASON
+    return NOT_DOMINATED_REASON
+
+
+def evidence_unavailable(effort_rows, proposals=None):
+    """True when there was no per-effort evidence, as distinct from an empty proposal."""
+    if effort_rows is None:
+        return True
+    if not proposals:
+        return False
+    return all(d.get("kind") == KIND_UNAVAILABLE for d in proposals.values())
+
+
+def resolve_effort_rows(lanes_doc, effort_rows):
+    """Returns (rows keyed by catalog model, published names that name no lane).
+
+    A source prints a model however it pleases: `gpt-5.6-luna` from SWE Refactor
+    Bench, `GPT-6 Astra` from Terminal-Bench and Artificial Analysis. Every
+    comparison below is against `lane["model"]`, so each row is re-keyed to the
+    lane model its printed name denotes, and the catalog owns that mapping
+    (`catalog.resolve_published_model`). A row naming no lane model is dropped
+    rather than reported per lane: the leaderboards carry GLM-5.3, Opus 4.8,
+    Sonnet 5 and a dozen others that are nobody's lane, and one line naming them
+    all is what a human needs to spot a `published_as` they still owe us.
+    """
+    resolved, unmatched = [], []
+    for row in effort_rows or []:
+        if not isinstance(row, dict):
+            continue
+        model = resolve_published_model(row.get("model"), lanes_doc, effort=row.get("effort"))
+        if model is None:
+            name = row.get("model")
+            if isinstance(name, str) and name.strip() and name not in unmatched:
+                unmatched.append(name)
+            continue
+        if model == row.get("model"):
+            resolved.append(row)
+        else:
+            copied = dict(row)
+            copied["model"] = model
+            resolved.append(copied)
+    return resolved, unmatched
+
+
+def unmatched_message(unmatched, width=79):
+    """One line naming the published models no lane runs, or "" for none."""
+    if not unmatched:
+        return ""
+    head = "no lane runs these, ignored: "
+    shown = []
+    for name in unmatched:
+        candidate = shown + [name]
+        more = len(unmatched) - len(candidate)
+        tail = f" +{more} more" if more else ""
+        if len(head + ", ".join(candidate) + tail) > width:
+            break
+        shown.append(name)
+    if not shown:
+        count = len(unmatched)
+        phrase = "name matches" if count == 1 else "names match"
+        return f"{count} published {phrase} no lane; each is too long to print here"
+    more = len(unmatched) - len(shown)
+    return head + ", ".join(shown) + (f" +{more} more" if more else "")
+
+
+def certain_effort_rows(effort_rows):
+    """Rows that may dominate. Uncertain rows inform nothing: they must not
+    dominate another lane, and they are not evidence against the lane they name.
+
+    A row at an effort no lane can select is dropped for the same reason. The
+    benchmark harnesses drive the API enum, which runs `none` to `max`, so every
+    published sweep carries a `none` row — and no lane can be configured at
+    `none`. Letting one dominate would switch off a real lane on the strength of
+    a setting that cannot be chosen, which is exactly what it did to
+    luna-low@codex: equal score to `none` at a tenth of a cent more.
+
+    A `composite` row is a reader's figure, not evidence: Artificial Analysis
+    does not publish the weighting of its Intelligence Index, so it is shown and
+    never counted.
+    """
+    certain = []
+    for row in effort_rows or []:
+        if not isinstance(row, dict) or row.get("uncertain") or row.get("composite"):
+            continue
+        if not row.get("model") or not row.get("effort"):
+            continue
+        if row["effort"] not in EFFORTS:
+            continue
+        score, cost = row.get("score"), row.get("cost_usd")
+        if isinstance(score, bool) or isinstance(cost, bool):
+            continue
+        if not isinstance(score, (int, float)) or not isinstance(cost, (int, float)):
+            continue
+        certain.append(row)
+    return certain
+
+
+def _beats(other, row):
+    """At least the score for no more money, and strictly better in one of the two."""
+    return (other["score"] >= row["score"] and other["cost_usd"] <= row["cost_usd"]
+            and (other["score"] > row["score"] or other["cost_usd"] < row["cost_usd"]))
+
+
+def dominating_effort(model, effort, source, certain):
+    """The effort of `model` that dominates `effort` inside one source, or None.
+
+    Dominated means another effort of the same model beats it on more than half
+    of the benchmarks that source scored both on. A source with one benchmark —
+    Terminal-Bench, SWE Refactor Bench — comes down to that one comparison.
+    Artificial Analysis scores eight components off the same runs, and losing
+    one noisy component in eight is not reason enough to switch a lane off: on
+    the live page of 2026-09-11 that reading proposed twelve lanes off, nine of
+    them on a single component.
+    """
+    mine, theirs = {}, {}
+    for row in certain:
+        if row.get("model") != model or row.get("source") != source:
+            continue
+        if row.get("effort") == effort:
+            mine.setdefault(row.get("benchmark"), row)
+        else:
+            theirs.setdefault(row["effort"], {}).setdefault(row.get("benchmark"), row)
+    for other_effort, board in theirs.items():
+        shared = [benchmark for benchmark in mine if benchmark in board]
+        wins = sum(1 for benchmark in shared if _beats(board[benchmark], mine[benchmark]))
+        if shared and 2 * wins > len(shared):
+            return other_effort
+    return None
+
+
+def dominating_row(row, certain):
+    """The dominating effort's point on this row's own board, or None.
+
+    The judgement belongs to the effort over its whole source
+    (`dominating_effort`), so every point of a dominated effort is marked on
+    every board of that source, including a board where it happens to score
+    higher: the lane is off over the source, not over one chart.
+
+    Public because the benchmark page draws this rule: a point it shows hollow
+    has to be a point the pre-screen switched a lane off over, and two
+    implementations of one rule would eventually disagree in front of a human
+    trying to check the wizard's arithmetic.
+    """
+    other = dominating_effort(row.get("model"), row.get("effort"), row.get("source"), certain)
+    if other is None:
+        return None
+    board = (row.get("source"), row.get("benchmark"))
+    return next((r for r in certain
+                 if r.get("model") == row.get("model") and r.get("effort") == other
+                 and (r.get("source"), r.get("benchmark")) == board), None)
+
+
+def _first_domination(lane, certain):
+    """(effort, source) of the first source in which another effort dominates
+    this lane, else None."""
+    sources = []
+    for row in certain:
+        if row.get("model") == lane["model"] and row.get("effort") == lane["effort"]:
+            if row.get("source") not in sources:
+                sources.append(row.get("source"))
+    for source in sources:
+        other = dominating_effort(lane["model"], lane["effort"], source, certain)
+        if other is not None:
+            return other, source
+    return None
+
+
+def propose_enabled(lanes_doc, effort_rows):
+    """Ticket-15 pre-screen rule. Returns {name: carry_decision}."""
+    rows, _unmatched = resolve_effort_rows(lanes_doc, effort_rows)
+    certain = certain_effort_rows(rows)
+    supplied = effort_rows is not None
+    out = {}
+    for name, lane in lanes_doc["lanes"].items():
+        if lane.get("effort") == "ultra":
+            out[name] = carry_decision(name, False, KIND_ULTRA)
+            continue
+        if "enabled" in lane:
+            # An explicit `enabled` is a decision the human already recorded. The
+            # pre-screen proposes for lanes that have no decision yet; it does not
+            # undo one. Silently switching a lane back on would put it in front of
+            # the ranker again without anyone saying so.
+            enabled = bool(lane["enabled"])
+            out[name] = carry_decision(name, enabled, KIND_RECORDED)
+            continue
+        found = _first_domination(lane, certain)
+        if found is not None:
+            other, source = found
+            out[name] = carry_decision(name, False, KIND_DOMINATED, source=source, competitor=other)
+            continue
+        if not supplied:
+            out[name] = carry_decision(name, True, KIND_UNAVAILABLE)
+        elif not any(
+            not row.get("uncertain")
+            and row.get("model") == lane["model"]
+            and row.get("effort") == lane["effort"]
+            for row in rows
+        ):
+            out[name] = carry_decision(name, True, KIND_NO_ROWS)
+        else:
+            out[name] = carry_decision(name, True, KIND_NOT_DOMINATED)
+    return out
+
+
 def collect(lanes_doc, epoch_csv=None, effort_rows=None):
     """Collect benchmark data for the report and interactive consumers.
 
@@ -734,7 +1044,7 @@ def collect(lanes_doc, epoch_csv=None, effort_rows=None):
     models = catalog_models(lanes_doc["lanes"])
     epoch_rows = load_epoch(epoch_csv)
     matched = match_epoch_rows(epoch_rows, models)
-    epoch_items, _epoch_table = build_epoch_section(models, matched)
+    epoch_items = build_epoch_section(models, matched)
 
     given = any(isinstance(r, dict) and r.get("source") == AA_SOURCE for r in (effort_rows or []))
     aa_skipped = None if given else AA_NO_ROWS
@@ -771,6 +1081,20 @@ def collect(lanes_doc, epoch_csv=None, effort_rows=None):
         "aa_skipped": aa_skipped,
         "notes": notes,
     }
+
+
+def format_collection(data, effort_rows=None, date=None):
+    """Markdown report from a collect() result. Shared by the CLI and plain setup."""
+    epoch_table = epoch_table_from_collection(data)
+    aa_table = None if data["aa_skipped"] is not None else aa_table_from_collection(data)
+    return render_report(
+        date or utc_today(),
+        epoch_table,
+        aa_table,
+        data["aa_skipped"],
+        data["notes"],
+        aa_source=aa_source_line(effort_rows),
+    )
 
 
 def epoch_table_from_collection(data):
@@ -840,14 +1164,7 @@ def run(args):
         epoch_csv=args.epoch_csv,
         effort_rows=effort_rows,
     )
-    epoch_table = epoch_table_from_collection(data)
-    aa_table = (
-        aa_table_from_collection(data) if data["aa_skipped"] is None else None
-    )
-    text = render_report(
-        date, epoch_table, aa_table, data["aa_skipped"], data["notes"],
-        aa_source=aa_source_line(effort_rows),
-    )
+    text = format_collection(data, effort_rows=effort_rows, date=date)
 
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(os.path.abspath(out_dir), f"{date}.md")

@@ -4,9 +4,36 @@ import copy
 import subprocess
 import textwrap
 
-from bench import EPOCH_BENCHMARKS, fmt_aa_value, fmt_cost
-from catalog import (CLASSES, EFFORTS, HARNESSES, normalize_name, resolve_published_model,
-                     strip_effort_suffix)
+from bench import (
+    EPOCH_BENCHMARKS,
+    KIND_DOMINATED,
+    KIND_NO_ROWS,
+    KIND_RECORDED,
+    KIND_UNAVAILABLE,
+    KIND_ULTRA,
+    NO_DATA_REASON,
+    NO_ROWS_REASON,
+    NOT_DOMINATED_REASON,
+    ULTRA_REASON,
+    bench_order_key,
+    carry_reason,
+    certain_effort_rows,
+    dominated_reason,
+    dominating_effort,
+    dominating_row,
+    effort_rank,
+    fmt_aa_value,
+    fmt_cost,
+    group_lanes,
+    is_dominated_reason,
+    lane_order,
+    model_group,
+    propose_enabled,
+    recorded_reason,
+    resolve_effort_rows,
+    unmatched_message,
+)
+from catalog import CLASSES, HARNESSES
 
 # These render as single lines in an 80-column terminal, where anything past
 # column 79 is clipped. Keep each one under that; a legend cut mid-sentence
@@ -38,10 +65,6 @@ DOMINATED_LEGEND = "X wins on S: effort X scores ≥ at ≤ cost on most of sour
 ABSENCE_LEGEND = "Absence of data is not evidence against a lane, so those stay on."
 RECORDED_LEGEND = '"in the catalog": you recorded that already; the pre-screen leaves it.'
 ULTRA_LEGEND = "ultra: no source scores it, and auto-delegation breaks the worker preamble."
-NO_ROWS_REASON = "no rows for this lane"
-NO_DATA_REASON = "no per-effort data"
-NOT_DOMINATED_REASON = "not dominated"
-ULTRA_REASON = "ultra, never carried"
 
 
 def hidden_legend(taken, off):
@@ -230,11 +253,24 @@ def discovery_notices(discovery, width=80):
         return [fit_line("Model discovery: did not run", width)]
     if isinstance(discovery, str):
         return [fit_line(f"Model discovery: did not run: {discovery}", width)]
+    if not isinstance(discovery, dict):
+        return [fit_line("Model discovery: did not run", width)]
+    if discovery.get("error") and "harnesses" not in discovery:
+        return [fit_line(f"Model discovery: did not run: {discovery['error']}", width)]
+    notices = []
+    if discovery.get("model_facts_available") is False:
+        notices.append(fit_line("Model discovery: saved Harness facts only; model facts unavailable", width))
+    for name, info in (discovery.get("harnesses") or {}).items():
+        if not isinstance(info, dict):
+            continue
+        status = info.get("status")
+        if status == "missing":
+            notices.append(fit_line(f"Harness {name}: missing", width))
+        elif status == "error":
+            err = info.get("error") or "unknown error"
+            notices.append(fit_line(f"Harness {name}: error: {err}", width))
     unmapped = discovery.get("unmapped") or []
     retired = discovery.get("retired") or []
-    if not unmapped and not retired:
-        return [fit_line("Model discovery: no drift", width)]
-    notices = []
     if unmapped:
         notices.append(list_line("Models with no lane", [
             f"{m.get('harness', '')} {m.get('slug', '')}".strip() for m in unmapped
@@ -243,6 +279,8 @@ def discovery_notices(discovery, width=80):
         notices.append(list_line("Lanes with retired models", [
             f"{r.get('lane', '')} ({r.get('model', '')})" for r in retired
         ], width))
+    if not notices:
+        return [fit_line("Model discovery: no drift", width)]
     return notices
 
 
@@ -257,275 +295,6 @@ def start_facts(lanes_path, routing_path, page_path, discovery, width=80):
         fit_line(f"Benchmark page: {page_path or '(not written)'}", width),
         *discovery_notices(discovery, width),
     ]
-
-
-def model_group(lane):
-    """The model a lane is grouped under. An agy slug family
-    (`gemini-3.8-flash-high`, `-low`) is one model at several efforts, so the
-    effort suffix comes off first (ticket 26)."""
-    return strip_effort_suffix(normalize_name((lane or {}).get("model")))[0]
-
-
-def effort_rank(effort):
-    """Most effort first: ultra, max, xhigh, high, medium, low; a stranger last."""
-    try:
-        return -EFFORTS.index(effort)
-    except ValueError:
-        return 1
-
-
-def group_lanes(names, lanes_doc):
-    """`names` regrouped by model: each group sits where its first lane sat,
-    and lists its efforts from most to least (ticket 26, item 1).
-
-    The order `names` arrives in is the page's own (benchmark order on a tier
-    page, tier on the review page, the catalog on the carry page), and it
-    decides only where each group goes. Inside a group the effort decides, so
-    `fable-max` is read before `fable-low` on every page and every table.
-    """
-    lanes = (lanes_doc or {}).get("lanes") or {}
-    groups = {}
-    for name in names:
-        groups.setdefault(model_group(lanes.get(name)), []).append(name)
-    out = []
-    for members in groups.values():
-        out.extend(sorted(members, key=lambda n: effort_rank((lanes.get(n) or {}).get("effort"))))
-    return out
-
-
-def bench_order_key(bench, name, lanes_doc=None):
-    """A lane's place by Epoch rank, or AA rank if its group has no Epoch; measured
-    lanes first, then by name. This is the order the tier pages open in and
-    the order the benchmark page lists lanes in, so it lives in one place."""
-    rec = ((bench or {}).get("lanes") or {}).get(name) if bench else None
-    mean = rec.get("mean") if rec else None
-    if mean is None and rec:
-        lanes = (lanes_doc or {}).get("lanes") or {}
-        group = model_group(lanes.get(name))
-        has_epoch = any(model_group(lane) == group
-                        and ((bench or {}).get("lanes", {}).get(other) or {}).get("mean") is not None
-                        for other, lane in lanes.items())
-        if not has_epoch:
-            mean = (rec.get("aa") or {}).get("mean")
-    return (mean is None, mean if mean is not None else 0, name)
-
-
-def lane_order(lanes_doc, bench):
-    """Every lane in the order a tier page lists them: benchmark order, then
-    grouped by model with efforts most to least."""
-    names = sorted((lanes_doc or {}).get("lanes") or {}, key=lambda n: bench_order_key(bench, n, lanes_doc))
-    return group_lanes(names, lanes_doc)
-
-
-def dominated_reason(effort, source):
-    """The reason for a lane another effort dominates: `high wins on aa`.
-
-    It names the source because two sources can disagree about one lane, and it
-    is not "dominated by high (tbench)" because that is 26 places and the `why`
-    column has 21 at 80 columns; `medium wins on tbench`, the longest, is 21.
-    """
-    return f"{effort} wins on {source}"
-
-
-def is_dominated_reason(why):
-    """Whether a proposal's reason is the data switching the lane off."""
-    return isinstance(why, str) and " wins on " in why
-
-
-def recorded_reason(enabled):
-    """The reason shown for a lane whose `enabled` the human already wrote."""
-    return f"{'on' if enabled else 'off'} in the catalog"
-
-
-def resolve_effort_rows(lanes_doc, effort_rows):
-    """Returns (rows keyed by catalog model, published names that name no lane).
-
-    A source prints a model however it pleases: `gpt-5.6-luna` from SWE Refactor
-    Bench, `GPT-6 Astra` from Terminal-Bench and Artificial Analysis. Every
-    comparison below is against `lane["model"]`, so each row is re-keyed to the
-    lane model its printed name denotes, and the catalog owns that mapping
-    (`catalog.resolve_published_model`). A row naming no lane model is dropped
-    rather than reported per lane: the leaderboards carry GLM-5.3, Opus 4.8,
-    Sonnet 5 and a dozen others that are nobody's lane, and one line naming them
-    all is what a human needs to spot a `published_as` they still owe us.
-    """
-    resolved, unmatched = [], []
-    for row in effort_rows or []:
-        if not isinstance(row, dict):
-            continue
-        model = resolve_published_model(row.get("model"), lanes_doc, effort=row.get("effort"))
-        if model is None:
-            name = row.get("model")
-            if isinstance(name, str) and name.strip() and name not in unmatched:
-                unmatched.append(name)
-            continue
-        if model == row.get("model"):
-            resolved.append(row)
-        else:
-            copied = dict(row)
-            copied["model"] = model
-            resolved.append(copied)
-    return resolved, unmatched
-
-
-def unmatched_message(unmatched, width=79):
-    """One line naming the published models no lane runs, or "" for none."""
-    if not unmatched:
-        return ""
-    head = "no lane runs these, ignored: "
-    shown = []
-    for name in unmatched:
-        candidate = shown + [name]
-        more = len(unmatched) - len(candidate)
-        tail = f" +{more} more" if more else ""
-        if len(head + ", ".join(candidate) + tail) > width:
-            break
-        shown.append(name)
-    if not shown:
-        count = len(unmatched)
-        phrase = "name matches" if count == 1 else "names match"
-        return f"{count} published {phrase} no lane; each is too long to print here"
-    more = len(unmatched) - len(shown)
-    return head + ", ".join(shown) + (f" +{more} more" if more else "")
-
-
-def certain_effort_rows(effort_rows):
-    """Rows that may dominate. Uncertain rows inform nothing: they must not
-    dominate another lane, and they are not evidence against the lane they name.
-
-    A row at an effort no lane can select is dropped for the same reason. The
-    benchmark harnesses drive the API enum, which runs `none` to `max`, so every
-    published sweep carries a `none` row — and no lane can be configured at
-    `none`. Letting one dominate would switch off a real lane on the strength of
-    a setting that cannot be chosen, which is exactly what it did to
-    luna-low@codex: equal score to `none` at a tenth of a cent more.
-
-    A `composite` row is a reader's figure, not evidence: Artificial Analysis
-    does not publish the weighting of its Intelligence Index, so it is shown and
-    never counted.
-    """
-    certain = []
-    for row in effort_rows or []:
-        if not isinstance(row, dict) or row.get("uncertain") or row.get("composite"):
-            continue
-        if not row.get("model") or not row.get("effort"):
-            continue
-        if row["effort"] not in EFFORTS:
-            continue
-        score, cost = row.get("score"), row.get("cost_usd")
-        if isinstance(score, bool) or isinstance(cost, bool):
-            continue
-        if not isinstance(score, (int, float)) or not isinstance(cost, (int, float)):
-            continue
-        certain.append(row)
-    return certain
-
-
-def _beats(other, row):
-    """At least the score for no more money, and strictly better in one of the two."""
-    return (other["score"] >= row["score"] and other["cost_usd"] <= row["cost_usd"]
-            and (other["score"] > row["score"] or other["cost_usd"] < row["cost_usd"]))
-
-
-def dominating_effort(model, effort, source, certain):
-    """The effort of `model` that dominates `effort` inside one source, or None.
-
-    Dominated means another effort of the same model beats it on more than half
-    of the benchmarks that source scored both on. A source with one benchmark —
-    Terminal-Bench, SWE Refactor Bench — comes down to that one comparison.
-    Artificial Analysis scores eight components off the same runs, and losing
-    one noisy component in eight is not reason enough to switch a lane off: on
-    the live page of 2026-09-11 that reading proposed twelve lanes off, nine of
-    them on a single component.
-    """
-    mine, theirs = {}, {}
-    for row in certain:
-        if row.get("model") != model or row.get("source") != source:
-            continue
-        if row.get("effort") == effort:
-            mine.setdefault(row.get("benchmark"), row)
-        else:
-            theirs.setdefault(row["effort"], {}).setdefault(row.get("benchmark"), row)
-    for other_effort, board in theirs.items():
-        shared = [benchmark for benchmark in mine if benchmark in board]
-        wins = sum(1 for benchmark in shared if _beats(board[benchmark], mine[benchmark]))
-        if shared and 2 * wins > len(shared):
-            return other_effort
-    return None
-
-
-def dominating_row(row, certain):
-    """The dominating effort's point on this row's own board, or None.
-
-    The judgement belongs to the effort over its whole source
-    (`dominating_effort`), so every point of a dominated effort is marked on
-    every board of that source, including a board where it happens to score
-    higher: the lane is off over the source, not over one chart.
-
-    Public because the benchmark page draws this rule: a point it shows hollow
-    has to be a point the pre-screen switched a lane off over, and two
-    implementations of one rule would eventually disagree in front of a human
-    trying to check the wizard's arithmetic.
-    """
-    other = dominating_effort(row.get("model"), row.get("effort"), row.get("source"), certain)
-    if other is None:
-        return None
-    board = (row.get("source"), row.get("benchmark"))
-    return next((r for r in certain
-                 if r.get("model") == row.get("model") and r.get("effort") == other
-                 and (r.get("source"), r.get("benchmark")) == board), None)
-
-
-def _first_domination(lane, certain):
-    """(effort, source) of the first source in which another effort dominates
-    this lane, else None."""
-    sources = []
-    for row in certain:
-        if row.get("model") == lane["model"] and row.get("effort") == lane["effort"]:
-            if row.get("source") not in sources:
-                sources.append(row.get("source"))
-    for source in sources:
-        other = dominating_effort(lane["model"], lane["effort"], source, certain)
-        if other is not None:
-            return other, source
-    return None
-
-
-def propose_enabled(lanes_doc, effort_rows):
-    """Ticket-15 pre-screen rule. Returns {name: (enabled, reason)}."""
-    rows, _unmatched = resolve_effort_rows(lanes_doc, effort_rows)
-    certain = certain_effort_rows(rows)
-    supplied = bool(effort_rows)
-    out = {}
-    for name, lane in lanes_doc["lanes"].items():
-        if lane.get("effort") == "ultra":
-            out[name] = (False, ULTRA_REASON)
-            continue
-        if "enabled" in lane:
-            # An explicit `enabled` is a decision the human already recorded. The
-            # pre-screen proposes for lanes that have no decision yet; it does not
-            # undo one. Silently switching a lane back on would put it in front of
-            # the ranker again without anyone saying so.
-            enabled = bool(lane["enabled"])
-            out[name] = (enabled, recorded_reason(enabled))
-            continue
-        found = _first_domination(lane, certain)
-        if found is not None:
-            other, source = found
-            out[name] = (False, dominated_reason(other, source))
-            continue
-        if not supplied:
-            out[name] = (True, NO_DATA_REASON)
-        elif not any(
-            not row.get("uncertain")
-            and row.get("model") == lane["model"]
-            and row.get("effort") == lane["effort"]
-            for row in rows
-        ):
-            out[name] = (True, NO_ROWS_REASON)
-        else:
-            out[name] = (True, NOT_DOMINATED_REASON)
-    return out
 
 
 # The run in order, for the marker on every screen. Tier is four screens, counted
@@ -575,9 +344,9 @@ class Wizard:
         self._line_order = {}
         self._width = 80
         _rows, self._unmatched = resolve_effort_rows(self.lanes_doc, effort_rows)
-        proposals = propose_enabled(self.lanes_doc, effort_rows)
-        self._enabled = {name: enabled for name, (enabled, _) in proposals.items()}
-        self._reasons = {name: reason for name, (_, reason) in proposals.items()}
+        self._proposals = propose_enabled(self.lanes_doc, effort_rows)
+        self._enabled = {name: decision["enabled"] for name, decision in self._proposals.items()}
+        self._reasons = {name: carry_reason(decision) for name, decision in self._proposals.items()}
         # The catalog is the starting state of a rerun. A lane that the carry
         # page proposes off keeps its tier here, so switching it back on restores
         # the catalog default instead of making the operator place it from
@@ -1035,17 +804,17 @@ class Wizard:
         off a short window to explain a case that is not on screen, so each line
         is earned by a reason that is actually shown.
         """
-        reasons = [self._reasons[name] for name in self._lane_names()]
+        kinds = [self._proposals[name]["kind"] for name in self._lane_names()]
         lines = [DOMINATED_LEGEND]
-        if any(r in (NO_ROWS_REASON, NO_DATA_REASON) for r in reasons):
+        if any(kind in (KIND_NO_ROWS, KIND_UNAVAILABLE) for kind in kinds):
             lines.append(ABSENCE_LEGEND)
         # a `published_as` still owed to us shows up here and nowhere else
         ignored = unmatched_message(self._unmatched, self._width - 1) if self.effort_rows else ""
         if ignored:
             lines.append(ignored)
-        if any(r == ULTRA_REASON for r in reasons):
+        if any(kind == KIND_ULTRA for kind in kinds):
             lines.append(ULTRA_LEGEND)
-        if any(r.endswith("in the catalog") for r in reasons):
+        if any(kind == KIND_RECORDED for kind in kinds):
             lines.append(RECORDED_LEGEND)
         return lines
 
@@ -1198,12 +967,29 @@ class Wizard:
                 body=body,
             )
         if self.screen == "discovery":
+            harnesses = (self.discovery.get("harnesses")
+                         if isinstance(self.discovery, dict) else None) or {}
+            rows = []
+            for name in HARNESSES:
+                info = harnesses.get(name) if isinstance(harnesses.get(name), dict) else None
+                if info is not None:
+                    status = info.get("status") or "missing"
+                    if status == "ok":
+                        label, found = "found", True
+                    elif status == "error":
+                        err = info.get("error") or "unknown error"
+                        label, found = f"error: {err}", False
+                    else:
+                        label, found = "missing", False
+                else:
+                    found = name in self.discovered
+                    label = "found" if found else "missing"
+                rows.append({"cells": [name, label], "marked": False, "dimmed": not found,
+                             "cursor": False, "tag": ""})
             return self._frame(
                 "discovery", "Delegate setup: discovery",
                 columns=["harness", "status"],
-                rows=[{"cells": [name, "found" if name in self.discovered else "missing"],
-                       "marked": False, "dimmed": name not in self.discovered,
-                       "cursor": False, "tag": ""} for name in HARNESSES],
+                rows=rows,
                 footer="any key: continue  b: back  q: quit",
             )
         if self.screen == "prescreen":
