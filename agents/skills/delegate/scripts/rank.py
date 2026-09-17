@@ -327,6 +327,29 @@ def format_rows(rows):
     return lines
 
 
+def print_rank_output(cls, cat, rows, tier=None):
+    """Print the Class header (or STOP) and ranked rows. Returns whether a Pick exists."""
+    has_pick = bool(rows and rows[0].get("pick"))
+    if not has_pick:
+        print(f"STOP: no lane eligible for {cls}")
+        for line in format_rows(rows):
+            print(line)
+        return False
+    routing = cat["routing"]
+    cls_config = routing.get("classes", {}).get(cls, {})
+    floor = tier if tier is not None else cls_config.get("floor")
+    ceiling = cls_config.get("ceiling")
+    margin = routing["margin"]
+    gate = routing["gate"]
+    project_file = cat.get("files", {}).get("project")
+    override_str = project_file if project_file else "none"
+    gate_pct = f"{int(round(gate * 100))}%"
+    print(f"# {cls}  floor={floor} ceiling={ceiling}  margin={margin}  gate={gate_pct}  (routing: global; project override: {override_str})")
+    for line in format_rows(rows):
+        print(line)
+    return True
+
+
 def run_usage():
     try:
         res = subprocess.run(
@@ -451,19 +474,8 @@ def main(argv=None):
         sys.stdout.write(json.dumps(out, indent=2) + "\n")
         sys.exit(0 if has_pick else 1)
 
-    if not has_pick:
-        print(f"STOP: no lane eligible for {args.target}")
-        for line in format_rows(rows):
-            print(line)
-        sys.exit(1)
-
-    project_file = cat.get("files", {}).get("project")
-    override_str = project_file if project_file else "none"
-    gate_pct = f"{int(round(gate * 100))}%"
-    print(f"# {args.target}  floor={floor} ceiling={ceiling}  margin={margin}  gate={gate_pct}  (routing: global; project override: {override_str})")
-    for line in format_rows(rows):
-        print(line)
-    sys.exit(0)
+    print_rank_output(args.target, cat, rows, tier=args.tier)
+    sys.exit(0 if has_pick else 1)
 
 
 if __name__ == "__main__":

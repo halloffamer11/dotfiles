@@ -844,28 +844,6 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
     )
 
 
-def _print_rank_output(cls, cat, rows, tier=None):
-    has_pick = bool(rows and rows[0].get("pick"))
-    if not has_pick:
-        print(f"STOP: no lane eligible for {cls}")
-        for line in rank.format_rows(rows):
-            print(line)
-        return False
-    routing = cat["routing"]
-    cls_config = routing.get("classes", {}).get(cls, {})
-    floor = tier if tier is not None else cls_config.get("floor")
-    ceiling = cls_config.get("ceiling")
-    margin = routing["margin"]
-    gate = routing["gate"]
-    project_file = cat.get("files", {}).get("project")
-    override_str = project_file if project_file else "none"
-    gate_pct = f"{int(round(gate * 100))}%"
-    print(f"# {cls}  floor={floor} ceiling={ceiling}  margin={margin}  gate={gate_pct}  (routing: global; project override: {override_str})")
-    for line in rank.format_rows(rows):
-        print(line)
-    return True
-
-
 def run(class_, brief, cwd, write=None, tier=None, dry_run=False, config_dir=None, meters=None, harnesses=None, ads_dir=None, runs_dir=None, no_probe=False, no_leash=False):
     if class_ not in CLASSES:
         sys.stderr.write(f"delegate: invalid class '{class_}'; must be one of {', '.join(CLASSES)}\n")
@@ -902,7 +880,7 @@ def run(class_, brief, cwd, write=None, tier=None, dry_run=False, config_dir=Non
         present = {h for h in HARNESSES if shutil.which(h)}
 
     rows = rank.rank(class_, cat, meters_doc, present, tier=tier)
-    has_pick = _print_rank_output(class_, cat, rows, tier=tier)
+    has_pick = rank.print_rank_output(class_, cat, rows, tier=tier)
     if not has_pick:
         sys.exit(1)
 
