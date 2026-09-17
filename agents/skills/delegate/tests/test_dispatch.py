@@ -734,7 +734,8 @@ def main():
         lines19 = res19.stdout.strip().splitlines()
         ok19 = (
             res19.returncode == 0 and
-            any("flash-high@agy" in line and line.endswith("pick") for line in lines19) and
+            any("luna-low@codex" in line and line.endswith("pick") for line in lines19) and
+            any("flash-high@agy" in line and "unknown meter, sorted last" in line for line in lines19) and
             "delegate: dry run, nothing dispatched" in res19.stdout and
             runs_after19 == runs_before19
         )
@@ -745,16 +746,16 @@ def main():
         dir20 = parse_run_dir_from_stdout(res20.stdout)
         ok20 = (
             res20.returncode == 0 and
-            "flash-high@agy" in res20.stdout and
-            "delegate: dispatching flash-high@agy" in res20.stdout and
+            "luna-low@codex" in res20.stdout and
+            "delegate: dispatching luna-low@codex" in res20.stdout and
             "delegate:" in res20.stdout and
             "delegate-metrics:" in res20.stdout and
             dir20 is not None and os.path.isdir(dir20)
         )
         if ok20:
             disp20 = json.load(open(os.path.join(dir20, "dispatch.json")))
-            ok20 = disp20.get("lane") == "flash-high@agy"
-        record("20. run mechanical dispatches flash-high@agy", ok20, f"rc={res20.returncode} stdout={res20.stdout} stderr={res20.stderr}")
+            ok20 = disp20.get("lane") == "luna-low@codex"
+        record("20. run mechanical dispatches luna-low@codex (agy unknown-last)", ok20, f"rc={res20.returncode} stdout={res20.stdout} stderr={res20.stderr}")
 
         b21 = make_brief("b21.md", f"fake-relay: status=completed final={done_final}\nBrief 21.")
         res21 = run_run(t_env, ["impl", "--brief", b21, "--cwd", cwd, "--meters", healthy_meters, "--tier", "3"])

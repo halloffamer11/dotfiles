@@ -52,21 +52,21 @@ with tempfile.TemporaryDirectory() as tmp:
     with open(cache, "w") as f:
         json.dump({"probed_at": now, "lanes": [
             {"lane": "agy-gemini", "harness": "agy", "meter": "gemini", "remaining_5h": 0.86,
-             "remaining_weekly": 0.88, "reset_5h": now + 3600, "reset_weekly": now + 2 * 86400,
+             "remaining_weekly": 0.88, "r": 0.86, "reset_5h": now + 3600, "reset_weekly": now + 2 * 86400,
              "status": "ok"},
             {"lane": "grok", "harness": "grok", "meter": None, "remaining_5h": None,
-             "remaining_weekly": 0.62, "reset_5h": None, "reset_weekly": now + 5 * 86400,
+             "remaining_weekly": 0.62, "r": 0.62, "reset_5h": None, "reset_weekly": now + 5 * 86400,
              "status": "ok"},
             {"lane": "claude-general", "harness": "claude", "meter": "general", "remaining_5h": 0.89,
-             "remaining_weekly": 0.46, "reset_5h": now + 3600, "reset_weekly": None, "status": "ok"},
+             "remaining_weekly": 0.46, "r": 0.46, "reset_5h": now + 3600, "reset_weekly": None, "status": "ok"},
             {"lane": "claude-fable", "harness": "claude", "meter": "fable", "remaining_5h": 0.70,
-             "remaining_weekly": 0.30, "reset_5h": now + 3600, "reset_weekly": now + 3 * 86400,
+             "remaining_weekly": 0.30, "r": 0.30, "reset_5h": now + 3600, "reset_weekly": now + 3 * 86400,
              "status": "ok"},
             {"lane": "codex", "harness": "codex", "meter": None, "remaining_5h": 1.0,
-             "remaining_weekly": 0.05, "reset_5h": now + 3600, "reset_weekly": now + 4 * 86400,
+             "remaining_weekly": 0.05, "r": 0.05, "reset_5h": now + 3600, "reset_weekly": now + 4 * 86400,
              "status": "unavailable"},
             {"lane": "agy-claude-gpt", "harness": "agy", "meter": "claude-gpt", "remaining_5h": 1.0,
-             "remaining_weekly": 0.37, "reset_5h": now + 3600, "reset_weekly": now + 2 * 86400,
+             "remaining_weekly": 0.37, "r": 0.37, "reset_5h": now + 3600, "reset_weekly": now + 2 * 86400,
              "status": "ok"},
         ]}, f)
     env = {"DELEGATE_CACHE": cache, "DELEGATE_RUNS": os.path.join(tmp, "runs.jsonl")}
@@ -114,6 +114,10 @@ with tempfile.TemporaryDirectory() as tmp:
     rc, out, _ = run(["limits", "--max-age-min", "600", "--eligible"] + cfg, env)
     check("--eligible drops a meter under the gate", "| codex" not in out.split(
         "**Plan consumption this cycle:**")[0], out)
+    check("--eligible keeps agy whose combined remaining is unknown", "| agy-gemini" in out.split(
+        "**Plan consumption this cycle:**")[0], out)
+    check("limits footer uses routing.gate not a hard-coded 10%",
+          "A meter under 10% remaining is skipped by rank.py." in out, out)
 
     rc, out, _ = run(["limits", "--max-age-min", "600", "--all"] + cfg, env)
     check("--all brings the ignored meter back", "| agy-claude-gpt" in out
@@ -315,7 +319,9 @@ with tempfile.TemporaryDirectory() as tmp:
     rc, out_norun, _ = run(["statusline", "--no-color", "--no-running"] + cfg, sl_env)
     check("statusline --no-running drops running glyph", "①" not in out_norun.splitlines()[0].split("wk")[-1], out_norun)
 
-    rc, out_color, _ = run(["statusline"] + cfg, sl_env)
+    color_env = dict(sl_env)
+    color_env["NO_COLOR"] = ""
+    rc, out_color, _ = run(["statusline"] + cfg, color_env)
     check("statusline with color has ANSI escapes", "\033[" in out_color, out_color)
 
     rc, out_nocache, _ = run(["statusline"] + cfg, {"DELEGATE_CACHE": os.path.join(tmp, "missing_cache.json")})
@@ -341,6 +347,77 @@ with tempfile.TemporaryDirectory() as tmp:
     rc, out_badcat, err_badcat = run(["statusline", "--config-dir", missing], sl_env)
     check("statusline with missing catalog exits 1", rc == 1, err_badcat)
     check("statusline missing catalog prints report: on stderr", "report:" in err_badcat, err_badcat)
+
+    # Gate equality, ignored status, project override, malformed cache, CONSULT_CACHE.
+    eq_cache = os.path.join(tmp, "eq_usage.json")
+    with open(eq_cache, "w") as f:
+        json.dump({"probed_at": now, "lanes": [
+            {"lane": "codex", "harness": "codex", "meter": None, "remaining_5h": 0.10,
+             "remaining_weekly": 0.10, "r": 0.10, "status": "unavailable",
+             "reset_5h": now + 3600, "reset_weekly": now + 4 * 86400},
+            {"lane": "grok", "harness": "grok", "meter": None, "remaining_5h": None,
+             "remaining_weekly": 0.62, "r": 0.62, "status": "ok",
+             "reset_weekly": now + 5 * 86400},
+            {"lane": "agy-gemini", "harness": "agy", "meter": "gemini", "remaining_5h": 0.86,
+             "remaining_weekly": 0.88, "r": 0.86, "status": "ok",
+             "reset_5h": now + 3600, "reset_weekly": now + 2 * 86400},
+            {"lane": "claude-general", "harness": "claude", "meter": "general", "remaining_5h": 0.89,
+             "remaining_weekly": 0.46, "r": 0.46, "status": "ok",
+             "reset_5h": now + 3600, "reset_weekly": now + 4 * 86400},
+            {"lane": "claude-fable", "harness": "claude", "meter": "fable", "remaining_5h": 0.58,
+             "remaining_weekly": 0.46, "r": 0.46, "remaining_weekly_model": 0.59, "status": "ok",
+             "reset_5h": now + 3600, "reset_weekly": now + 4 * 86400},
+        ]}, f)
+    eq_env = {"DELEGATE_CACHE": eq_cache, "DELEGATE_RUNS": env["DELEGATE_RUNS"]}
+    rc, out_eq, _ = run(["limits", "--max-age-min", "600", "--eligible"] + cfg, eq_env)
+    check("limits --eligible keeps r equal to gate despite status=unavailable",
+          rc == 0 and "| codex" in out_eq.split("**Plan consumption this cycle:**")[0], out_eq)
+    rc, out_eq_sl, _ = run(["statusline", "--no-color", "--no-running"] + cfg, eq_env)
+    check("statusline does not mark r equal to gate as gated",
+          rc == 0 and "✗" not in out_eq_sl, out_eq_sl)
+
+    git_root = os.path.join(tmp, "proj")
+    os.makedirs(os.path.join(git_root, ".delegate"))
+    open(os.path.join(git_root, ".git"), "w").close()
+    with open(os.path.join(git_root, ".delegate", "routing.json"), "w") as f:
+        json.dump({"gate": 0.5}, f)
+    p = subprocess.run([sys.executable, REPORT, "limits", "--max-age-min", "600", "--eligible",
+                        "--config-dir", config_dir],
+                       capture_output=True, text=True, cwd=git_root,
+                       env={**os.environ, **eq_env})
+    proj_body = p.stdout.split("**Plan consumption this cycle:**")[0]
+    check("project gate 50% drops r=0.10 from --eligible",
+          p.returncode == 0 and "| codex" not in proj_body and "| grok" in proj_body, p.stdout)
+    check("project gate footer prints 50%", "under 50% remaining" in p.stdout, p.stdout)
+
+    p_sl = subprocess.run([sys.executable, REPORT, "statusline", "--no-color", "--no-running",
+                           "--config-dir", config_dir],
+                          capture_output=True, text=True, cwd=git_root,
+                          env={**os.environ, **eq_env})
+    check("statusline project gate marks r=0.10 with ✗",
+          p_sl.returncode == 0 and "✗" in p_sl.stdout, p_sl.stdout)
+
+    bad_cache = os.path.join(tmp, "bad_usage.json")
+    with open(bad_cache, "w") as f:
+        f.write("{not json")
+    rc, out_bad, _ = run(["statusline"] + cfg, {"DELEGATE_CACHE": bad_cache})
+    check("statusline with malformed cache exits 0 and prints nothing",
+          rc == 0 and out_bad == "", out_bad)
+
+    consult = os.path.join(tmp, "consult_usage.json")
+    with open(consult, "w") as f:
+        json.dump({"probed_at": now, "lanes": [
+            {"lane": "grok", "harness": "grok", "remaining_weekly": 0.99, "r": 0.99,
+             "reset_weekly": now + 86400, "status": "ok"},
+        ]}, f)
+    consult_env = dict(os.environ)
+    consult_env.pop("DELEGATE_CACHE", None)
+    consult_env["CONSULT_CACHE"] = consult
+    p_c = subprocess.run([sys.executable, REPORT, "limits", "--max-age-min", "600"] + cfg,
+                         capture_output=True, text=True, env=consult_env)
+    check("limits honors CONSULT_CACHE when DELEGATE_CACHE is unset",
+          p_c.returncode == 0 and "| grok" in p_c.stdout and "99%" in p_c.stdout,
+          p_c.stderr + p_c.stdout)
 
 print("\n" + ("ALL PASS" if not fails else f"{len(fails)} FAILED: {', '.join(fails)}"))
 sys.exit(1 if fails else 0)

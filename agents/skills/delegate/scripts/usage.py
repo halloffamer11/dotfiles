@@ -3,25 +3,32 @@
 
 Emits one JSON document of *lanes* (harness × meter). Per lane:
   r      = min(remaining_5h, remaining_weekly): the gate (availability).
+           agy keeps the raw windows and leaves r/pace unknown; no vendor
+           publishes a joint bound.
   pace   = remaining_weekly / fraction of the weekly cycle still to run.
            1.0 = spending evenly; >1 = ahead (under-used, will expire unspent);
            <1 = behind (over-spent). Cycle length is assumed 7 days.
   score  = pace when the weekly meter and its reset are known, else r.
-           rank.py sorts on score. The 5h window is a rate cap, not a budget:
+           rank.py sorts on pace. The 5h window is a rate cap, not a budget:
            what expires unspent is the weekly allotment, so pace is the thing
            to balance.
-Costs zero model tokens: every probe is a slash/status command, not a prompt.
+
+Codex, agy, and grok probes are status/RPC commands. The Claude probe runs
+`claude -p /usage` and can spend the meter being measured.
 
   usage.py            serve cache if younger than TTL, else re-probe
   usage.py --refresh  force re-probe
   usage.py --max-age-min N   override TTL (default 10)
   usage.py --pretty   human table instead of JSON
 
-Cache: $DELEGATE_CACHE (default ~/.cache/delegate/usage.json).
-Absence of a CLI, auth failure, or a probe timeout marks that lane
-"unknown" — never a crash. Exit 0 always.
+Cache: get_cache_path() — $DELEGATE_CACHE, else $CONSULT_CACHE, else
+~/.cache/delegate/usage.json. Absence of a CLI, auth failure, or a probe
+timeout marks that lane "unknown" — never a crash. Exit 0 always.
+
+Public acquisition: load_cached() never probes and never writes a meter
+event; probe(refresh=...) is the refresh/TTL path.
 """
-import json, os, re, subprocess, sys, time
+import json, math, os, re, subprocess, sys, time
 from datetime import datetime, timezone
 try:
     from events import append, meter_event
@@ -29,14 +36,152 @@ except ImportError:
     from .events import append, meter_event
 
 TTL_MIN_DEFAULT = 10
-GATE = 0.10           # r below this → lane unavailable
 WEEK = 7 * 86400      # assumed weekly-cycle length for pace
 CYCLE_FLOOR = 0.02    # ~3.4h: pace denominator floor near a reset
 ROLLOVER_MIN = 30     # binding window resets within this → ask user whether to wait
+AGY_COMBINED_NOTE = "agy combined remaining and pace unknown until a vendor joint bound exists"
+
 def get_cache_path():
     return os.environ.get("DELEGATE_CACHE") or os.environ.get("CONSULT_CACHE") or os.path.expanduser("~/.cache/delegate/usage.json")
 CACHE = get_cache_path()
-NOW = time.time()
+
+def _valid_meter_number(value, *, fraction=False):
+    if value is None:
+        return True
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        number = float(value)
+    except OverflowError:
+        return False
+    return math.isfinite(number) and (0 <= number <= 1 if fraction else number >= 0)
+
+
+def _is_agy_observation(name, observation):
+    if isinstance(observation, dict) and observation.get("harness") == "agy":
+        return True
+    return isinstance(name, str) and (name == "agy" or name.startswith("agy-"))
+
+
+def _agy_unknown_combined(observation):
+    """Keep agy window values; drop invented combined Remaining and Pace."""
+    out = dict(observation)
+    out["r"] = None
+    out["pace"] = None
+    out["score"] = None
+    out["binding"] = None
+    out["reset_binding"] = None
+    out["cycle_left"] = None
+    out["status"] = "unknown"
+    out["rollover_soon"] = False
+    note = out.get("note")
+    if not note:
+        out["note"] = AGY_COMBINED_NOTE
+    elif AGY_COMBINED_NOTE not in str(note):
+        out["note"] = f"{note}; {AGY_COMBINED_NOTE}"
+    return out
+
+
+def _normalize_agy_document(document):
+    """Return a copy whose agy combined Remaining/Pace are unknown. Does not write."""
+    if not isinstance(document, dict):
+        return document
+    out = dict(document)
+    if "lanes" in out and isinstance(out["lanes"], list):
+        out["lanes"] = [
+            _agy_unknown_combined(entry)
+            if isinstance(entry, dict) and _is_agy_observation(entry.get("lane"), entry)
+            else entry
+            for entry in out["lanes"]
+        ]
+        return out
+    return {
+        name: (
+            _agy_unknown_combined(obs)
+            if isinstance(obs, dict) and _is_agy_observation(name, obs)
+            else obs
+        )
+        for name, obs in out.items()
+    }
+
+
+def observations(document):
+    """Return validated observations by Meter, or None for a malformed document.
+
+    Accept the usage-cache envelope and the legacy bare Meter map. Invalid
+    observations make the whole document unknown, consistently for every caller.
+    No values are repaired and this boundary never probes a vendor. agy
+    combined Remaining and Pace are unknown even when a cache still holds a
+    derived number.
+    """
+    if not isinstance(document, dict):
+        return None
+    if "lanes" in document:
+        if not _valid_meter_number(document.get("probed_at")):
+            return None
+        if not isinstance(document["lanes"], list):
+            return None
+        parsed = {}
+        for entry in document["lanes"]:
+            if not isinstance(entry, dict):
+                return None
+            name = entry.get("lane")
+            if not isinstance(name, str) or not name:
+                return None
+            parsed[name] = entry
+        entries = [(entry["lane"], entry) for entry in document["lanes"]]
+    else:
+        parsed = document
+        entries = document.items()
+    for name, observation in entries:
+        if not isinstance(name, str) or not name or not isinstance(observation, dict):
+            return None
+        if not _valid_meter_number(observation.get("r"), fraction=True):
+            return None
+        if not _valid_meter_number(observation.get("pace")):
+            return None
+        if not _valid_meter_number(observation.get("remaining_weekly"), fraction=True):
+            return None
+        if "status" in observation and not isinstance(observation["status"], str):
+            return None
+    out = {}
+    for name, observation in parsed.items():
+        out[name] = (
+            _agy_unknown_combined(observation)
+            if _is_agy_observation(name, observation)
+            else observation
+        )
+    return out
+
+
+def eligible(observation, gate):
+    """Unknown Remaining never vetoes; Remaining equal to Gate is eligible."""
+    if not observation or not isinstance(observation, dict):
+        return True
+    r = observation.get("r")
+    if r is None:
+        return True
+    try:
+        return float(r) >= float(gate)
+    except (TypeError, ValueError, OverflowError):
+        return True
+
+
+def load_cached(cache_path=None):
+    """Read the usage cache without probing or emitting a meter event.
+
+    Missing or unreadable files become {}. agy combined Remaining/Pace in the
+    returned copy are unknown; the file on disk is not rewritten.
+    """
+    path = cache_path or get_cache_path()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            doc = json.load(f)
+        if not isinstance(doc, dict) or observations(doc) is None:
+            return {}
+        return _normalize_agy_document(doc)
+    except (OSError, ValueError):
+        return {}
 
 def which(b): return subprocess.run(["command", "-v", b], shell=False, capture_output=True, text=True).returncode == 0 if False else any(os.access(os.path.join(p, b), os.X_OK) for p in os.environ.get("PATH", "").split(os.pathsep))
 
@@ -48,17 +193,28 @@ def run(cmd, timeout=60, stdin_data=None):
 
 def lane(harness, meter, five_h=None, weekly=None, reset_5h=None, reset_wk=None, note=None, remaining_weekly_model=None):
     """five_h/weekly are REMAINING fractions (0..1) or None; resets are epoch seconds or None."""
+    if harness == "agy":
+        combined_note = AGY_COMBINED_NOTE if not note else f"{note}; {AGY_COMBINED_NOTE}"
+        return {"lane": f"{harness}-{meter}" if meter else harness, "harness": harness, "meter": meter,
+                "remaining_5h": five_h, "remaining_weekly": weekly,
+                "remaining_weekly_model": remaining_weekly_model,
+                "r": None, "binding": None,
+                "reset_5h": reset_5h, "reset_weekly": reset_wk, "reset_binding": None,
+                "cycle_left": None, "pace": None, "score": None,
+                "status": "unknown", "rollover_soon": False, "note": combined_note}
     known = [x for x in (five_h, weekly) if x is not None]
     r = min(known) if known else None
     binding = None
     if r is not None:
         binding = "weekly" if (weekly is not None and (five_h is None or weekly <= five_h)) else "5h"
     reset = reset_wk if binding == "weekly" else reset_5h
-    status = "unknown" if r is None else ("unavailable" if r < GATE else "ok")
-    rollover = bool(reset and status == "unavailable" and (reset - NOW) <= ROLLOVER_MIN * 60)
+    # Observation quality is independent of a project's effective Gate.
+    status = "unknown" if r is None else "ok"
+    rollover = False
+    now = time.time()
     cycle_left = pace = None
     if weekly is not None and reset_wk:
-        cycle_left = min(1.0, max(CYCLE_FLOOR, (reset_wk - NOW) / WEEK))
+        cycle_left = min(1.0, max(CYCLE_FLOOR, (reset_wk - now) / WEEK))
         pace = round(weekly / cycle_left, 3)
     score = pace if pace is not None else r
     return {"lane": f"{harness}-{meter}" if meter else harness, "harness": harness, "meter": meter,
@@ -141,7 +297,7 @@ def claude_reset(text):
         minute = m.group(4) or "00"
         year = datetime.now(tz).year
         t = datetime.strptime(f"{m.group(1)} {m.group(2)} {year} {hour}:{minute}", "%b %d %Y %H:%M").replace(tzinfo=tz)
-        if t.timestamp() < NOW - 86400: t = t.replace(year=year + 1)
+        if t.timestamp() < time.time() - 86400: t = t.replace(year=year + 1)
         return t.timestamp()
     except Exception:
         return None
@@ -220,7 +376,11 @@ def load_cache(max_age_min, cache_path=None):
     p = cache_path or get_cache_path()
     try:
         with open(p) as f: d = json.load(f)
-        if NOW - d.get("probed_at", 0) <= max_age_min * 60: return d
+        if (isinstance(d, dict) and "lanes" in d and observations(d) is not None
+                and _valid_meter_number(d.get("probed_at"))
+                and d.get("probed_at") is not None
+                and 0 <= time.time() - d["probed_at"] <= max_age_min * 60):
+            return d
     except Exception: pass
     return None
 
@@ -233,22 +393,59 @@ def write_cache(d, cache_path=None):
         json.dump(d, f, indent=1)
     append(meter_event(d))
 
+def probe(refresh=False, max_age_min=None, cache_path=None):
+    """Return a usage document, probing vendors when the cache is missing or stale.
+
+    refresh=True always probes. A cache hit emits no meter event. Timeout and
+    per-harness failures stay inside the probe_* functions (unknown rows).
+    """
+    ttl = TTL_MIN_DEFAULT if max_age_min is None else max_age_min
+    d = None if refresh else load_cache(ttl, cache_path=cache_path)
+    if d is None:
+        lanes = probe_codex() + probe_agy() + probe_claude() + probe_grok()
+        now = time.time()
+        d = {"probed_at": now, "probed_at_iso": datetime.fromtimestamp(now, timezone.utc).isoformat(),
+             "rollover_min": ROLLOVER_MIN, "lanes": lanes}
+        write_cache(d, cache_path=cache_path)
+        d = _normalize_agy_document(d)
+        d["from_cache"] = False
+    else:
+        d = _normalize_agy_document(d)
+        d["from_cache"] = True
+    return d
+
+def acquire(refresh=False, max_age_min=None, timeout=180):
+    """Shared bounded acquisition for callers; cached-only viewers use load_cached.
+
+    Keep a process boundary around vendor probes: their stream reads may block
+    despite per-vendor timeouts. The CLI process owns probe/cache/event writes.
+    A timeout or failed probe returns a valid, fresh cached document, or {}.
+    """
+    command = [sys.executable, os.path.abspath(__file__)]
+    if refresh:
+        command.append("--refresh")
+    if max_age_min is not None:
+        command.extend(["--max-age-min", str(max_age_min)])
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+        if result.returncode == 0:
+            doc = json.loads(result.stdout)
+            if isinstance(doc, dict) and observations(doc) is not None:
+                return _normalize_agy_document(doc)
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        pass
+    cached = load_cache(TTL_MIN_DEFAULT if max_age_min is None else max_age_min)
+    return _normalize_agy_document(cached) if cached is not None else {}
+
+
 def main():
     args = sys.argv[1:]
     refresh = "--refresh" in args; pretty = "--pretty" in args
     ttl = TTL_MIN_DEFAULT
     if "--max-age-min" in args: ttl = float(args[args.index("--max-age-min") + 1])
-    d = None if refresh else load_cache(ttl)
-    if d is None:
-        lanes = probe_codex() + probe_agy() + probe_claude() + probe_grok()
-        d = {"probed_at": NOW, "probed_at_iso": datetime.fromtimestamp(NOW, timezone.utc).isoformat(),
-             "gate": GATE, "rollover_min": ROLLOVER_MIN, "lanes": lanes}
-        write_cache(d)
-        d["from_cache"] = False
-    else:
-        d["from_cache"] = True
+    d = probe(refresh=refresh, max_age_min=ttl)
     if pretty:
-        age = int((NOW - d["probed_at"]) / 60)
+        age = int((time.time() - d["probed_at"]) / 60)
         print(f"# usage (cache age {age} min, from_cache={d['from_cache']})")
         for L in d["lanes"]:
             def f(x): return "  ?" if x is None else f"{int(round(x*100)):3d}%"

@@ -55,6 +55,7 @@ sys.path.insert(0, HERE)
 from catalog import load_catalog, CatalogError, HARNESSES, EFFORTS, CLASSES, HARNESS_EFFORTS
 import events
 import rank
+import usage
 
 # The harness whose lanes run natively, as subagents of the session; a future
 # Codex orchestrator changes it (ticket 22, out of scope).
@@ -414,12 +415,7 @@ def ledger_start(thread_id, lane, class_name, effort, timeout_str, child_cwd, br
 def probe_meters(no_probe):
     if no_probe:
         return
-    usage_py = os.path.join(HERE, "usage.py")
-    if os.path.isfile(usage_py):
-        try:
-            subprocess.run([sys.executable, usage_py, "--refresh"], timeout=180, capture_output=True)
-        except Exception:
-            pass
+    usage.acquire(refresh=True, timeout=180)
 
 
 def codex_home():

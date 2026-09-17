@@ -7,11 +7,14 @@ projects carried lanes within their global Tiers and preserves Order provenance.
 Validate complete save proposals with `catalog.validate_project_routing()` against
 the original global documents, not projected lane records. For exact-Tier previews,
 use `rank.tier_leaders()`; it and the Class-facing `rank()` share `rank_range()`.
-`rank.load_cached_usage()` reads observations without a vendor probe.
-`rank.meter_observations()` owns cache validity for ranking and any viewer:
-valid envelope and legacy map formats keep their behavior; any malformed observation
-makes the whole document unknown. This intentionally replaces partial use of invalid
-documents. The throwaway Herdr dashboard that drove these changes lives on branch
+`usage.load_cached()` / `rank.load_cached_usage()` read observations without a vendor
+probe or meter event. `usage.acquire()` is the refresh path. `usage.observations()`
+owns cache validity (`rank.meter_observations()` re-exports it): valid envelope and
+legacy map formats keep their behavior; any malformed observation makes the whole
+document unknown. `usage.eligible(observation, gate)` is the Gate predicate
+(unknown Remaining never vetoes; Remaining equal to Gate is eligible). agy window
+values stay visible; combined Remaining and Pace are unknown. This intentionally
+replaces partial use of invalid documents. The throwaway Herdr dashboard that drove these changes lives on branch
 `worktree/delegate-monitor-herdr` under `tools/delegate-dashboard/`, not on `main`.
 
 - `scripts/catalog.py`: the two configuration files (`~/.config/delegate/lanes.json`, `routing.json`, project override `.delegate/routing.json`), validators, `show`/`check`/`fmt`. It also owns the mapping from a benchmark source's printed model name to a lane model (`resolve_published_model`, the lane field `published_as`; a row's `effort` picks the member of an agy slug family); `bench.py` and the setup pre-screen both read it from here. `HARNESS_EFFORTS` is the effort each harness offers, with the command or page that proved each list; `check` and `delegate.py --effort` refuse anything outside it (ticket 19). `assets/samples/`: the starting catalog from the spec.
