@@ -15,17 +15,15 @@ Machine configuration and agent tooling managed as one Git repository.
 
 ## Active work
 
-**Next session: Herdr monitor branch.** Resume `worktree/delegate-monitor-herdr`.
-Read the dashboard spec below, then the branch's `tools/delegate-dashboard/CLAUDE.md`
-and ticket 09's final verdict. Its prototype is accepted; production scope still
-needs definition. Reopen it in a separate worktree using the Herdr skill and the
-installed CLI help. Preserve `main` and its local work. Compare the branch with
-current `main` before integration: the prototype predates the modular changes,
-including the shared Meter boundary, catalog edits and metering toggle. Keep its
-project `.delegate/routing.json` test preferences off `main`. Validate the dashboard
-against the current backend before extending it. The Rust `tools/delegate-mon/`
-monitor is a separate tool. This session only prepares the restart; it does not
-reopen or merge the prototype.
+**Next session: dashboard compatibility WIP** (2026-09-17). Resume branch
+`worktree/delegate-monitor-herdr` in `/private/tmp/delegate-monitor-herdr`. The
+Git worktree exists; its Herdr workspace is closed. Read its `tools/delegate-dashboard/CLAUDE.md` and
+`.scratch/delegate-dashboard-plugin/issues/10-current-backend-compatibility.md`.
+Main was merged into the prototype at `70cf9bb`; partial model edits are kept,
+with two failing dashboard checks. Both workers are stopped. Orin approved the
+compatibility pass and a delegate-selected TUI fallback after Claude Opus returned
+403; agy/Grok remain authorized. Keep the branch's project policy off main.
+Production scope, UI integration into main, and the Rust monitor remain separate.
 
 **Delegate modular batch complete** (2026-09-16): tickets 01–13 landed, all 13
 script suites and full/focused terminal checks passed, and independent review
@@ -51,9 +49,8 @@ carry their Landed notes here. Orin's verdict, 2026-09-15: a Herdr plugin is the
 right host for a persistent delegation control surface, and project Order, Gate and
 Margin give useful manual steering. The prototype UI, tickets 05-09 with their live
 evidence, and the verdict record on tickets 01 and 09 stay on branch
-`worktree/delegate-monitor-herdr`, as the spec requires; its worktree was closed
-on 2026-09-15 and the branch's own CLAUDE.md says how to reopen the dashboard. A
-production control surface is not ticketed yet.
+`worktree/delegate-monitor-herdr`, as the spec requires. Its worktree is reopened for ticket 10's compatibility pass.
+A production control surface is not ticketed yet.
 
 **Delegate redesign follow-ups:** spec
 `docs/superpowers/specs/2026-09-08-delegate-redesign.md`; tickets in
