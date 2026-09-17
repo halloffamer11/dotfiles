@@ -12,7 +12,7 @@ Provide focused Tier, Order, paired Floor/Ceiling and Gate/Margin edits with exp
 
 ## Acceptance
 
-**Status:** needs-triage
+**Status:** ready-for-agent
 
 - [ ] Preview shows actual file and resolved stow target, global/effective values, changed fields and affected Picks using one cached observation snapshot.
 - [ ] Apply validates the full document, rejects intervening edits and preserves symlinks; no-op and invalid writes preserve file bytes.
@@ -23,3 +23,44 @@ Provide focused Tier, Order, paired Floor/Ceiling and Gate/Margin edits with exp
 ## Recorded, 2026-09-16
 
 Cut after Orin accepted the agy recommendation and instructed Fable to proceed with consultation C1–C8 plus scope M1–M5. Ticket creation was interrupted by Claude access failure. This ticket records work to do, not implementation or acceptance of the deferred Domain design.
+
+## Implementation contract, 2026-09-16
+
+Use explicit CLI operations: `set FIELD JSON_VALUE --scope global|project`,
+`range CLASS FLOOR CEILING --scope global|project`, and
+`order LANE POSITION --scope global|project`. All accept `--cwd` and
+`--config-dir`. Default to a JSON preview; applying requires the same operation
+with `--apply --expect REVISION`, where REVISION is returned by the preview.
+An explicit instruction supplying the desired value authorizes preview and apply
+without asking again. No generic transaction service or saved executable proposal.
+
+Allow `lanes.<lane>.tier` globally and `routing.gate`/`routing.margin` in either
+scope. Lane names contain dots, so parse using the known prefix and final field,
+not a naive split. Range changes set both bounds at once. Reserve
+`routing.meters` for ticket 08. Lane carry and arbitrary JSON fields are outside
+this command's allowlist. Reject project Lane Tier writes.
+
+The revision covers both global source documents, the project document's
+presence/content and their resolved paths. Re-read and compare immediately
+before writing; a changed source or symlink target requires a fresh preview.
+Only the chosen source document is written. Resolve its real path, preserve the
+symlink, validate global and effective views, and skip the write for a semantic
+no-op. The preview includes original and resulting values, a changed-field list,
+resolved target, and before/after per-Class Picks and exact-Tier leaders from the
+same cached observation snapshot. Report unavailable Harnesses and missing
+observations. This protects against an intervening edit between commands; it is
+not a cross-process transaction guarantee.
+
+Order POSITION is one-based within the Lane's current Tier among carried Lanes.
+A global move renumbers that Tier only. A project move starts from effective
+Order, changes only the selected Tier's relative sequence, and preserves the
+other Tiers' effective order. Existing catalog projection remains authoritative.
+Moving Tier puts the Lane at the new Tier's end and shows that Order consequence
+in the preview; unrelated Tier membership and carry stay unchanged.
+
+For `setup.py --screen`, use the existing screen names (start, carry, tier1–tier4,
+review, routing). Start preserves the full wizard. A focused screen starts with
+current decisions, does not apply carry proposals on entry, and goes to a review
+of the chosen edits before confirm. Reject incompatible plain/non-TTY use with
+a clear suggestion to use the surgical CLI. Move bulk tier-line helpers in a
+separate pure change; keep compatibility imports for current callers.

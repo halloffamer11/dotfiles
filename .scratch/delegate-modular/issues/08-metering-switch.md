@@ -12,7 +12,7 @@ Add routing.meters as an explicit boolean, default true when absent, with projec
 
 ## Acceptance
 
-**Status:** needs-triage
+**Status:** ready-for-agent
 
 - [ ] Validators accept booleans and reject other types; legacy documents default on.
 - [ ] Off performs no automatic probe and gives deterministic Tier/Order/name selection; on restores the existing policy.
@@ -22,3 +22,13 @@ Add routing.meters as an explicit boolean, default true when absent, with projec
 ## Recorded, 2026-09-16
 
 Cut after Orin accepted the agy recommendation and instructed Fable to proceed with consultation C1–C8 plus scope M1–M5. Ticket creation was interrupted by Claude access failure. This ticket records work to do, not implementation or acceptance of the deferred Domain design.
+
+## Implementation contract, 2026-09-16
+
+Use the ticket 11 setter for `routing.meters` with JSON `true` or `false`.
+The existing setup routing screen exposes the same boolean; use its established
+marker and keyboard conventions. Preserve absence on a no-op edit of legacy
+routing rather than rewriting the catalog just to add the default. Dispatch
+must honor the effective switch at both run start and finish, including named
+dispatch automatic probes. Ranking still validates the Class and Range when off.
+Fixture checks must cover that a subsequent caller cannot reintroduce a probe.

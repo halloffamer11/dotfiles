@@ -12,7 +12,7 @@ Add read-only model inspection beside collect and share evidence records with HT
 
 ## Acceptance
 
-**Status:** needs-triage
+**Status:** ready-for-agent
 
 - [ ] Fixtures cover exact effort, absent data, conflicting identities and benchmark version separation.
 - [ ] Cost labels distinguish source task sets and whole-run Terminal-Bench costs; no cross-source cost comparison or combined score.
@@ -22,3 +22,16 @@ Add read-only model inspection beside collect and share evidence records with HT
 ## Recorded, 2026-09-16
 
 Cut after Orin accepted the agy recommendation and instructed Fable to proceed with consultation C1–C8 plus scope M1–M5. Ticket creation was interrupted by Claude access failure. This ticket records work to do, not implementation or acceptance of the deferred Domain design.
+
+## Implementation contract, 2026-09-16
+
+Use `bench.py model MODEL` with `--config-dir`, repeatable `--effort-rows`,
+optional local `--epoch-csv`, and `--json`. Preserve the existing report CLI.
+Default model inspection is read-only and does not fetch sources implicitly.
+The human-readable output and JSON expose the same evidence records, also used
+by the HTML view. An accepted mixed-source row is evidence only when its
+identity/effort can be attributed without guessing. Keep unresolved rows visible
+with their reason. Standing is scoped to the loaded snapshot and board/version;
+label direction and ties, and leave standing unknown when direction is unknown.
+Web research notes remain reference links; this ticket does not authorize a new
+scraper, new accepted dataset, or treating unsourced numbers as measurements.
