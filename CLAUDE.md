@@ -22,8 +22,12 @@ story (grok), the benchmark boards behind it (Artificial Analysis from the accep
 Terminal-Bench 4.0, APEX-Agents and DeepSWE read in the browser), a multi-domain tiers and
 judgment-setup scope (astra high), and two comparisons with kunchenguid/quota-axi (grok,
 agy). `2026-09-15-verification-notes.md` there records what was checked at merge and which
-claims to discount. No tickets are cut from it yet; the consultation's 18-step migration
-and the scope's tickets M1-M11 are the proposals on the table.
+claims to discount. On 2026-09-16, recovered Orin's approval from Fable's session:
+agy combined Remaining/Pace stays unknown; proceed with tickets. The coding-only cut
+(C1–C8 plus M1–M5, with overlaps combined) is now in
+`.scratch/delegate-modular/issues/`, with the agy change as ticket 13. Read
+`.scratch/delegate-modular/CLAUDE.md` before resuming. Implementation has not started;
+M6–M11 and the remaining consultation steps are still proposals.
 
 **Project routing backend** (2026-09-15, from the dashboard prototype): a
 project's `.delegate/routing.json` may carry `project_order`, a flat list of carried
