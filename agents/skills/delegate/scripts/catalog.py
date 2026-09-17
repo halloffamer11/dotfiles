@@ -9,10 +9,13 @@ Locations:
   global lanes:    <CONFIG_DIR>/lanes.json
   global routing:  <CONFIG_DIR>/routing.json
   project routing: <git-root>/.delegate/routing.json
+  class guide:     <skill>/assets/classes.md
+  project guide:   <git-root>/.delegate/classes.md
 
 CLI forms:
   catalog.py show [--cwd DIR] [--config-dir DIR] [--json]
   catalog.py check FILE [--partial]
+  catalog.py check-guide [FILE] [--overlay]
   catalog.py fmt FILE [--partial]
 """
 import argparse
@@ -51,6 +54,15 @@ HARNESS_EFFORTS = {
 CLASSES = ("scout", "mechanical", "impl", "review", "hard-impl")
 LANES_VERSION = "delegate-lanes.v1"
 ROUTING_VERSION = "delegate-routing.v1"
+# Class sections in assets/classes.md (and a project overlay) are ATX headings
+# at this level, named exactly as CLASSES. Other heading levels are metadata
+# and are not checked against the registry, so "How to pick" cannot collide.
+CLASS_GUIDE_HEADING_LEVEL = 2
+ATX_HEADING = re.compile(r"^ {0,3}(#{1,6})\s+(.+?)\s*$")
+FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+# Floor/Ceiling integers belong in routing.json. A `floor:` / `ceiling:` (or
+# `=`) declaration in the guide is how numeric policy drifted before.
+FLOOR_CEILING_DECL = re.compile(r"(?i)\b(floor|ceiling)\s*[:=]\s*\d+")
 
 # Benchmark sources print a model however they please: some publish the slug a
 # harness accepts (`gpt-5.6-luna`), some a display name (`GPT-6 Astra`,
@@ -807,6 +819,97 @@ def load_catalog(cwd=None, config_dir=None):
     }
 
 
+def default_class_guide_path():
+    """Shipped Class guide beside this script: ../assets/classes.md."""
+    return os.path.abspath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "classes.md")
+    )
+
+
+def _iter_guide_headings(text):
+    """Yield (lineno, level, title) for ATX headings outside fenced code."""
+    in_fence = None
+    for lineno, raw in enumerate(text.splitlines(), 1):
+        fence = FENCE_OPEN.match(raw)
+        if fence:
+            mark = fence.group(1)
+            ch, n = mark[0], len(mark)
+            if in_fence is None:
+                in_fence = (ch, n)
+            elif ch == in_fence[0] and n >= in_fence[1]:
+                in_fence = None
+            continue
+        if in_fence is not None:
+            continue
+        matched = ATX_HEADING.match(raw)
+        if not matched:
+            continue
+        title = re.sub(r"\s+#+\s*$", "", matched.group(2)).strip()
+        if not title:
+            continue
+        yield lineno, len(matched.group(1)), title
+
+
+def validate_guide_text(text, source="classes.md", overlay=False):
+    """Validate Class-guide markdown. Global headings must equal CLASSES;
+    overlay headings must be a subset. Metadata headings are any other level."""
+    if not isinstance(text, str):
+        raise CatalogError(f"{source}: document: class guide must be markdown text")
+
+    decl = FLOOR_CEILING_DECL.search(text)
+    if decl:
+        line = text.count("\n", 0, decl.start()) + 1
+        kind = decl.group(1).lower()
+        raise CatalogError(
+            f"{source}: line {line}: '{kind}' integer is routing.json policy; "
+            "the guide must not declare Floor or Ceiling"
+        )
+
+    found = []
+    seen = {}
+    allowed = ", ".join(CLASSES)
+    for lineno, level, title in _iter_guide_headings(text):
+        if level != CLASS_GUIDE_HEADING_LEVEL:
+            continue
+        if title in seen:
+            raise CatalogError(
+                f"{source}: heading '## {title}': duplicate class section "
+                f"(first at line {seen[title]})"
+            )
+        if title not in CLASSES:
+            raise CatalogError(
+                f"{source}: heading '## {title}': unknown class; class sections "
+                f"must be one of {allowed}"
+            )
+        seen[title] = lineno
+        found.append(title)
+
+    names = tuple(found)
+    if overlay:
+        return names
+
+    missing = [c for c in CLASSES if c not in seen]
+    if missing:
+        raise CatalogError(
+            f"{source}: classes: missing required class '{missing[0]}'"
+        )
+    return names
+
+
+def validate_guide(path, overlay=False):
+    """Validate one Class guide file. overlay=True for a project subset."""
+    expanded = os.path.abspath(os.path.expanduser(path))
+    if not os.path.isfile(expanded):
+        raise CatalogError(f"{path}: file is missing")
+    try:
+        with open(expanded, "r", encoding="utf-8") as f:
+            text = f.read()
+    except Exception as e:
+        raise CatalogError(f"{path}: file: cannot read: {e}")
+    validate_guide_text(text, source=path, overlay=overlay)
+    return text
+
+
 def check_file(path, partial=False):
     """Validates one file. Detects validator from version field."""
     doc = load_json(path)
@@ -905,6 +1008,19 @@ def main(argv=None):
     p_check.add_argument("file", help="path to file to check")
     p_check.add_argument("--partial", action="store_true", help="allow partial routing file")
 
+    p_guide = sub.add_parser("check-guide", help="validate a class guide")
+    p_guide.add_argument(
+        "file",
+        nargs="?",
+        default=None,
+        help="path to classes.md (default: this skill's assets/classes.md)",
+    )
+    p_guide.add_argument(
+        "--overlay",
+        action="store_true",
+        help="project overlay: class sections must be a subset of CLASSES",
+    )
+
     p_fmt = sub.add_parser("fmt", help="format and validate a catalog or routing file")
     p_fmt.add_argument("file", help="path to file to format")
     p_fmt.add_argument("--partial", action="store_true", help="allow partial routing file")
@@ -917,6 +1033,10 @@ def main(argv=None):
         elif args.cmd == "check":
             check_file(args.file, partial=args.partial)
             print(f"ok: {args.file}")
+        elif args.cmd == "check-guide":
+            guide_path = args.file if args.file is not None else default_class_guide_path()
+            validate_guide(guide_path, overlay=args.overlay)
+            print(f"ok: {guide_path}")
         elif args.cmd == "fmt":
             fmt_file(args.file, partial=args.partial)
             print(f"formatted: {args.file}")

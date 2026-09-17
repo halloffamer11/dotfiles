@@ -1027,4 +1027,197 @@ with tempfile.TemporaryDirectory() as td:
     )
 
 
+# 9. Ticket 10: Class guide headings vs CLASSES; overlay is a subset.
+GUIDE_PATH = os.path.abspath(os.path.join(HERE, "..", "assets", "classes.md"))
+
+
+def class_guide(names, extra="", prefix="# Class guide\n\n# How to pick\n\nPick one Class.\n"):
+    body = prefix
+    for name in names:
+        body += f"\n## {name}\n\n### Intent\n\nA {name} job.\n"
+    return body + extra
+
+
+try:
+    catalog.validate_guide(GUIDE_PATH)
+    record("9.1 shipped class guide validates as global", True)
+except Exception as e:
+    record("9.1 shipped class guide validates as global", False, str(e))
+
+res_guide = subprocess.run(
+    [sys.executable, CATALOG_PY, "check-guide", GUIDE_PATH],
+    capture_output=True,
+    text=True,
+)
+record(
+    "9.1b check-guide CLI shipped file",
+    res_guide.returncode == 0 and res_guide.stdout.strip() == f"ok: {GUIDE_PATH}",
+    res_guide.stdout + res_guide.stderr,
+)
+
+res_guide_default = subprocess.run(
+    [sys.executable, CATALOG_PY, "check-guide"],
+    capture_output=True,
+    text=True,
+)
+record(
+    "9.1c check-guide default path is the shipped guide",
+    res_guide_default.returncode == 0
+    and res_guide_default.stdout.strip() == f"ok: {catalog.default_class_guide_path()}"
+    and os.path.samefile(catalog.default_class_guide_path(), GUIDE_PATH),
+    res_guide_default.stdout + res_guide_default.stderr,
+)
+
+record(
+    "9.1d metadata headings are not Class sections",
+    catalog.validate_guide_text(class_guide(catalog.CLASSES)) == catalog.CLASSES,
+)
+
+msg = check_catalog_error(
+    catalog.validate_guide_text,
+    "# Class guide\n\n## How to pick\n\n" + class_guide(catalog.CLASSES, prefix=""),
+)
+record(
+    "9.1e a ## metadata heading is an unknown class",
+    bool(msg and "How to pick" in msg and "unknown class" in msg),
+    msg,
+)
+
+with tempfile.TemporaryDirectory() as td:
+    overlay_path = os.path.join(td, "classes.md")
+    with open(overlay_path, "w", encoding="utf-8") as f:
+        f.write(class_guide(("scout", "impl")))
+    try:
+        names = catalog.validate_guide_text(
+            class_guide(("scout", "impl")), overlay=True
+        )
+        catalog.validate_guide(overlay_path, overlay=True)
+        overlay_ok = names == ("scout", "impl")
+    except Exception as e:
+        overlay_ok = False
+        names = e
+    res_overlay = subprocess.run(
+        [sys.executable, CATALOG_PY, "check-guide", overlay_path, "--overlay"],
+        capture_output=True,
+        text=True,
+    )
+    res_as_global = subprocess.run(
+        [sys.executable, CATALOG_PY, "check-guide", overlay_path],
+        capture_output=True,
+        text=True,
+    )
+    record(
+        "9.2 overlay subset of CLASSES is accepted",
+        overlay_ok
+        and res_overlay.returncode == 0
+        and res_overlay.stdout.strip() == f"ok: {overlay_path}",
+        repr(names) + res_overlay.stdout + res_overlay.stderr,
+    )
+    record(
+        "9.2b overlay as global is missing required classes",
+        res_as_global.returncode == 1
+        and "missing required class" in res_as_global.stderr,
+        res_as_global.stderr,
+    )
+
+    empty_overlay = os.path.join(td, "empty.md")
+    with open(empty_overlay, "w", encoding="utf-8") as f:
+        f.write("# How to pick\n\nProject note only.\n")
+    record(
+        "9.2c overlay with no Class sections is an empty subset",
+        check_catalog_error(catalog.validate_guide, empty_overlay, overlay=True) is None,
+    )
+
+msg = check_catalog_error(
+    catalog.validate_guide_text,
+    class_guide(("scout", "knowledge-scout", "impl")),
+    overlay=True,
+)
+record(
+    "9.3 overlay unknown class is rejected",
+    bool(msg and "knowledge-scout" in msg and "unknown class" in msg),
+    msg,
+)
+
+partial = [c for c in catalog.CLASSES if c != "review"]
+msg = check_catalog_error(catalog.validate_guide_text, class_guide(partial))
+record(
+    "9.4 global missing Class section is rejected",
+    bool(msg and "missing required class 'review'" in msg),
+    msg,
+)
+
+msg = check_catalog_error(
+    catalog.validate_guide_text,
+    class_guide(catalog.CLASSES) + "\n## scout\n\nAgain.\n",
+)
+record(
+    "9.5 duplicate Class section is rejected",
+    bool(msg and "duplicate class section" in msg and "## scout" in msg),
+    msg,
+)
+
+msg = check_catalog_error(
+    catalog.validate_guide_text,
+    class_guide(catalog.CLASSES, extra="\n### Default\n\nfloor: 2\n"),
+)
+record(
+    "9.6 floor integer declaration is rejected",
+    bool(msg and "floor" in msg and "routing.json" in msg and "line " in msg),
+    msg,
+)
+
+msg = check_catalog_error(
+    catalog.validate_guide_text,
+    class_guide(("scout",), extra="\nCeiling = 3\n"),
+    overlay=True,
+)
+record(
+    "9.6b overlay ceiling integer declaration is rejected",
+    bool(msg and "ceiling" in msg and "routing.json" in msg),
+    msg,
+)
+
+reordered = class_guide(("mechanical",) + catalog.CLASSES[2:] + ("scout",))
+record(
+    "9.7 global Class sections may use a different order",
+    check_catalog_error(catalog.validate_guide_text, reordered) is None,
+)
+record(
+    "9.7b indented Markdown headings remain Class sections",
+    check_catalog_error(catalog.validate_guide_text,
+                        class_guide(catalog.CLASSES).replace("## scout", "   ## scout")) is None,
+)
+
+fenced = class_guide(
+    catalog.CLASSES,
+    extra="\n```\n## knowledge-scout\nfloor: 9\n```\n",
+)
+# A fenced heading is not a Class section; a fenced floor: integer still
+# duplicates routing.json policy and is refused.
+msg = check_catalog_error(catalog.validate_guide_text, fenced)
+record(
+    "9.8 fenced floor integer is still routing policy",
+    bool(msg and "floor" in msg and "routing.json" in msg),
+    msg,
+)
+fenced_heading_only = class_guide(
+    catalog.CLASSES,
+    extra="\n```\n## knowledge-scout\n```\n",
+)
+record(
+    "9.8b fenced unknown heading is not a Class section",
+    check_catalog_error(catalog.validate_guide_text, fenced_heading_only) is None,
+)
+
+with tempfile.TemporaryDirectory() as missing_dir:
+    missing_path = os.path.join(missing_dir, "classes.md")
+    msg = check_catalog_error(catalog.validate_guide, missing_path)
+    record(
+        "9.9 missing guide file is refused",
+        bool(msg and "file is missing" in msg),
+        msg,
+    )
+
+
 sys.exit(1 if fails else 0)
