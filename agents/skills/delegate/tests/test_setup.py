@@ -262,7 +262,7 @@ def case_routing_edits_keep_other_classes():
         cfg = os.path.join(td, "config")
         discover_path = os.path.join(td, "discover.json")
         write_discover(discover_path, catalog.HARNESSES)
-        answers = "\n" * 6 + "n\n" + "\n" * 6 + "3\n3\n" + "\n" * 2 + "0.3\n\n" + "y\n"
+        answers = "\n" * 6 + "n\n" + "\n" * 6 + "3\n3\n" + "\n" * 2 + "0.3\n\n\n" + "y\n"
         result = run_setup(cfg, discover_path, answers, "--no-bench")
         _lanes, routing = load_written(cfg)
         unchanged = all(
@@ -542,6 +542,40 @@ def case_plain_collects_bench_in_process():
     return ok, f"text={text[:200]!r} source_has_bench={'bench.py' in source}"
 
 
+def case_focused_screen_rejects_plain():
+    with tempfile.TemporaryDirectory() as td:
+        cfg = os.path.join(td, "config")
+        os.makedirs(cfg)
+        catalog.write_json(os.path.join(cfg, "lanes.json"), copy.deepcopy(lanes_sample))
+        catalog.write_json(os.path.join(cfg, "routing.json"), copy.deepcopy(routing_sample))
+        discover_path = os.path.join(td, "discover.json")
+        write_discover(discover_path, catalog.HARNESSES)
+        result = run_setup(cfg, discover_path, "", "--no-bench", "--plain", "--screen", "carry")
+        return (
+            result.returncode == 1
+            and "catalog.py" in result.stderr
+            and "set" in result.stderr
+            and not (result.stdout or "").strip().endswith("wrote"),
+            f"code={result.returncode} stderr={result.stderr!r}",
+        )
+
+
+def case_start_screen_keeps_plain_wizard():
+    with tempfile.TemporaryDirectory() as td:
+        cfg = os.path.join(td, "config")
+        discover_path = os.path.join(td, "discover.json")
+        write_discover(discover_path, catalog.HARNESSES)
+        result = run_setup(
+            cfg, discover_path, default_answers(len(lanes_sample["lanes"])),
+            "--no-bench", "--screen", "start",
+        )
+        wrote = os.path.isfile(os.path.join(cfg, "lanes.json"))
+        return (
+            result.returncode == 0 and wrote,
+            f"code={result.returncode} stdout={result.stdout[-200:]!r}",
+        )
+
+
 def case_saved_discovery_never_probes():
     import setup
     from unittest.mock import patch
@@ -582,11 +616,42 @@ for name, case in (
     ("one discovery path is discover.discover", case_one_discovery_path_is_discover),
     ("a harness error keeps existing lanes", case_harness_error_keeps_existing_lanes),
     ("plain collects bench in process", case_plain_collects_bench_in_process),
+    ("focused screen on a pipe names the surgical CLI", case_focused_screen_rejects_plain),
+    ("full start on a pipe still runs the wizard", case_start_screen_keeps_plain_wizard),
 ):
     try:
         ok, detail = case()
     except Exception as e:
         ok, detail = False, repr(e)
     record(name, ok, detail)
+
+try:
+    import setup
+    with tempfile.TemporaryDirectory() as td:
+        cfg = os.path.join(td, "cfg")
+        real = os.path.join(td, "real")
+        os.makedirs(cfg); os.makedirs(real)
+        for name, doc in (("lanes.json", lanes_sample), ("routing.json", routing_sample)):
+            catalog.write_json(os.path.join(real, name), doc)
+            os.symlink(os.path.join(real, name), os.path.join(cfg, name))
+        lp, rp = os.path.join(cfg, "lanes.json"), os.path.join(cfg, "routing.json")
+        before = {p: open(p, "rb").read() for p in (lp, rp)}
+        rev = catalog.catalog_revision(config_dir=cfg)
+        setup.write_focused(cfg, rev, lanes_sample, routing_sample, lanes_sample, routing_sample, lp, rp)
+        record("focused no-op preserves bytes and stow links",
+               all(os.path.islink(p) and open(p, "rb").read() == before[p] for p in (lp, rp)))
+        proposed = copy.deepcopy(routing_sample); proposed["meters"] = False
+        setup.write_focused(cfg, rev, lanes_sample, routing_sample, lanes_sample, proposed, lp, rp)
+        record("focused routing write follows stow link and preserves Lane bytes",
+               os.path.islink(rp) and catalog.load_json(rp)["meters"] is False
+               and open(lp, "rb").read() == before[lp])
+        try:
+            setup.write_focused(cfg, rev, lanes_sample, routing_sample, lanes_sample, routing_sample, lp, rp)
+            stale_rejected = False
+        except catalog.CatalogError:
+            stale_rejected = True
+        record("focused save rejects intervening source changes", stale_rejected)
+except Exception as e:
+    record("focused writes preserve stow and revisions", False, repr(e))
 
 sys.exit(1 if fails else 0)

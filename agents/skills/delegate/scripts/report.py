@@ -24,9 +24,9 @@ from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 
 try:
-    from catalog import load_catalog, CatalogError, HARNESSES
+    from catalog import load_catalog, CatalogError, HARNESSES, meters_enabled
 except ImportError:
-    from .catalog import load_catalog, CatalogError, HARNESSES
+    from .catalog import load_catalog, CatalogError, HARNESSES, meters_enabled
 
 try:
     from rank import rank
@@ -135,7 +135,11 @@ def ignored(lane_row, by_meter):
     return not by_meter.get(lane_row["lane"]) and lane_row["harness"] != "claude"
 
 
-def usage_doc(refresh=False, max_age_min=None):
+def usage_doc(refresh=False, max_age_min=None, routing=None):
+    if refresh:
+        return usage.acquire(refresh=True, max_age_min=max_age_min, timeout=180)
+    if routing is not None and not meters_enabled(routing):
+        return usage.load_cached()
     return usage.acquire(refresh=refresh, max_age_min=max_age_min, timeout=180)
 
 
@@ -160,8 +164,10 @@ def plan_row(lane_row, meters):
 
 def cmd_limits(a):
     catalog = load_catalog_or_die(a.config_dir)
-    doc = usage_doc(a.refresh, a.max_age_min)
-    gate = catalog.get("routing", {}).get("gate", 0.1)
+    routing = catalog.get("routing", {})
+    metering = meters_enabled(routing)
+    doc = usage_doc(a.refresh, a.max_age_min, routing=routing)
+    gate = routing.get("gate", 0.1)
     obs_map = usage.observations(doc) or {}
     by_meter = models_by_meter(catalog)
     lanes = sorted((dict(L, lane=name, harness=L.get("harness", name.split("-", 1)[0]))
@@ -171,7 +177,7 @@ def cmd_limits(a):
     skipped = [L["lane"] for L in lanes if ignored(L, by_meter)]
     shown = [L for L in lanes
              if (a.all or not ignored(L, by_meter))
-             and (not a.eligible or usage.eligible(obs_map.get(L["lane"]), gate))]
+             and (not a.eligible or not metering or usage.eligible(obs_map.get(L["lane"]), gate))]
     rows = [[L["lane"], model_cell(L, by_meter), pct(L.get("remaining_weekly")),
              pct(L.get("remaining_5h")), when(L.get("reset_weekly")), when(L.get("reset_5h"))]
             for L in shown]
@@ -205,7 +211,10 @@ def cmd_limits(a):
         print(f"\nIgnored, no lane spends them: {', '.join(skipped)}.")
     gate_pct = f"{int(round(gate * 100))}%"
     age_label = f"{age} min ago" if age is not None else "at an unknown time"
-    print(f"\nProbed {age_label}. A meter under {gate_pct} remaining is skipped by rank.py.")
+    if metering:
+        print(f"\nProbed {age_label}. A meter under {gate_pct} remaining is skipped by rank.py.")
+    else:
+        print(f"\nCached {age_label}. Metering is off; ranking does not skip by Gate.")
 
 
 # ---------------------------------------------------------------- cost
@@ -549,6 +558,7 @@ def cmd_statusline(a):
     routing = catalog.get("routing", {})
     classes = routing.get("classes", {})
     gate_threshold = routing.get("gate", 0.10)
+    metering = meters_enabled(routing)
 
     won_by_meter = {}
     for cls in classes:
@@ -612,6 +622,8 @@ def cmd_statusline(a):
     sorted_meters = sorted(catalog_order, key=sort_key)
 
     out_lines = []
+    if not metering:
+        out_lines.append(f"{c['DIM']}meters off{c['R']}")
     for m_key in sorted_meters:
         m_def = all_meters.get(m_key, {})
         lbl = get_meter_label(m_key, m_def, all_meters)
@@ -625,7 +637,7 @@ def cmd_statusline(a):
         if model_remw is not None:
             remw = model_remw
 
-        is_gated = not usage.eligible(obs_map.get(m_key, u_row), gate_threshold)
+        is_gated = metering and not usage.eligible(obs_map.get(m_key, u_row), gate_threshold)
 
         won_tiers = won_by_meter.get(m_key, set())
         badge_str = format_badge(won_tiers, c)

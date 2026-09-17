@@ -1553,8 +1553,7 @@ with tempfile.TemporaryDirectory() as td:
         msg is not None and "global-only" in msg and "terra-high@codex" in msg,
         msg,
     )
-    msg = check_catalog_error(
-        catalog.edit_catalog,
+    preview_m = catalog.edit_catalog(
         "set",
         field="routing.meters",
         value=False,
@@ -1565,9 +1564,32 @@ with tempfile.TemporaryDirectory() as td:
         meters=EMPTY_METERS,
     )
     record(
-        "10.4d routing.meters is reserved",
-        msg is not None and "routing.meters" in msg and "reserved" in msg,
-        msg,
+        "10.4d routing.meters accepts JSON false",
+        preview_m["values"]["original"]["effective"] is True
+        and preview_m["values"]["resulting"]["effective"] is False
+        and preview_m["changed"] == ["routing.meters"]
+        and preview_m["noop"] is False,
+        repr(preview_m["values"]),
+    )
+    catalog.edit_catalog(
+        "set",
+        field="routing.meters",
+        value=False,
+        scope="global",
+        cwd=repo,
+        config_dir=cfg,
+        apply=True,
+        expect=preview_m["revision"],
+        present=ALL_HARNESSES,
+        meters=EMPTY_METERS,
+    )
+    written_m = catalog.load_json(os.path.join(cfg, "routing.json"))
+    record(
+        "10.4d2 applying meters false writes the boolean and keeps Gate/Margin",
+        written_m["meters"] is False
+        and written_m["gate"] == routing_sample["gate"]
+        and written_m["margin"] == routing_sample["margin"],
+        repr(written_m.get("meters")),
     )
 
 
@@ -1958,5 +1980,98 @@ with tempfile.TemporaryDirectory() as td:
         config_dir=cfg, field="routing.gate", value=0.2, meters={}, present=ALL_HARNESSES)
     record("10.13 Present null project is invalid, not an absent overlay",
         msg is not None and "must be a JSON object" in msg and file_bytes(path) == b"null\n", msg)
+# 11. routing.meters: validators, default on, project override, no-op absence.
+doc_m = copy.deepcopy(routing_sample)
+record("11.1 legacy routing without meters defaults on",
+       "meters" not in doc_m and catalog.meters_enabled(doc_m) is True
+       and catalog.validate_routing(doc_m) is not None)
+
+doc_m["meters"] = False
+record("11.2 meters false is valid and effective off",
+       catalog.validate_routing(doc_m) is not None and catalog.meters_enabled(doc_m) is False)
+
+doc_m["meters"] = True
+record("11.3 meters true is valid and effective on",
+       catalog.validate_routing(doc_m) is not None and catalog.meters_enabled(doc_m) is True)
+
+for bad in (0, 1, "false", None, 0.0):
+    doc_bad = copy.deepcopy(routing_sample)
+    doc_bad["meters"] = bad
+    msg_bad = check_catalog_error(catalog.validate_routing, doc_bad)
+    record(
+        f"11.4 meters rejects {bad!r}",
+        msg_bad is not None and "meters" in msg_bad and "boolean" in msg_bad,
+        msg_bad,
+    )
+
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, _real = make_edit_fixture(td)
+    routing_path = os.path.join(cfg, "routing.json")
+    before = file_bytes(routing_path)
+    preview = catalog.edit_catalog(
+        "set", field="routing.meters", value=True, scope="global",
+        cwd=repo, config_dir=cfg, present=ALL_HARNESSES, meters=EMPTY_METERS,
+    )
+    applied = catalog.edit_catalog(
+        "set", field="routing.meters", value=True, scope="global",
+        cwd=repo, config_dir=cfg, apply=True, expect=preview["revision"],
+        present=ALL_HARNESSES, meters=EMPTY_METERS,
+    )
+    after_doc = catalog.load_json(routing_path)
+    record(
+        "11.5 no-op true on legacy routing preserves absence and file bytes",
+        preview["noop"] is True and applied["written"] is False
+        and "meters" not in after_doc
+        and file_bytes(routing_path) == before
+        and preview["values"]["original"]["effective"] is True
+        and preview["values"]["resulting"]["effective"] is True,
+        repr(preview),
+    )
+
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, _real = make_edit_fixture(td, project={"meters": False})
+    cat = catalog.load_catalog(cwd=repo, config_dir=cfg)
+    record(
+        "11.6 project meters false overrides global default on",
+        catalog.meters_enabled(cat["routing"]) is False
+        and "meters" not in catalog.load_json(os.path.join(cfg, "routing.json")),
+        repr(cat["routing"].get("meters")),
+    )
+    preview = catalog.edit_catalog(
+        "set", field="routing.meters", value=True, scope="project",
+        cwd=repo, config_dir=cfg, present=ALL_HARNESSES, meters=EMPTY_METERS,
+    )
+    catalog.edit_catalog(
+        "set", field="routing.meters", value=True, scope="project",
+        cwd=repo, config_dir=cfg, apply=True, expect=preview["revision"],
+        present=ALL_HARNESSES, meters=EMPTY_METERS,
+    )
+    project_doc = catalog.load_json(os.path.join(repo, ".delegate", "routing.json"))
+    cat_after = catalog.load_catalog(cwd=repo, config_dir=cfg)
+    record(
+        "11.6b project meters true restores on without writing global",
+        project_doc.get("meters") is True
+        and catalog.meters_enabled(cat_after["routing"]) is True
+        and "meters" not in catalog.load_json(os.path.join(cfg, "routing.json")),
+        repr(project_doc),
+    )
+
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, real_cfg = make_edit_fixture(td, symlink=True)
+    preview = catalog.edit_catalog(
+        "set", field="routing.meters", value=False, scope="global",
+        cwd=repo, config_dir=cfg, present=ALL_HARNESSES, meters=EMPTY_METERS,
+    )
+    catalog.edit_catalog(
+        "set", field="routing.meters", value=False, scope="global",
+        cwd=repo, config_dir=cfg, apply=True, expect=preview["revision"],
+        present=ALL_HARNESSES, meters=EMPTY_METERS,
+    )
+    routing_link = os.path.join(cfg, "routing.json")
+    record(
+        "11.7 meters apply preserves the routing symlink",
+        os.path.islink(routing_link)
+        and catalog.load_json(os.path.join(real_cfg, "routing.json"))["meters"] is False,
+    )
 
 sys.exit(1 if fails else 0)

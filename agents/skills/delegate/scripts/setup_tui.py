@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Selectable terminal setup UI for delegate catalogs."""
 import copy
+import os
 import subprocess
 import textwrap
 
@@ -33,9 +34,17 @@ from bench import (
     resolve_effort_rows,
     unmatched_message,
 )
-from catalog import (CLASSES, HARNESSES, TIER_LINE_VALUES, parse_tier_lines,
-                     unnamed_carried, tier_lines_summary, apply_tier_lines_to_doc,
-                     write_order_from_lines)
+from catalog import (
+    CLASSES,
+    HARNESSES,
+    TIER_LINE_VALUES,
+    apply_tier_lines_to_doc,
+    meters_enabled,
+    parse_tier_lines,
+    tier_lines_summary,
+    unnamed_carried,
+    write_order_from_lines,
+)
 
 # These render as single lines in an 80-column terminal, where anything past
 # column 79 is clipped. Keep each one under that; a legend cut mid-sentence
@@ -83,8 +92,7 @@ def hidden_legend(taken, off):
     return f"Not listed: {', '.join(parts)}." if parts else ""
 
 
-# --- tier lines: the benchmark page's decisions, pasted (ticket 27) -------------
-
+# --- tier lines: catalog owns the parser; these names stay for callers ------
 
 
 class ClipboardError(Exception):
@@ -212,7 +220,8 @@ class Wizard:
 
     def __init__(self, lanes_doc, routing_doc, bench, discovered,
                  lanes_path, routing_path, initial_message="",
-                 bench_page_path=None, effort_rows=None, discovery=None, clipboard=None):
+                 bench_page_path=None, effort_rows=None, discovery=None, clipboard=None,
+                 focus=None):
         # read only when `v` is pressed on the review page (ticket 27)
         self._clipboard = clipboard or read_clipboard
         self._original_lanes = copy.deepcopy(lanes_doc)
@@ -226,6 +235,7 @@ class Wizard:
         self.lanes_path = lanes_path
         self.routing_path = routing_path
         self.bench_page_path = bench_page_path
+        self.focus = None if focus in (None, "start") else focus
         self.screen = "start"
         self.tier = None
         self.cursor = 0
@@ -239,8 +249,16 @@ class Wizard:
         self._width = 80
         _rows, self._unmatched = resolve_effort_rows(self.lanes_doc, effort_rows)
         self._proposals = propose_enabled(self.lanes_doc, effort_rows)
-        self._enabled = {name: decision["enabled"] for name, decision in self._proposals.items()}
         self._reasons = {name: carry_reason(decision) for name, decision in self._proposals.items()}
+        # A focused screen starts from the catalog as it stands and never
+        # applies carry proposals the operator has not seen.
+        if self.focus:
+            self._enabled = {
+                name: lane.get("enabled", True)
+                for name, lane in self.lanes_doc["lanes"].items()
+            }
+        else:
+            self._enabled = {name: decision["enabled"] for name, decision in self._proposals.items()}
         # The catalog is the starting state of a rerun. A lane that the carry
         # page proposes off keeps its tier here, so switching it back on restores
         # the catalog default instead of making the operator place it from
@@ -255,6 +273,8 @@ class Wizard:
             }
             for tier in range(1, 5)
         }
+        if self.focus:
+            self._enter_focus()
 
     def result(self):
         return self._result
@@ -318,6 +338,36 @@ class Wizard:
         self.message = ""
         self._arrange_review()
 
+    def _go_confirm(self):
+        self.screen = "confirm"
+        self.cursor = 0
+        self.message = ""
+
+    def _enter_focus(self):
+        """Open the named focused screen on current catalog decisions."""
+        if self.focus == "carry":
+            self._enter_prescreen()
+        elif self.focus in ("tier1", "tier2", "tier3", "tier4"):
+            self._enter_tier(int(self.focus[-1]))
+        elif self.focus == "review":
+            self._enter_review()
+        elif self.focus == "routing":
+            self.screen = "routing"
+            self.tier = None
+            self.cursor = 0
+            self.message = ""
+
+    def _back_from_confirm(self):
+        if self.focus == "carry":
+            self._enter_prescreen()
+        elif self.focus in ("tier1", "tier2", "tier3", "tier4"):
+            self._enter_tier(int(self.focus[-1]))
+        elif self.focus == "review":
+            self._enter_review()
+        else:
+            self.screen = "routing"
+            self.cursor = 0
+
     def _start_key(self, name):
         """Where a lane first sits in its tier: the order of the lines applied,
         then an `order` the catalog already gives it at this tier, then
@@ -326,7 +376,8 @@ class Wizard:
         line = self._line_order.get(name)
         original = self._original_lanes["lanes"][name]
         kept = original.get("order") if original.get("tier") == self._assigned.get(name) else None
-        return (line is None, line or 0, kept is None, kept or 0, *self._bench_order(name))
+        moved = self.focus and original["tier"] != self._assigned.get(name)
+        return (bool(moved), line is None, line or 0, kept is None, kept or 0, *self._bench_order(name))
 
     def _arrange_review(self):
         """Each tier's order, 4 to 1. A lane already ordered in its tier keeps
@@ -494,8 +545,13 @@ class Wizard:
             elif key in ("x", "space") and names:
                 self._toggle_enabled(names[min(self.cursor, len(names) - 1)])
             elif key == "enter":
-                self._enter_tier(4)
+                if self.focus:
+                    self._go_confirm()
+                else:
+                    self._enter_tier(4)
             elif key == "b":
+                if self.focus:
+                    return
                 self.screen = "discovery"
                 self.cursor = 0
                 self.message = ""
@@ -514,11 +570,15 @@ class Wizard:
                 name = self._active_name()
                 if name:
                     if name in self._marks[self.tier]:
+                        if self.focus and self.tier == 1:
+                            self.message = "Tier 1 is the lowest Tier; use carry to turn a Lane off."
+                            return
                         self._marks[self.tier].remove(name)
                     else:
                         self._marks[self.tier].add(name)
             elif key == "enter":
-                if self.tier == 1 and any(name not in self._marks[1] for name in active):
+                if (self.tier == 1 and not self.focus
+                        and any(name not in self._marks[1] for name in active)):
                     self.message = "every lane needs a tier"
                     return
                 # A marked lane takes this tier. An unmarked lane that used to
@@ -526,14 +586,21 @@ class Wizard:
                 # assignments remain as that lane's editable default.
                 for name in active:
                     if self._assigned.get(name) == self.tier:
-                        del self._assigned[name]
+                        if self.focus:
+                            self._assigned[name] = max(1, self.tier - 1)
+                        else:
+                            del self._assigned[name]
                 for name in active:
                     if name in self._marks[self.tier]:
                         self._assigned[name] = self.tier
-                if self.tier > 1:
+                if self.focus:
+                    self._go_confirm()
+                elif self.tier > 1:
                     self._enter_tier(self.tier - 1)
                 else:
                     self._enter_review()
+            elif key == "b" and self.focus:
+                return
             elif key == "b" and self.tier < 4:
                 previous = self.tier + 1
                 self._enter_tier(previous)
@@ -553,38 +620,49 @@ class Wizard:
             elif key == "v":
                 self._paste_tier_lines()
             elif key == "enter":
-                self.screen = "routing"
-                self.cursor = 0
-                self.message = ""
+                if self.focus:
+                    self._go_confirm()
+                else:
+                    self.screen = "routing"
+                    self.cursor = 0
+                    self.message = ""
             elif key == "b":
+                if self.focus:
+                    return
                 self._enter_tier(1)
             return
         if self.screen == "routing":
-            count = len(CLASSES) * 2 + 2
+            count = len(CLASSES) * 2 + 3
+            meters_idx = len(CLASSES) * 2 + 2
             if key == "up":
                 self.cursor = (self.cursor - 1) % count
             elif key == "down":
                 self.cursor = (self.cursor + 1) % count
-            elif key in ("plus", "minus"):
-                delta = 1 if key == "plus" else -1
-                if self.cursor < len(CLASSES) * 2:
-                    cls_idx = self.cursor // 2
-                    is_ceiling = (self.cursor % 2 == 1)
-                    name = CLASSES[cls_idx]
-                    cls_info = self.routing_doc["classes"][name]
-                    if is_ceiling:
-                        cls_info["ceiling"] = min(4, max(cls_info["floor"], cls_info["ceiling"] + delta))
+            elif key in ("plus", "minus", "x", "space"):
+                if self.cursor == meters_idx:
+                    self._set_meters(not self._meters_on())
+                elif key in ("plus", "minus"):
+                    delta = 1 if key == "plus" else -1
+                    if self.cursor < len(CLASSES) * 2:
+                        cls_idx = self.cursor // 2
+                        is_ceiling = (self.cursor % 2 == 1)
+                        name = CLASSES[cls_idx]
+                        cls_info = self.routing_doc["classes"][name]
+                        if is_ceiling:
+                            cls_info["ceiling"] = min(4, max(cls_info["floor"], cls_info["ceiling"] + delta))
+                        else:
+                            cls_info["floor"] = min(cls_info["ceiling"], max(1, cls_info["floor"] + delta))
                     else:
-                        cls_info["floor"] = min(cls_info["ceiling"], max(1, cls_info["floor"] + delta))
-                else:
-                    name = "margin" if self.cursor == len(CLASSES) * 2 else "gate"
-                    old = self.routing_doc[name]
-                    self.routing_doc[name] = round(min(1.0, max(0.0, old + delta * 0.05)), 2)
+                        name = "margin" if self.cursor == len(CLASSES) * 2 else "gate"
+                        old = self.routing_doc[name]
+                        self.routing_doc[name] = round(min(1.0, max(0.0, old + delta * 0.05)), 2)
             elif key == "enter":
                 self.screen = "confirm"
                 self.cursor = 0
                 self.message = ""
             elif key == "b":
+                if self.focus:
+                    return
                 # back to the review page, with every tier it holds intact
                 self._enter_review()
             return
@@ -593,7 +671,8 @@ class Wizard:
             # window: at 80x24 eleven of twenty items showed, and the nine out
             # of sight included both file paths and every routing value. A
             # confirm screen you cannot read to the end is not one.
-            count = len(self.lanes_doc["lanes"]) + len(CLASSES) * 2 + 4
+            count = (len(self._focus_rows()) if self.focus else
+                     len(self.lanes_doc["lanes"]) + len(CLASSES) * 2 + 5)
             if key == "up":
                 self.cursor = (self.cursor - 1) % count
                 return
@@ -601,6 +680,10 @@ class Wizard:
                 self.cursor = (self.cursor + 1) % count
                 return
             if key == "y":
+                if self.focus:
+                    self._result = (self._focused_lanes(), copy.deepcopy(self.routing_doc))
+                    self.screen = "done"
+                    return
                 result_lanes = copy.deepcopy(self._original_lanes)
                 self._arrange_review()
                 for name, lane in result_lanes["lanes"].items():
@@ -622,8 +705,71 @@ class Wizard:
                 self._result = None
                 self.screen = "quit"
             elif key == "b":
-                self.screen = "routing"
-                self.cursor = 0
+                self._back_from_confirm()
+
+    def _focused_lanes(self):
+        """Preserve untouched records and materialize only changed decisions."""
+        result = copy.deepcopy(self._original_lanes)
+        if self.focus == "routing":
+            return result
+        self._arrange_review()
+        for name, lane in result["lanes"].items():
+            original = self._original_lanes["lanes"][name]
+            lane["tier"] = self._final_tier(name)
+            if self._enabled[name] != original.get("enabled", True):
+                if self._enabled[name]:
+                    lane.pop("enabled", None)
+                else:
+                    lane["enabled"] = False
+                    lane.pop("order", None)
+        for tier in range(1, 5):
+            original_names = [name for name, lane in self._original_lanes["lanes"].items()
+                              if lane["tier"] == tier and lane.get("enabled", True)]
+            original_names.sort(key=lambda name: (
+                self._original_lanes["lanes"][name].get("order") is None,
+                self._original_lanes["lanes"][name].get("order", 0),
+                *self._bench_order(name)))
+            current = self._tier_order[tier]
+            if current != original_names:
+                for order, name in enumerate(current, 1):
+                    result["lanes"][name]["order"] = order
+        return result
+
+    def _focus_rows(self):
+        """The actual focused edits, including their Order consequences."""
+        rows = []
+        def add(name, old, new):
+            rows.append({"cells": [name, "", f"{old} → {new}"],
+                         "marked": False, "dimmed": False, "tag": ""})
+        result = self._focused_lanes()
+        for name, lane in result["lanes"].items():
+            original = self._original_lanes["lanes"][name]
+            for field in ("tier", "order", "enabled"):
+                if lane.get(field) != original.get(field):
+                    add(f"{name}.{field}", original.get(field, "unset"), lane.get(field, "unset"))
+        for name in CLASSES:
+            for field in ("floor", "ceiling"):
+                old = self._original_routing["classes"][name][field]
+                new = self.routing_doc["classes"][name][field]
+                if old != new:
+                    add(f"classes.{name}.{field}", old, new)
+        for field in ("gate", "margin", "meters"):
+            old, new = self._original_routing.get(field), self.routing_doc.get(field)
+            if old != new:
+                add(field, "on (default)" if field == "meters" and old is None else old, new)
+        for path, changed in ((self.lanes_path, result != self._original_lanes),
+                              (self.routing_path, self.routing_doc != self._original_routing)):
+            if changed:
+                rows.append({"cells": ["file", "", path], "marked": False,
+                             "dimmed": False, "tag": ""})
+                resolved = os.path.realpath(path)
+                if resolved != os.path.abspath(path):
+                    rows.append({"cells": ["target", "", resolved], "marked": False,
+                                 "dimmed": False, "tag": ""})
+        if not rows:
+            rows.append({"cells": ["No changes", "", "Nothing will be written"],
+                         "marked": False, "dimmed": False, "tag": ""})
+        return rows
 
     def _bench_columns(self):
         """The benchmark columns worth their width: the ones some lane on this
@@ -771,6 +917,24 @@ class Wizard:
             f"  {percent} remaining, however capable it is.",
         ]
 
+    def _meters_on(self):
+        return meters_enabled(self.routing_doc)
+
+    def _set_meters(self, enabled):
+        if enabled:
+            if "meters" not in self._original_routing:
+                self.routing_doc.pop("meters", None)
+            else:
+                self.routing_doc["meters"] = True
+        else:
+            self.routing_doc["meters"] = False
+
+    def _meters_legend(self):
+        state = "on" if self._meters_on() else "off"
+        if self._meters_on():
+            return ["meters on — ranking uses Gate and Margin. Off is Tier, Order and name only."]
+        return [f"meters {state} — ranking is Tier, Order and name only. Gate and Margin stay stored."]
+
     def _routing_settings(self):
         values = []
         for name in CLASSES:
@@ -778,7 +942,8 @@ class Wizard:
             values.append((name, "floor", cls_info["floor"]))
             values.append((name, "ceiling", cls_info["ceiling"]))
         values.extend([(None, "margin", self.routing_doc["margin"]),
-                       (None, "gate", self.routing_doc["gate"])])
+                       (None, "gate", self.routing_doc["gate"]),
+                       (None, "meters", "on" if self._meters_on() else "off")])
         return values
 
     def _routing_panel(self):
@@ -818,6 +983,14 @@ class Wizard:
                 f"pace beats the pick's by more than {value}.",
                 "Pace is unspent quota against time left in the week; above 1.0 the "
                 "quota will expire unused.",
+            ]
+        if kind == "meters":
+            return [
+                f"meters: {value}",
+                "When on, ranking uses Gate and Margin, and dispatch probes Remaining "
+                "at the start and finish of a job.",
+                "When off, ranking is Tier, Order and lane name only. Cached Remaining "
+                "may still show. Gate and Margin stay stored.",
             ]
         return [
             f"gate: {value}",
@@ -1007,9 +1180,13 @@ class Wizard:
             for name in ("margin", "gate"):
                 rows.append({"cells": [name, "", str(self.routing_doc[name])], "marked": False,
                              "dimmed": False, "tag": ""})
+            rows.append({"cells": ["meters", "", "on" if self._meters_on() else "off"],
+                         "marked": False, "dimmed": False, "tag": ""})
             for path in (self.lanes_path, self.routing_path):
                 rows.append({"cells": ["file", "", path], "marked": False,
                              "dimmed": False, "tag": ""})
+            if self.focus:
+                rows = self._focus_rows()
             for index, row in enumerate(rows):
                 row["cursor"] = index == self.cursor
             return self._frame(
@@ -1019,8 +1196,9 @@ class Wizard:
                 # a path is the one value here that will not fit a 24-place cell,
                 # and `/Users/dreiss/.config/de…` is not a path anyone can check
                 elastic="value",
-                legend=[CLASSES_LEGEND, *self._margin_legend(),
-                        *self._gate_legend(), CONFIRM_OFF_LEGEND],
+                legend=(["Only the listed changes will be written."] if self.focus else
+                        [CLASSES_LEGEND, *self._margin_legend(),
+                         *self._gate_legend(), *self._meters_legend(), CONFIRM_OFF_LEGEND]),
             )
         return self._frame(self.screen, "Delegate setup")
 

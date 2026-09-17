@@ -239,6 +239,7 @@ def show_routing(routing_doc):
         print(f"classes.{name}: floor={cls_info['floor']} ceiling={cls_info['ceiling']}")
     print(f"margin: {routing_doc['margin']}")
     print(f"gate: {routing_doc['gate']}")
+    print(f"meters: {'on' if catalog.meters_enabled(routing_doc) else 'off'}")
 
 
 def ask_routing(routing_doc):
@@ -253,6 +254,15 @@ def ask_routing(routing_doc):
         cls_info["ceiling"] = c
     routing_doc["margin"] = ask_fraction("margin", routing_doc["margin"])
     routing_doc["gate"] = ask_fraction("gate", routing_doc["gate"])
+    current = "on" if catalog.meters_enabled(routing_doc) else "off"
+    answer = read_answer(f"meters [{current}]: ").strip().lower()
+    if answer in ("off", "false", "n", "no"):
+        routing_doc["meters"] = False
+    elif answer in ("on", "true", "y", "yes"):
+        if "meters" not in routing_doc:
+            pass
+        else:
+            routing_doc["meters"] = True
 
 
 def load_effort_rows(paths):
@@ -307,6 +317,24 @@ def confirm_and_write(lanes_doc, routing_doc, lanes_path, routing_path):
     print(f"wrote {routing_path}")
 
 
+def write_focused(config_dir, revision, original_lanes, original_routing,
+                  lanes, routing, lanes_path, routing_path):
+    """Check the sources again and preserve links and unchanged document bytes."""
+    if catalog.catalog_revision(config_dir=config_dir) != revision:
+        raise CatalogError("intervening edit: catalog sources changed; reopen the focused screen")
+    validate_lanes(lanes, lanes_path)
+    validate_routing(routing, routing_path)
+    written = False
+    for path, old, new in ((lanes_path, original_lanes, lanes),
+                           (routing_path, original_routing, routing)):
+        if old != new:
+            catalog._write_preserving_link(path, new)
+            print(f"wrote {path}")
+            written = True
+    if not written:
+        print("nothing changed; nothing written")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Interactively create or revise a delegate catalog.")
     parser.add_argument("--config-dir", default=catalog.CONFIG_DIR, help="directory for lanes.json and routing.json")
@@ -327,10 +355,23 @@ def main(argv=None):
                              "same lines from the clipboard")
     parser.add_argument("--no-discover", action="store_true", help="skip model discovery")
     parser.add_argument("--fixture-dir", default=None, help="fixture directory for harness discovery")
+    parser.add_argument(
+        "--screen",
+        default="start",
+        choices=("start", "carry", "tier1", "tier2", "tier3", "tier4", "review", "routing"),
+        help="enter one setup screen; start is the full wizard",
+    )
     args = parser.parse_args(argv)
 
     try:
+        plain = args.plain or not sys.stdin.isatty() or not sys.stdout.isatty()
+        if args.screen != "start" and plain:
+            raise CatalogError(
+                f"--screen {args.screen} needs a terminal; "
+                "use catalog.py set, range, or order for non-interactive edits"
+            )
         config_dir = os.path.abspath(os.path.expanduser(args.config_dir))
+        focused_revision = catalog.catalog_revision(config_dir=config_dir) if args.screen != "start" else None
         tier_lines = read_tier_lines(args.tiers_from) if args.tiers_from else None
         existing = os.path.isfile(os.path.join(config_dir, "lanes.json"))
         # Start from the editable catalog, acquire once, then filter only a
@@ -345,7 +386,6 @@ def main(argv=None):
             )
         else:
             note_undiscovered_lanes(lanes_doc, discovery_data)
-        plain = args.plain or not sys.stdin.isatty() or not sys.stdout.isatty()
         # Discovery reports drift at the moment the human is already deciding
         # tiers, and it must never be able to stop them getting there: any
         # failure becomes the reason string the start facts print. Both
@@ -409,6 +449,7 @@ def main(argv=None):
                 bench_page_path=page_path,
                 effort_rows=effort_rows,
                 discovery=discovery_data,
+                focus=None if args.screen == "start" else args.screen,
             )
             if tier_lines is not None:
                 summary = wizard.apply_tier_lines(tier_lines)
@@ -420,10 +461,14 @@ def main(argv=None):
                 result_lanes, result_routing = result
                 validate_lanes(result_lanes, lanes_path)
                 validate_routing(result_routing, routing_path)
-                write_json(lanes_path, result_lanes)
-                write_json(routing_path, result_routing)
-                print(f"wrote {lanes_path}")
-                print(f"wrote {routing_path}")
+                if args.screen != "start":
+                    write_focused(config_dir, focused_revision, lanes_doc, routing_doc,
+                                  result_lanes, result_routing, lanes_path, routing_path)
+                else:
+                    write_json(lanes_path, result_lanes)
+                    write_json(routing_path, result_routing)
+                    print(f"wrote {lanes_path}")
+                    print(f"wrote {routing_path}")
     except SetupAbort:
         return 130
     except CatalogError as e:

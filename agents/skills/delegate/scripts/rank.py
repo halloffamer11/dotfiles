@@ -88,6 +88,7 @@ def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="
     routing = cat.get("routing", {})
     margin = routing.get("margin", 0.2)
     gate = routing.get("gate", 0.1)
+    metering = catalog.meters_enabled(routing)
     reason_label = reason_label or "tier"
 
     meter_map = meter_observations(meters) or {}
@@ -105,7 +106,12 @@ def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="
             r = rec.get("r")
             pace = rec.get("pace")
             remaining_weekly = rec.get("remaining_weekly")
-            meter_status = "unknown" if r is None else ("ok" if usage.eligible(rec, gate) else "unavailable")
+            if r is None:
+                meter_status = "unknown"
+            elif metering and not usage.eligible(rec, gate):
+                meter_status = "unavailable"
+            else:
+                meter_status = "ok"
         else:
             r = None
             pace = None
@@ -125,7 +131,7 @@ def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="
             veto_reason = f"vetoed:floor, {lane_name} (tier {lane_tier}) < {reason_label} floor (tier {floor})"
         elif lane_tier is not None and ceiling is not None and lane_tier > ceiling:
             veto_reason = f"vetoed:ceiling, {lane_name} (tier {lane_tier}) > {reason_label} ceiling (tier {ceiling})"
-        elif not usage.eligible(rec, gate):
+        elif metering and not usage.eligible(rec, gate):
             r_pct = f"{int(round(r * 100)):d}%"
             gate_pct = f"{int(round(gate * 100)):d}%"
             veto_reason = f"vetoed:gate, {lane_name}: {meter_name} meter {r_pct} left < gate {gate_pct}"
@@ -155,11 +161,13 @@ def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="
             vetoed_rows.append(row)
 
     def sort_key(item):
-        unknown = 1 if item["pace"] is None else 0
         t = item["tier"] if item["tier"] is not None else 99
-        p = item["pace"] if item["pace"] is not None else 0.0
         unordered = 1 if item["order"] is None else 0
         o = item["order"] if item["order"] is not None else 0
+        if not metering:
+            return (t, unordered, o, item["lane"])
+        unknown = 1 if item["pace"] is None else 0
+        p = item["pace"] if item["pace"] is not None else 0.0
         return (unknown, t, unordered, o, -p, item["lane"])
 
     eligible_rows.sort(key=sort_key)
@@ -167,11 +175,12 @@ def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="
     if eligible_rows:
         pick_row = eligible_rows[0]
         beaten_pace = None
-        for r in eligible_rows[1:]:
-            if r["pace"] is not None and pick_row["pace"] is not None:
-                if r["pace"] >= pick_row["pace"] + margin:
-                    beaten_pace = pick_row["pace"]
-                    pick_row = r
+        if metering:
+            for r in eligible_rows[1:]:
+                if r["pace"] is not None and pick_row["pace"] is not None:
+                    if r["pace"] >= pick_row["pace"] + margin:
+                        beaten_pace = pick_row["pace"]
+                        pick_row = r
 
         for r in eligible_rows:
             if r is pick_row:
@@ -182,7 +191,7 @@ def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="
                     r["reason"] = "pick"
             else:
                 r["pick"] = False
-                if r["pace"] is None:
+                if metering and r["pace"] is None:
                     r["reason"] = "unknown meter, sorted last"
                 else:
                     r["reason"] = "eligible"
@@ -295,7 +304,8 @@ def print_rank_output(cls, cat, rows, tier=None):
     project_file = cat.get("files", {}).get("project")
     override_str = project_file if project_file else "none"
     gate_pct = f"{int(round(gate * 100))}%"
-    print(f"# {cls}  floor={floor} ceiling={ceiling}  margin={margin}  gate={gate_pct}  (routing: global; project override: {override_str})")
+    meters_bit = "" if catalog.meters_enabled(routing) else "  meters=off"
+    print(f"# {cls}  floor={floor} ceiling={ceiling}{meters_bit}  margin={margin}  gate={gate_pct}  (routing: global; project override: {override_str})")
     for line in format_rows(rows):
         print(line)
     return True
@@ -312,6 +322,25 @@ def run_usage():
 def load_cached_usage(cache_path=None):
     """Read the usage cache without invoking any vendor probe."""
     return usage.load_cached(cache_path=cache_path)
+
+
+def load_usage(cat, meters_path=None, *, refresh=False):
+    """Observations for ranking. routing.meters off never probes vendors.
+
+    ``meters_path`` is an explicit document and is loaded even when metering
+    is off. ``refresh=True`` is the class-rank path (acquire); False is cache.
+    """
+    if meters_path:
+        try:
+            with open(meters_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    if not catalog.meters_enabled(cat.get("routing", {})):
+        return load_cached_usage()
+    if refresh:
+        return run_usage()
+    return load_cached_usage()
 
 
 def main(argv=None):
@@ -345,14 +374,7 @@ def main(argv=None):
         sys.stderr.write(f"rank: {e}\n")
         sys.exit(1)
 
-    if args.meters:
-        try:
-            with open(args.meters, "r", encoding="utf-8") as f:
-                meters_doc = json.load(f)
-        except Exception:
-            meters_doc = {}
-    else:
-        meters_doc = load_cached_usage() if tiers_mode else run_usage()
+    meters_doc = load_usage(cat, args.meters, refresh=not tiers_mode)
 
     if args.harnesses is not None:
         present = set(h.strip() for h in args.harnesses.split(",") if h.strip())
@@ -364,22 +386,25 @@ def main(argv=None):
         routing = cat["routing"]
         margin = routing["margin"]
         gate = routing["gate"]
+        metering = catalog.meters_enabled(routing)
 
         if args.json:
             out = {
                 "margin": margin,
                 "gate": gate,
+                "meters": metering,
                 "tiers": previews,
             }
             sys.stdout.write(json.dumps(out, indent=2) + "\n")
             sys.exit(0)
 
         gate_pct = f"{int(round(gate * 100))}%"
+        meters_bit = "" if metering else "  meters=off"
         for preview in previews:
             leader = preview["leader"] or "none"
             print(
                 f"# Tier {preview['tier']} preview; not a Class Pick  "
-                f"leader={leader}  margin={margin}  gate={gate_pct}"
+                f"leader={leader}{meters_bit}  margin={margin}  gate={gate_pct}"
             )
             for line in format_rows(preview["rows"]):
                 print(line)
@@ -398,6 +423,7 @@ def main(argv=None):
     ceiling = cls_config.get("ceiling")
     margin = routing["margin"]
     gate = routing["gate"]
+    metering = catalog.meters_enabled(routing)
 
     if args.json:
         out = {
@@ -406,6 +432,7 @@ def main(argv=None):
             "ceiling": ceiling,
             "margin": margin,
             "gate": gate,
+            "meters": metering,
             "pick": rows[0]["lane"] if has_pick else None,
             "rows": rows,
         }

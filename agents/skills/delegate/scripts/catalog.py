@@ -18,6 +18,7 @@ CLI forms:
   catalog.py check-guide [FILE] [--overlay]
   catalog.py fmt FILE [--partial]
   catalog.py set FIELD JSON_VALUE --scope global|project [--cwd DIR] [--config-dir DIR]
+      FIELD is lanes.<lane>.tier, routing.gate, routing.margin, or routing.meters
   catalog.py range CLASS FLOOR CEILING --scope global|project [--cwd DIR] [--config-dir DIR]
   catalog.py order LANE POSITION --scope global|project [--cwd DIR] [--config-dir DIR]
   (set/range/order default to a JSON preview; --apply --expect REVISION writes)
@@ -493,7 +494,7 @@ def validate_routing(doc, source="routing.json", partial=False):
             "cannot appear in global routing"
         )
 
-    allowed_top = {"version", "classes", "margin", "gate", "note"}
+    allowed_top = {"version", "classes", "margin", "gate", "meters", "note"}
     if partial:
         allowed_top.add("project_order")
     for k in doc:
@@ -569,6 +570,13 @@ def validate_routing(doc, source="routing.json", partial=False):
                 f"{source}: key 'gate': gate must be a number between 0 and 1, got {g!r}"
             )
 
+    if "meters" in doc:
+        m = doc["meters"]
+        if type(m) is not bool:
+            raise CatalogError(
+                f"{source}: key 'meters': meters must be a JSON boolean, got {m!r}"
+            )
+
     if "project_order" in doc:
         project_order = doc["project_order"]
         if not isinstance(project_order, list):
@@ -630,6 +638,13 @@ def merge_routing(global_doc, project_doc=None, global_source="routing.json", pr
                 sources[k] = p_src
 
     return routing, sources
+
+
+def meters_enabled(routing):
+    """Effective routing.meters: JSON true or false, absent defaults on."""
+    if not isinstance(routing, dict) or "meters" not in routing:
+        return True
+    return routing["meters"] is True
 
 
 def _validate_merged_routing(routing, source):
@@ -1111,7 +1126,7 @@ def show_catalog(cwd=None, config_dir=None, as_json=False):
 HERE_SCRIPTS = os.path.dirname(os.path.abspath(__file__))
 _SET_LANE_PREFIX = "lanes."
 _SET_LANE_TIER_SUFFIX = ".tier"
-_SET_ROUTING_FIELDS = {"gate": "routing.gate", "margin": "routing.margin"}
+_SET_ROUTING_FIELDS = {"gate": "routing.gate", "margin": "routing.margin", "meters": "routing.meters"}
 
 
 def _rank_mod():
@@ -1348,12 +1363,8 @@ def parse_set_field(field):
     """Split an allowed set field on the known prefix and final name, not every dot."""
     if not isinstance(field, str) or not field.strip():
         raise CatalogError("field is required")
-    if field in ("routing.gate", "routing.margin"):
+    if field in ("routing.gate", "routing.margin", "routing.meters"):
         return ("routing", field.split(".", 1)[1])
-    if field == "routing.meters":
-        raise CatalogError(
-            "field 'routing.meters' is reserved; this command does not edit it"
-        )
     if field.startswith("routing.classes."):
         raise CatalogError(
             f"field '{field}' is outside this command's allowlist; "
@@ -1372,7 +1383,7 @@ def parse_set_field(field):
         )
     raise CatalogError(
         f"unknown field '{field}'; allowed fields are "
-        "lanes.<lane>.tier, routing.gate, routing.margin"
+        "lanes.<lane>.tier, routing.gate, routing.margin, routing.meters"
     )
 
 
@@ -1504,21 +1515,45 @@ def _plan_set(field, value, scope, lanes_doc, routing_doc, project_doc):
         proposed_routing = copy.deepcopy(routing_doc)
         proposed_project = copy.deepcopy(project_doc)
         dest = "routing" if scope == "global" else "project"
-        if scope == "global":
-            proposed_routing[key] = value
-        else:
-            if proposed_project is None:
-                proposed_project = {}
-            proposed_project[key] = value
-        original_global = routing_doc.get(key)
+        write_value = True
+        if key == "meters":
+            if type(value) is not bool:
+                raise CatalogError(
+                    f"key 'meters': meters must be a JSON boolean, got {value!r}"
+                )
+            # A no-op of the default on a legacy document must not add meters.
+            if value is True:
+                if scope == "global" and "meters" not in routing_doc:
+                    write_value = False
+                elif scope == "project":
+                    global_on = meters_enabled(routing_doc)
+                    project_has = project_doc is not None and "meters" in project_doc
+                    if global_on and not project_has:
+                        write_value = False
+        if write_value:
+            if scope == "global":
+                proposed_routing[key] = value
+            else:
+                if proposed_project is None:
+                    proposed_project = {}
+                proposed_project[key] = value
+        original_global = routing_doc.get(key) if key in routing_doc else None
+        original_merged, _sources = merge_routing(routing_doc, project_doc)
         original_effective = (
-            project_doc.get(key, original_global)
-            if project_doc is not None else original_global
+            meters_enabled(original_merged) if key == "meters"
+            else (
+                project_doc.get(key, original_global)
+                if project_doc is not None else original_global
+            )
         )
-        resulting_global = proposed_routing.get(key)
+        resulting_global = proposed_routing.get(key) if key in proposed_routing else None
+        resulting_merged, _sources = merge_routing(proposed_routing, proposed_project)
         resulting_effective = (
-            proposed_project.get(key, resulting_global)
-            if proposed_project is not None else resulting_global
+            meters_enabled(resulting_merged) if key == "meters"
+            else (
+                proposed_project.get(key, resulting_global)
+                if proposed_project is not None else resulting_global
+            )
         )
         return dest, proposed_lanes, proposed_routing, proposed_project, {
             "field": _SET_ROUTING_FIELDS[key],
@@ -1639,6 +1674,8 @@ def _changed_fields(op, values, original_doc, proposed_doc, dest):
                 changed.append("routing.gate")
             if field == "routing.margin" and original_doc.get("margin") != proposed_doc.get("margin"):
                 changed.append("routing.margin")
+            if field == "routing.meters" and original_doc.get("meters") != proposed_doc.get("meters"):
+                changed.append("routing.meters")
         return changed
     if op == "range":
         cls = values["class"]
@@ -1843,7 +1880,7 @@ def main(argv=None):
         p.add_argument("--expect", default=None, help="revision from a preview of the same sources")
 
     p_set = sub.add_parser("set", help="preview or apply one allowed field edit")
-    p_set.add_argument("field", help="lanes.<lane>.tier, routing.gate, or routing.margin")
+    p_set.add_argument("field", help="lanes.<lane>.tier, routing.gate, routing.margin, or routing.meters")
     p_set.add_argument("value", help="JSON value")
     add_edit_flags(p_set)
 

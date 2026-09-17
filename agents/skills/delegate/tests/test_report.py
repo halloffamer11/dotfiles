@@ -419,5 +419,35 @@ with tempfile.TemporaryDirectory() as tmp:
           p_c.returncode == 0 and "| grok" in p_c.stdout and "99%" in p_c.stdout,
           p_c.stderr + p_c.stdout)
 
+    off_cfg = os.path.join(tmp, "off-config")
+    shutil.copytree(SAMPLES, off_cfg)
+    off_routing = json.load(open(os.path.join(off_cfg, "routing.json")))
+    off_routing["meters"] = False
+    with open(os.path.join(off_cfg, "routing.json"), "w") as f:
+        json.dump(off_routing, f, indent=2)
+        f.write("\n")
+    missing_cache = os.path.join(tmp, "no-cache-meters-off.json")
+    rc, out_off_lim, err_off_lim = run(
+        ["limits", "--config-dir", off_cfg],
+        {"DELEGATE_CACHE": missing_cache},
+    )
+    check("limits with meters off and missing cache does not probe",
+          rc == 0 and not os.path.exists(missing_cache)
+          and "Metering is off" in out_off_lim, err_off_lim + out_off_lim)
+    rc, out_off_sl, _ = run(
+        ["statusline", "--no-color", "--no-running", "--config-dir", off_cfg],
+        sl_env,
+    )
+    check("statusline with meters off names the state and drops gated marks",
+          rc == 0 and out_off_sl.splitlines()[0].strip() == "meters off"
+          and "✗" not in out_off_sl, out_off_sl)
+    rc, out_off_el, _ = run(
+        ["limits", "--max-age-min", "600", "--eligible", "--config-dir", off_cfg],
+        eq_env,
+    )
+    check("limits --eligible with meters off keeps a below-Gate meter",
+          rc == 0 and "| codex" in out_off_el.split("**Plan consumption this cycle:**")[0],
+          out_off_el)
+
 print("\n" + ("ALL PASS" if not fails else f"{len(fails)} FAILED: {', '.join(fails)}"))
 sys.exit(1 if fails else 0)

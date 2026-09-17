@@ -976,4 +976,80 @@ with tempfile.TemporaryDirectory() as td:
         usage.probe_codex, usage.probe_agy, usage.probe_claude, usage.probe_grok = origs
         os.environ.pop("DELEGATE_CACHE", None)
 
+    # 25. routing.meters off: Tier/Order/name only, no Gate, no steal, no probe.
+    cat_off = copy.deepcopy(cat)
+    cat_off["routing"]["meters"] = False
+    cat_off["lanes"]["terra-high@codex"]["order"] = 1
+    cat_off["lanes"]["grok46-high@grok"]["order"] = 2
+    m_off = [
+        meter("codex", weekly=0.05, five_h=0.05, pace=0.10, status="ok"),
+        meter("grok", weekly=1.00, pace=2.00, status="ok"),
+        meter("claude-fable", weekly=0.70, five_h=0.70, pace=0.85, status="ok"),
+        meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
+    ]
+    doc_off = write_meters_doc(meters_path, m_off)
+    rows_off = rank.rank("impl", cat_off, doc_off, ALL_HARNESSES)
+    terra_off = next(r for r in rows_off if r["lane"] == "terra-high@codex")
+    grok_off = next(r for r in rows_off if r["lane"] == "grok46-high@grok")
+    luna_off = next(r for r in rows_off if r["lane"] == "luna-low@codex")
+    fable_off = next(r for r in rows_off if r["lane"] == "fable-xhigh@claude")
+    record(
+        "case 25 meters off ranks by Tier, Order and name; Gate and Margin are ignored",
+        rows_off[0]["lane"] == "terra-high@codex" and rows_off[0]["reason"] == "pick"
+        and terra_off["eligible"] is True and "vetoed:gate" not in terra_off["reason"]
+        and grok_off["reason"] == "eligible" and "stolen" not in grok_off["reason"]
+        and luna_off["reason"].startswith("vetoed:floor")
+        and fable_off["reason"].startswith("vetoed:ceiling"),
+        repr([(r["lane"], r["reason"]) for r in rows_off[:6]]),
+    )
+    rows_on = rank.rank("impl", cat, doc_off, ALL_HARNESSES)
+    terra_on = next(r for r in rows_on if r["lane"] == "terra-high@codex")
+    record(
+        "case 25b meters on restores Gate veto",
+        terra_on["eligible"] is False and "vetoed:gate" in terra_on["reason"],
+        terra_on["reason"],
+    )
+
+    probed25 = []
+    orig_acquire = usage.acquire
+    def mark_acquire(*a, **k):
+        probed25.append("acquire")
+        return orig_acquire(*a, **k)
+    usage.acquire = mark_acquire
+    missing25 = os.path.join(td, "missing-usage-25.json")
+    os.environ["DELEGATE_CACHE"] = missing25
+    try:
+        loaded_off = rank.load_usage(cat_off, refresh=True)
+        loaded_again = rank.load_usage(cat_off, refresh=True)
+        record(
+            "case 25c load_usage with meters off never probes, even on refresh, including a later caller",
+            loaded_off == {} and loaded_again == {} and probed25 == []
+            and not os.path.exists(missing25),
+            repr(probed25),
+        )
+        loaded_on = rank.load_usage(cat, meters_path=meters_path, refresh=True)
+        record(
+            "case 25d explicit meters file is still loaded when metering is on",
+            loaded_on.get("lanes") and probed25 == [],
+            repr(probed25),
+        )
+    finally:
+        usage.acquire = orig_acquire
+        os.environ.pop("DELEGATE_CACHE", None)
+
+    fake_git_m = os.path.join(td, "repo-meters")
+    os.makedirs(fake_git_m)
+    open(os.path.join(fake_git_m, ".git"), "w").close()
+    os.makedirs(os.path.join(fake_git_m, ".delegate"))
+    catalog.write_json(os.path.join(fake_git_m, ".delegate", "routing.json"), {"meters": False})
+    cat_proj = catalog.load_catalog(cwd=fake_git_m, config_dir=cfg_dir)
+    rows_proj = rank.rank("impl", cat_proj, doc_off, ALL_HARNESSES)
+    terra_proj = next(r for r in rows_proj if r["lane"] == "terra-high@codex")
+    record(
+        "case 25e project meters false skips Gate on a cache-below-gate meter",
+        catalog.meters_enabled(cat_proj["routing"]) is False
+        and terra_proj["eligible"] is True,
+        terra_proj["reason"],
+    )
+
 sys.exit(1 if fails else 0)

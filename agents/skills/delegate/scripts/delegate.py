@@ -52,7 +52,7 @@ import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from catalog import load_catalog, CatalogError, HARNESSES, EFFORTS, CLASSES, HARNESS_EFFORTS
+from catalog import load_catalog, CatalogError, HARNESSES, EFFORTS, CLASSES, HARNESS_EFFORTS, meters_enabled
 import events
 import rank
 import usage
@@ -259,6 +259,7 @@ def resolve(lane_name, class_name, brief_path, cwd_dir, write_dir, effort_arg, c
         "timeout": lane_data["timeout"],
         "child_cwd": child_cwd,
         "ads_dir": resolved_ads_dir,
+        "routing": cat.get("routing", {}),
     }
 
 
@@ -412,8 +413,8 @@ def ledger_start(thread_id, lane, class_name, effort, timeout_str, child_cwd, br
     ))
 
 
-def probe_meters(no_probe):
-    if no_probe:
+def probe_meters(no_probe, routing=None):
+    if no_probe or (routing is not None and not meters_enabled(routing)):
         return
     usage.acquire(refresh=True, timeout=180)
 
@@ -780,7 +781,7 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
     )
 
     # Step 5: Probe meters (before)
-    probe_meters(no_probe)
+    probe_meters(no_probe, resolved.get("routing"))
 
     # Step 6: Run the relay
     relay_exit, secs = run_relay(
@@ -796,7 +797,7 @@ def dispatch(lane, class_, brief, cwd, write=None, effort=None, config_dir=None,
     )
 
     # Step 5: Probe meters (after)
-    probe_meters(no_probe)
+    probe_meters(no_probe, resolved.get("routing"))
 
     # Step 7: Map the result
     mapped = map_result(
@@ -861,14 +862,7 @@ def run(class_, brief, cwd, write=None, tier=None, dry_run=False, config_dir=Non
             )
             sys.exit(2)
 
-    if meters:
-        try:
-            with open(meters, "r", encoding="utf-8") as f:
-                meters_doc = json.load(f)
-        except Exception:
-            meters_doc = {}
-    else:
-        meters_doc = rank.run_usage()
+    meters_doc = rank.load_usage(cat, meters, refresh=True)
 
     if harnesses is not None:
         present = set(h.strip() for h in harnesses.split(",") if h.strip())
