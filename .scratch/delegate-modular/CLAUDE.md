@@ -1,10 +1,14 @@
 # Delegate modular work
 
-Research is merged at `6467747`. Implementation is in progress. Tickets 01–07, 09, 10 and 13 are integrated
-through `49a628b`; independent review is running. Ticket 10’s examples await
-Orin’s review. Ticket 11’s CLI landed at `43f3eb1`; its focused screens and ticket 08 are in
-one active worker. Ticket 12 is in a separate worker. All 13 delegate script
-suites passed on the integrated foundation and CLI.
+Research is merged at `6467747`. Tickets 01–07, 09, 10, 12 and 13 are integrated;
+ticket 11’s CLI landed at `43f3eb1`. Its focused screens and ticket 08 are in the
+active `worktree/dm-focused-setup` worker. Ticket 10’s examples await Orin’s review.
+All 13 delegate script suites passed after foundation/CLI integration.
+
+Independent Meter/catalog review found two cache validity gaps, fixed at
+`9a74a4f` with passing affected fixtures. Model inspection landed at `9c15e0c`
+and passed a separate independent review. Completed worker worktrees are removed;
+only the focused-setup worker remains active.
 
 For implementation or triage, read the numbered tickets in `issues/` and their
 source notes. Each ticket names its blockers and acceptance checks. Start with

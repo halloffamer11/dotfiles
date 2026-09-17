@@ -35,6 +35,16 @@ ask again. A source change requires a fresh preview. Apply preserves stow links
 and writes only the chosen source document. Focused edits preserve other choices;
 bulk tier-line imports still turn omitted carried Lanes off.
 
+## Model evidence
+
+Use `scripts/bench.py model MODEL --effort-rows FILE` for a read-only inspection;
+repeat `--effort-rows` for accepted datasets and use `--json` for the same records
+as JSON. `--epoch-csv FILE` accepts a local snapshot. This command fetches nothing.
+It separates Model-family evidence from rows attributable to a Lane’s exact
+effort, shows unresolved identity and absent rows, and keeps board versions and
+source cost bases separate. Standing is within the loaded snapshot. Research
+links remain references until their rows pass the acceptance pipeline.
+
 ## 1. Classify and write the brief
 
 Read CONTEXT.md terms if this session has not. Read `assets/classes.md`. If the git root has `.delegate/classes.md`, use each of its `##` Class sections in place of the matching section from the skill guide. Pick exactly one Class; when two seem to fit, the counter-examples decide. Named dispatch skips Range and still writes the Class on the prompt.

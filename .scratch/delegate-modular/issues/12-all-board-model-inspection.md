@@ -12,12 +12,12 @@ Add read-only model inspection beside collect and share evidence records with HT
 
 ## Acceptance
 
-**Status:** ready-for-agent
+**Status:** landed
 
-- [ ] Fixtures cover exact effort, absent data, conflicting identities and benchmark version separation.
-- [ ] Cost labels distinguish source task sets and whole-run Terminal-Bench costs; no cross-source cost comparison or combined score.
-- [ ] Unknown identity mappings remain unresolved and inspection changes no Tier, Order or carry policy.
-- [ ] Benchmark and page tests pass; evidence availability limits are visible.
+- [x] Fixtures cover exact effort, absent data, conflicting identities and benchmark version separation.
+- [x] Cost labels distinguish source task sets and whole-run Terminal-Bench costs; no cross-source cost comparison or combined score.
+- [x] Unknown identity mappings remain unresolved and inspection changes no Tier, Order or carry policy.
+- [x] Benchmark and page tests pass; evidence availability limits are visible.
 
 ## Recorded, 2026-09-16
 
@@ -35,3 +35,19 @@ with their reason. Standing is scoped to the loaded snapshot and board/version;
 label direction and ties, and leave standing unknown when direction is unknown.
 Web research notes remain reference links; this ticket does not authorize a new
 scraper, new accepted dataset, or treating unsourced numbers as measurements.
+
+## Landed, 2026-09-16
+
+`9c15e0c` implements read-only `bench.py model`, shared evidence records for HTML,
+source/version-scoped standing and explicit evidence limits. Root review fixed
+canonical queries hiding unresolved candidate rows, exposed uncertainty and costs
+in the family text view, and corrected the multimodal relevance label.
+
+Independent checks: bench, bench_page, setup and setup_tui fixtures pass. A local
+inspection of `gpt-5.6-sol` against all three accepted source files completed
+without fetching. Quoted source descriptions and their dates are unchanged;
+relevance labels are interpretations. No new dataset or Domain is enabled.
+
+Terra’s separate read-only review found no actionable regression. It inspected
+the changed surface and repeated a local three-source inspection. It did not
+revalidate live source claims or the broader redesign.

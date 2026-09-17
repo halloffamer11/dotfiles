@@ -31,3 +31,10 @@ import-time timestamps, validates before agy normalization, and preserves bounde
 acquisition; setup saved-discovery inputs perform no live probes. Independent
 review of the integrated foundation is running; any findings will be recorded
 with their follow-up fixes. No live catalog policy was edited by this work.
+
+## Independent review, 2026-09-16
+
+Terra’s read-only Meter/catalog review found missing envelope timestamp and
+unvalidated display-number gaps. `9a74a4f` rejects those documents at the shared
+boundary; legacy bare maps still need no timestamp. Usage, rank, report, dispatch
+and catalog fixtures pass. A valid-envelope Tier fixture now includes its timestamp.
