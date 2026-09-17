@@ -243,14 +243,13 @@ def rank_range(cat, meters, present, floor=None, ceiling=None, *, reason_label="
     return ordered_eligible + vetoed_rows
 
 
-def rank(cls, cat, meters, present, tier=None, effort=None):
+def rank(cls, cat, meters, present, tier=None):
     """Rank catalog lanes for a given class.
 
     cat: dict from catalog.load_catalog
     meters: usage document dict (or {})
     present: set of harness names
     tier: optional floor override (must be between class floor and ceiling)
-    effort: optional effort override (unused in base ranking rule)
     """
     routing = cat.get("routing", {})
     classes = routing.get("classes", {})
