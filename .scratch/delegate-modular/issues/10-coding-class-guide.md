@@ -12,12 +12,12 @@ Create a guide for the existing five Classes with intent, signals, examples, cou
 
 ## Acceptance
 
-**Status:** implemented 2026-09-16 (`ca03156`); code checks pass, guide examples await Orin’s review.
+**Status:** landed; code checks pass and Orin accepted the guide examples.
 
 - [x] Guide covers exactly the existing Classes; overlay cannot create a Class or change numeric policy.
 - [x] Validation rejects unknown/missing Class sections and duplicated numeric Floor/Ceiling declarations.
 - [x] The skill loads the guide at classification and states the STOP interaction without an interactive Python prompt.
-- [ ] Catalog and existing STOP tests pass; guide examples receive maintainer review.
+- [x] Catalog and existing STOP tests pass; Orin accepted the guide examples.
 
 ## Recorded, 2026-09-16
 
@@ -29,5 +29,15 @@ Cut after Orin accepted the agy recommendation and instructed Fable to proceed w
 reviewed against the ticket; root removed an unrequested Class-section-order
 constraint, corrected the guide hierarchy and a glossary inconsistency, and
 made the missing-file fixture use its own temporary directory. Root reran
-catalog and rank tests and the skill validator; all pass. The remaining checkbox
-is Orin's review of the examples, not an implementation blocker.
+catalog and rank tests and the skill validator; all pass. At landing, only
+Orin's review of the examples remained.
+
+## Maintainer acceptance and redraft
+
+Orin accepted the guide and requested a humanizer redraft. The revision keeps
+all five Classes and their examples, combines overlapping selection advice,
+and removes repeated Floor/Ceiling, routing and dispatch instructions already
+owned by SKILL.md. Class-specific reasons to use a higher Tier remain.
+
+The redrafted guide passes `catalog.py check-guide`; all Class headings and
+examples are preserved.

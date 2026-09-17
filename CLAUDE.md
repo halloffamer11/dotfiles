@@ -29,8 +29,9 @@ agy combined Remaining/Pace stays unknown; proceed with tickets. The coding-only
 `.scratch/delegate-modular/CLAUDE.md` for the implementation record. Tickets 01–13
 are implemented through `561aca4`, with final display/docs following. All 13 script
 suites and full/focused terminal smoke checks pass. Independent reviews are complete;
-cache findings were fixed. Ticket 10’s guide examples await Orin’s review. M6–M11
-and the remaining consultation steps are still proposals.
+cache findings were fixed. Orin accepted ticket 10’s guide examples; the guide
+has been redrafted for clarity. M6–M11 and the remaining consultation steps
+are still proposals.
 
 **Project routing backend** (2026-09-15, from the dashboard prototype): a
 project's `.delegate/routing.json` may carry `project_order`, a flat list of carried

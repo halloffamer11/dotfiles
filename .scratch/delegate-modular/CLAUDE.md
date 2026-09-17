@@ -2,8 +2,8 @@
 
 The coding-only implementation is landed through `561aca4` (2026-09-16), with
 final display/documentation corrections in the following commit. Tickets 01–13
-carry Landed notes and verification. Ticket 10’s examples still await Orin’s
-review; implementation does not depend on that review.
+carry Landed notes and verification. Orin accepted ticket 10’s examples and
+requested a humanizer redraft, now applied.
 
 All 13 delegate script suites pass, plus full and focused PTY checks. Independent
 Meter/catalog review found two cache validity gaps, fixed at `9a74a4f`. Separate
