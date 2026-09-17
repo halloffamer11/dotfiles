@@ -1102,4 +1102,67 @@ try:
 except Exception as e:
     record("27 the page's off, copy, sensitivity, beaten-by and meter colour, under node", False, repr(e))
 
+
+# --- ticket 12: HTML uses the same evidence records ---------------------------
+try:
+    rows = [
+        {"source": "aa", "model": "gpt-5.6-sol", "effort": "high",
+         "benchmark": "Terminal-Bench 2.1", "score": 0.80, "cost_usd": 0.81,
+         "uncertain": False, "observed": "2026-09-11", "provenance": "unlabelled",
+         "url": "https://example.invalid/aa"},
+        {"source": "tbench", "model": "GPT-5.6 Sol", "effort": "high",
+         "benchmark": "Terminal-Bench 4.0", "score": 39.9, "score_unit": "%",
+         "cost_usd": 100.0, "uncertain": False, "observed": "2026-09-03",
+         "provenance": "unlabelled", "url": "https://example.invalid/tbench"},
+        {"source": "aa", "model": "Grok 4.3", "effort": "none",
+         "benchmark": "Omniscience", "score": 29.5, "cost_usd": 1.24,
+         "uncertain": True, "observed": "2026-09-11", "provenance": "unlabelled"},
+        {"source": "x", "model": "gpt-5.6-sol", "effort": "high",
+         "benchmark": "Nobody's board", "score": 9.0, "cost_usd": 1.0,
+         "uncertain": False, "observed": "2026-09-11", "provenance": "unlabelled"},
+    ]
+    records = bench.evidence_records(rows, LANES)
+    page = bench_page.render(None, LANES, rows)
+    about = bench.board_about("aa", "AutomationBench")
+    tb = bench.board_about("tbench", "Terminal-Bench 4.0")
+    index = bench.board_about("aa", "Artificial Analysis Intelligence Index")
+    record(
+        "HTML rows carry shared standing, cost basis, version and unresolved identity",
+        any(r["version"] == "2.1" and "Intelligence Index" in (r["cost_basis"] or "")
+            for r in records)
+        and any(r["version"] == "4.0" and "whole run" in (r["cost_basis"] or "")
+                for r in records)
+        and any(r["identity"] == "unresolved" and r["uncertain"] for r in records)
+        and "cost basis" in page and "standing" in page
+        and "2.1" in page and "4.0" in page
+        and ("unknown (" in page or "no catalog model" in page),
+        page[page.find('<table class="rows">'):page.find('<table class="rows">') + 800]
+        if '<table class="rows">' in page else page[:400],
+    )
+    record(
+        "speaks_to names coding, knowledge and API-workflow relevance without new Classes",
+        about is not None and "API-workflow relevance" in about["speaks_to"]
+        and "not a routing Domain or Class" in about["speaks_to"]
+        and "Knowledge relevance" in bench.board_about("aa", "Omniscience")["speaks_to"]
+        and "Coding relevance" in tb["speaks_to"]
+        and "composite across reasoning, knowledge, maths and programming" in index["speaks_to"]
+        and "knowledge-scout" not in about["speaks_to"]
+        and about["measures"].startswith("It tests whether models can complete realistic SaaS")
+        and about["fetched"] == "2026-09-12"
+        and index["fetched"] == "2026-09-12"
+        and index["score"].startswith("Intelligence Index is calculated as a weighted average"),
+        str({"auto": about["speaks_to"], "tb": tb["speaks_to"]}),
+    )
+    record(
+        "quoted methodology is preserved and direction is labelled, never inferred",
+        about["direction"] == "higher-is-better"
+        and tb["direction"] == "higher-is-better"
+        and bench.board_about("t", "Nobody's board") is None
+        and bench.board_direction("t", "Nobody's board") == bench.DIRECTION_UNKNOWN
+        and "higher-is-better" in page,
+        str(about.get("direction")),
+    )
+except Exception as e:
+    record("ticket 12 HTML shared evidence records", False, repr(e))
+
 sys.exit(1 if fails else 0)

@@ -49,8 +49,18 @@
   "rejected": {
     "cursorbench": "Cursor grades its own Composer models on a proprietary harness tuned per model; no runner, tasks, licence or raw artifacts published.",
     "databench": "Hex, proprietary end to end, LLM-judged with acknowledged noise, no raw evidence released.",
-    "deepswe": "Client-rendered with no data in the HTML; would need an API call, not a scrape.",
+    "deepswe": "Client-rendered with no data in the HTML; would need an API call, not a scrape. A 2026-09-15 browser reading is reference-only and is not an accepted row.",
     "swebench": "Submission-based, no reasoning-effort field, no cost column, no catalog model by exact name.",
     "vista": "One selected effort per row; its own leaderboard states the ladders are not comparable."
+  },
+  "reference_notes": {
+    "web-boards-2026-09-15": {
+      "note": "Human-read boards on 2026-09-15 (AA Terminal-Bench v4.0, APEX-Agents 1.1, DeepSWE v1.1). Reference links only; not accepted effort rows. DeepSWE stays rejected for automated extraction. Keep those versions separate from accepted AA Terminal-Bench 2.1 and ingested tbench 4.0.",
+      "urls": [
+        "https://artificialanalysis.ai/evaluations/terminalbench-v4-0",
+        "https://www.mercor.com/apex/apex-agents-leaderboard/",
+        "https://deepswe.datacurve.ai/"
+      ]
+    }
   }
 }
