@@ -12,13 +12,13 @@ Provide focused Tier, Order, paired Floor/Ceiling and Gate/Margin edits with exp
 
 ## Acceptance
 
-**Status:** in-progress
+**Status:** landed
 
-- [ ] Preview shows actual file and resolved stow target, global/effective values, changed fields and affected Picks using one cached observation snapshot.
-- [ ] Apply validates the full document, rejects intervening edits and preserves symlinks; no-op and invalid writes preserve file bytes.
-- [ ] Paired Range writes avoid invalid intermediate states; project Order never leaks into global data.
-- [ ] Focused edits preserve unrelated fields and carry choices; full bulk import semantics remain tested.
-- [ ] Affected catalog, setup and renderer tests pass; the documented CLI contract is reviewable before implementation.
+- [x] Preview shows actual file and resolved stow target, global/effective values, changed fields and affected Picks using one cached observation snapshot.
+- [x] Apply validates the full document, rejects intervening edits and preserves symlinks; no-op and invalid writes preserve file bytes.
+- [x] Paired Range writes avoid invalid intermediate states; project Order never leaks into global data.
+- [x] Focused edits preserve unrelated fields and carry choices; full bulk import semantics remain tested.
+- [x] Affected catalog, setup and renderer tests pass; the documented CLI contract is reviewable before implementation.
 
 ## Recorded, 2026-09-16
 
@@ -72,3 +72,17 @@ apply. Root review corrected the immediate pre-write revision check and Tier
 moves into a destination with unordered Lanes. Catalog and rank fixtures pass;
 all 13 delegate script suites passed after integration. Focused setup screens
 and bulk helper relocation are still in the active setup worker.
+
+## Landed, 2026-09-16
+
+`6173d51` moves bulk helpers in a pure commit. `561aca4` adds focused screens and
+metering control. Root corrected focused no-op Order normalization, Tier unmark,
+changed-field confirmation, and source-revision/stow-preserving saves before
+integration. Meter-off fixtures cover callers, project overrides, deterministic
+ranking, preserved Gate/Margin and explicit refresh.
+
+All 13 delegate script suites pass on the integrated changes. Full-wizard PTY
+and focused Routing/Tier/Review/Carry no-op checks pass; a real focused PTY toggle
+writes routing only and preserves stow links. Terra's independent review found
+no actionable regression in these commits. Final label/layout checks preserve
+the existing TUI design and make focused navigation and metering state explicit.

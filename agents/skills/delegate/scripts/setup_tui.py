@@ -62,7 +62,7 @@ TIER_FOOTER = f"↑/↓/j/k: move  {FLIP_KEYS}  enter: next  b: back  o: bench  
 REVIEW_FOOTER = "j/k: cursor  J/K: move lane  1-4: tier  v: paste  enter: next  b: back  q: quit"
 REVIEW_MOVE_LEGEND = "J/K or shift-↑/↓ moves a lane inside its tier; 1-4 moves it to that tier's end."
 REVIEW_ORDER_LEGEND = "Ranking tries 1 first; a lane lower down runs if its pace beats 1's by margin."
-ROUTING_FOOTER = "↑/↓ or j/k: move  +/-: adjust  enter: confirm  b: back  q: quit"
+ROUTING_FOOTER = "j/k: move  +/-: adjust  space/x: meters  enter: confirm  b: back  q: quit"
 PRESCREEN_FOOTER = f"↑/↓ or j/k: move  {FLIP_KEYS}  enter: continue  b: back  q: quit"
 NO_DATA_MESSAGE = "No per-effort data was supplied, so nothing else could be judged."
 CONFIRM_OFF_LEGEND = "off: written with enabled: false.  On lanes omit the key."
@@ -756,7 +756,9 @@ class Wizard:
         for field in ("gate", "margin", "meters"):
             old, new = self._original_routing.get(field), self.routing_doc.get(field)
             if old != new:
-                add(field, "on (default)" if field == "meters" and old is None else old, new)
+                add(field, ("on (default)" if old is None else "on" if old else "off")
+                    if field == "meters" else old,
+                    ("on" if new else "off") if field == "meters" else new)
         for path, changed in ((self.lanes_path, result != self._original_lanes),
                               (self.routing_path, self.routing_doc != self._original_routing)):
             if changed:
@@ -904,6 +906,8 @@ class Wizard:
 
     def _margin_legend(self):
         value = self.routing_doc["margin"]
+        if not self._meters_on():
+            return [f"margin {value} is stored; metering is off."]
         return [
             f"margin {value} — a lane further down the order takes the job instead of",
             f"  the top pick only when its pace beats the pick's by more than {value}.",
@@ -911,6 +915,8 @@ class Wizard:
 
     def _gate_legend(self):
         value = self.routing_doc["gate"]
+        if not self._meters_on():
+            return [f"gate {value} is stored; metering is off."]
         percent = f"{value * 100:g}%"
         return [
             f"gate {value} — a lane is skipped outright once its meter drops below",
@@ -976,6 +982,9 @@ class Wizard:
                                   + (f": {', '.join(admitted)}." if admitted else "."))
             paragraphs.append("A job sent to a lane by name skips the range.")
             return paragraphs
+        if kind in ("gate", "margin") and not self._meters_on():
+            return [f"{kind}: {value}", "Stored only while metering is off.",
+                    "Ranking uses Tier, Order and Lane name. Turn meters on to use Gate and Margin."]
         if kind == "margin":
             return [
                 f"margin: {value}",
@@ -996,7 +1005,8 @@ class Wizard:
             f"gate: {value}",
             f"A lane is skipped outright once its meter drops below {value * 100:g}% "
             "remaining, however capable it is.",
-            "Remaining is the lower of the meter's 5-hour and weekly fractions.",
+            "For shared spend, Remaining is the lower Window fraction. "
+            "agy's combined Remaining is unknown.",
         ]
 
     def _step_marker(self):
@@ -1008,7 +1018,11 @@ class Wizard:
         if self.screen in ("done", "quit"):
             return ""
         here = f"tier{self.tier}" if self.screen == "tier" else self.screen
-        parts = [f"[{label}]" if key == here else label for key, label in STEPS]
+        steps = STEPS
+        if self.focus:
+            focus_key = "prescreen" if self.focus == "carry" else self.focus
+            steps = tuple((key, label) for key, label in STEPS if key in (focus_key, "confirm"))
+        parts = [f"[{label}]" if key == here else label for key, label in steps]
         return " · ".join(parts)
 
     def _discovery_notices(self):
@@ -1111,7 +1125,9 @@ class Wizard:
                 # The tier definition belongs where the decision is made, but it
                 # and the key hints together overflow an 80-column footer, and a
                 # truncated footer loses the keys.
-                legend=self._tier_legend(),
+                legend=[*self._tier_legend(), *(
+                    ["Unmarking moves a Lane down one Tier; Enter reviews the changes."]
+                    if self.focus and self.tier > 1 else [])],
             )
         if self.screen == "review":
             epoch_names, aa_names = self._bench_columns()
@@ -1137,7 +1153,8 @@ class Wizard:
                         "cursor": name == here, "tag": "",
                     })
             off = [name for name in self.lanes_doc["lanes"] if not self._enabled[name]]
-            legend = [REVIEW_MOVE_LEGEND, REVIEW_ORDER_LEGEND]
+            legend = [REVIEW_MOVE_LEGEND, REVIEW_ORDER_LEGEND if self._meters_on()
+                      else "Metering is off. Ranking uses Tier, Order and Lane name."]
             if off:
                 legend.append(self._drift_line("Not carried, keeps its catalog tier", off))
             return self._frame(
@@ -1147,7 +1164,9 @@ class Wizard:
                 legend=legend,
             )
         if self.screen == "routing":
-            rows = [{"cells": [f"{cls} {kind}" if cls else kind, str(value)], "marked": False,
+            rows = [{"cells": [f"{cls} {kind}" if cls else kind,
+                               ("[x] on" if self._meters_on() else "[ ] off") if kind == "meters" else str(value)],
+                     "marked": kind == "meters" and self._meters_on(),
                      "dimmed": False, "cursor": i == self.cursor, "tag": ""}
                     for i, (cls, kind, value) in enumerate(self._routing_settings())]
             return self._frame(

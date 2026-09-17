@@ -1,20 +1,15 @@
 # Delegate modular work
 
-Research is merged at `6467747`. Tickets 01–07, 09, 10, 12 and 13 are integrated;
-ticket 11’s CLI landed at `43f3eb1`. Its focused screens and ticket 08 are in the
-active `worktree/dm-focused-setup` worker. Ticket 10’s examples await Orin’s review.
-All 13 delegate script suites passed after foundation/CLI integration.
+The coding-only implementation is landed through `561aca4` (2026-09-16), with
+final display/documentation corrections in the following commit. Tickets 01–13
+carry Landed notes and verification. Ticket 10’s examples still await Orin’s
+review; implementation does not depend on that review.
 
-Independent Meter/catalog review found two cache validity gaps, fixed at
-`9a74a4f` with passing affected fixtures. Model inspection landed at `9c15e0c`
-and passed a separate independent review. Completed worker worktrees are removed;
-only the focused-setup worker remains active.
-
-For implementation or triage, read the numbered tickets in `issues/` and their
-source notes. Each ticket names its blockers and acceptance checks. Start with
-the first unlanded ticket whose blockers are satisfied. Tickets 08, 11 and 12
-now have concrete CLI contracts. Active workers use isolated worktrees under
-`/private/tmp/delegate-modular-20260916/`; inspect their state before restarting work.
+All 13 delegate script suites pass, plus full and focused PTY checks. Independent
+Meter/catalog review found two cache validity gaps, fixed at `9a74a4f`. Separate
+model-inspection and focused-setup/metering reviews found no actionable regression.
+Worker runs are adjudicated in the delegate ledger. No worker remains active;
+completed worktrees are removed. Read the numbered tickets for scope and decisions.
 
 Before relying on research claims, read
 [verification notes](research/2026-09-15-verification-notes.md). They qualify the

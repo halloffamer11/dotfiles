@@ -12,12 +12,12 @@ Add routing.meters as an explicit boolean, default true when absent, with projec
 
 ## Acceptance
 
-**Status:** ready-for-agent
+**Status:** landed
 
-- [ ] Validators accept booleans and reject other types; legacy documents default on.
-- [ ] Off performs no automatic probe and gives deterministic Tier/Order/name selection; on restores the existing policy.
-- [ ] Project override, cache absence and retained Gate/Margin are covered by fixtures.
-- [ ] Setup controls and the surgical setter agree; affected tests pass.
+- [x] Validators accept booleans and reject other types; legacy documents default on.
+- [x] Off performs no automatic probe and gives deterministic Tier/Order/name selection; on restores the existing policy.
+- [x] Project override, cache absence and retained Gate/Margin are covered by fixtures.
+- [x] Setup controls and the surgical setter agree; affected tests pass.
 
 ## Recorded, 2026-09-16
 
@@ -32,3 +32,17 @@ routing rather than rewriting the catalog just to add the default. Dispatch
 must honor the effective switch at both run start and finish, including named
 dispatch automatic probes. Ranking still validates the Class and Range when off.
 Fixture checks must cover that a subsequent caller cannot reintroduce a probe.
+
+## Landed, 2026-09-16
+
+`6173d51` moves bulk helpers in a pure commit. `561aca4` adds focused screens and
+metering control. Root corrected focused no-op Order normalization, Tier unmark,
+changed-field confirmation, and source-revision/stow-preserving saves before
+integration. Meter-off fixtures cover callers, project overrides, deterministic
+ranking, preserved Gate/Margin and explicit refresh.
+
+All 13 delegate script suites pass on the integrated changes. Full-wizard PTY
+and focused Routing/Tier/Review/Carry no-op checks pass; a real focused PTY toggle
+writes routing only and preserves stow links. Terra's independent review found
+no actionable regression in these commits. Final label/layout checks preserve
+the existing TUI design and make focused navigation and metering state explicit.
