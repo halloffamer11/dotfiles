@@ -15,23 +15,29 @@ Machine configuration and agent tooling managed as one Git repository.
 
 ## Active work
 
-**Delegate modular research** (2026-09-15): eight worker notes in
-`.scratch/delegate-modular/research/` answer four questions about the delegate skill: two
-deep-modules reviews (astra xhigh, grok), a refactoring consultation toward the modular
-story (grok), the benchmark boards behind it (Artificial Analysis from the accepted rows;
-Terminal-Bench 4.0, APEX-Agents and DeepSWE read in the browser), a multi-domain tiers and
-judgment-setup scope (astra high), and two comparisons with kunchenguid/quota-axi (grok,
-agy). `2026-09-15-verification-notes.md` there records what was checked at merge and which
-claims to discount. On 2026-09-16, recovered Orin's approval from Fable's session:
-agy combined Remaining/Pace stays unknown; proceed with tickets. The coding-only cut
-(C1–C8 plus M1–M5, with overlaps combined) is now in
-`.scratch/delegate-modular/issues/`, with the agy change as ticket 13. Read
-`.scratch/delegate-modular/CLAUDE.md` for the implementation record. Tickets 01–13
-are implemented through `561aca4`, with final display/docs following. All 13 script
-suites and full/focused terminal smoke checks pass. Independent reviews are complete;
-cache findings were fixed. Orin accepted ticket 10’s guide examples; the guide
-has been redrafted for clarity. M6–M11 and the remaining consultation steps
-are still proposals.
+**Next session: Herdr monitor branch.** Resume `worktree/delegate-monitor-herdr`.
+Read the dashboard spec below, then the branch's `tools/delegate-dashboard/CLAUDE.md`
+and ticket 09's final verdict. Its prototype is accepted; production scope still
+needs definition. Reopen it in a separate worktree using the Herdr skill and the
+installed CLI help. Preserve `main` and its local work. Compare the branch with
+current `main` before integration: the prototype predates the modular changes,
+including the shared Meter boundary, catalog edits and metering toggle. Keep its
+project `.delegate/routing.json` test preferences off `main`. Validate the dashboard
+against the current backend before extending it. The Rust `tools/delegate-mon/`
+monitor is a separate tool. This session only prepares the restart; it does not
+reopen or merge the prototype.
+
+**Delegate modular batch complete** (2026-09-16): tickets 01–13 landed, all 13
+script suites and full/focused terminal checks passed, and independent review
+findings were fixed. Orin accepted the Class guide; its humanizer redraft landed
+at `a24d20e`. Read `.scratch/delegate-modular/CLAUDE.md` for the implementation
+record and qualified research pointers. Multi-domain scope and the remaining
+consultation steps are still proposals.
+
+**Retained work** (2026-09-16): `.scratch/dotfiles-bootstrap/issues/` holds five
+unimplemented bootstrap and maintenance tickets, separate from the monitor work.
+`prompt.md` is the original modular-research brief, retained as scope history.
+Orin confirmed the global Gate of 0%; it is an intentional configuration choice.
 
 **Project routing backend** (2026-09-15, from the dashboard prototype): a
 project's `.delegate/routing.json` may carry `project_order`, a flat list of carried
@@ -49,52 +55,28 @@ evidence, and the verdict record on tickets 01 and 09 stay on branch
 on 2026-09-15 and the branch's own CLAUDE.md says how to reopen the dashboard. A
 production control surface is not ticketed yet.
 
-The delegate redesign is the main live thread. Spec
+**Delegate redesign follow-ups:** spec
 `docs/superpowers/specs/2026-09-08-delegate-redesign.md`; tickets in
 `.scratch/delegate-redesign/issues/`, each carrying its own decisions and a
 "Landed" note; skill context `agents/skills/delegate/CLAUDE.md`. Tickets 01-19 and
 22-28 are landed, and the boxes left unticked there are Orin's own confirmations,
 which each ticket's Status line names.
 
-**Delegate browser use** is the second thread, on branch `worktree/silver-river-1847`
-(not merged): tickets 01-07 in `.scratch/delegate-browser/issues/`. Goal: the dispatch
-path lets workers use a browser a harness already has — a disposable browser
-everywhere, and the Helium "GenAI" agent profile through the Playwright extension — on
-the Mac and omarchy. No new config file, flag or ranking change; machine setup happens
-in conversation with Orin. Ticket 01 is done: the runner `scripts/browser_probes.py`,
-the prompt changes, and the Mac baseline table, with a 2026-09-12 retest beneath it.
+**Delegate browser follow-ups:** the former `worktree/silver-river-1847` work is
+merged into `main`; that local branch is closed. Tickets 01–07 in
+`.scratch/delegate-browser/issues/` own remaining setup and parity work. Before
+changing browser dispatch, read the browser section of
+`agents/skills/delegate/CLAUDE.md` and
+`.scratch/delegate-browser/research/2026-09-10-browser-routes.md` for the proven
+Mac behavior and outstanding Grok, native Claude, and Omarchy work.
 
-State after 2026-09-12, each row proven against Playwright's own snapshots rather
-than a worker's marker: **agy** passes; **codex** passes through a home of
-delegate's own (`~/.local/share/delegate/codex-home`, built by
-`make delegate-codex-home`), which holds one MCP server, so a worker never sees
-Gmail, `codex-cli`, `node_repl`, hooks or `~/.codex/AGENTS.md` — ticket 03 is done on the
-Mac, proven through the normal dispatch path in a read-only run and a write run,
-and only the omarchy setup remains; **grok** has a browser
-on write runs only, because its built-in `read-only` sandbox kills every stdio MCP
-server on macOS, and the proven fix is a custom sandbox profile, which needs a
-relay change (ticket 04); **claude** lanes are native since ticket 22, so ticket 02
-is rescoped to the session's own config and a restart. Facts and setup rules:
-`.scratch/delegate-browser/research/2026-09-10-browser-routes.md`.
-
-**Ticket 22 landed on `main` as `71e285c`** (2026-09-11), on top of `ea5430b`: each
-class has a floor and a ceiling (`routing.json` `classes`), no class reaches tier 4,
-`run --tier` raises the floor for one job, and Claude lanes run natively as the
-`lane-*` agents in `agents/agents/`.
-
-**Landed on `main` at `d53e5af`** (2026-09-13): tickets 18, 19 and 24-28 on top of
-22 and 23. The chain was `bench-aa-effort-slugs` (18, 24), then `t19-efforts-and-rows`,
-`t25-wizard-pages`, `t26-page-tiers`, `t27-page-first`, `t28-tier-order`; the last four
-worktrees and branches are removed, and `main` merged the browser thread on the way.
-Orin's wizard run (2026-09-13, ticket 28's run note) wrote the repo catalog: 18 lanes
-on, each with a tier and an `order`, 25 off; `scout` is floor 1 / ceiling 2. The live
-`~/.config/delegate/{lanes,routing}.json` are stow links into the repo since the same
-day (the plain files it replaced sit in `~/.config/delegate/_pre-stow-2026-09-13/`,
-unused), `make skills` linked the 16 `lane-*` agents, and `rank.py impl` through the
-installed skill reads the new tiers and orders. `make delegate-wizard` runs the wizard
-on the repo catalog with the accepted rows from any directory
-(`make -C <checkout> delegate-wizard`; `WIZARD_ARGS` adds flags such as
-`--tiers-from <file>`).
+**Live configuration:** `~/.config/delegate/{lanes,routing}.json` are stow links
+into this repo since 2026-09-13. The replaced plain files in
+`~/.config/delegate/_pre-stow-2026-09-13/` are unused. Orin's Tier and Order choices
+are recorded in ticket 28; current values belong to the catalog. From any directory,
+`make -C <checkout> delegate-wizard` edits that catalog with the accepted benchmark
+rows; `WIZARD_ARGS` adds setup flags. For historical implementation and validation,
+read the redesign tickets rather than reconstructing deleted worker branches.
 
 **Open, in priority order:**
 
