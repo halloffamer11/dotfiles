@@ -4,6 +4,7 @@ import copy
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -1219,5 +1220,731 @@ with tempfile.TemporaryDirectory() as missing_dir:
         msg,
     )
 
+
+# 10. Focused catalog edits (ticket 11 CLI). Fixtures only; never the live config.
+ALL_HARNESSES = set(catalog.HARNESSES)
+EMPTY_METERS = {}
+
+
+def make_edit_fixture(td, *, project=None, dotted=False, symlink=False):
+    real_cfg = os.path.join(td, "real-cfg")
+    cfg = os.path.join(td, "cfg")
+    os.makedirs(real_cfg)
+    os.makedirs(cfg)
+    lanes = copy.deepcopy(lanes_sample)
+    lanes["lanes"]["terra-high@codex"]["order"] = 1
+    lanes["lanes"]["grok46-high@grok"]["order"] = 2
+    lanes["lanes"]["luna-low@codex"]["order"] = 1
+    lanes["lanes"]["flash-high@agy"]["order"] = 2
+    lanes["lanes"]["sol-high@codex"]["order"] = 1
+    lanes["lanes"]["fable-xhigh@claude"]["order"] = 1
+    if dotted:
+        extra = copy.deepcopy(lanes["lanes"]["luna-low@codex"])
+        extra["model"] = "gpt-5.6-luna"
+        extra["order"] = 3
+        lanes["lanes"]["gpt-5.6-luna-low@codex"] = extra
+    catalog.write_json(os.path.join(real_cfg, "lanes.json"), lanes)
+    catalog.write_json(os.path.join(real_cfg, "routing.json"), copy.deepcopy(routing_sample))
+    if symlink:
+        os.symlink(os.path.join(real_cfg, "lanes.json"), os.path.join(cfg, "lanes.json"))
+        os.symlink(os.path.join(real_cfg, "routing.json"), os.path.join(cfg, "routing.json"))
+    else:
+        os.replace(os.path.join(real_cfg, "lanes.json"), os.path.join(cfg, "lanes.json"))
+        os.replace(os.path.join(real_cfg, "routing.json"), os.path.join(cfg, "routing.json"))
+        real_cfg = cfg
+    repo = os.path.join(td, "repo")
+    os.makedirs(repo)
+    open(os.path.join(repo, ".git"), "w").close()
+    if project is not None:
+        os.makedirs(os.path.join(repo, ".delegate"))
+        catalog.write_json(os.path.join(repo, ".delegate", "routing.json"), project)
+    return cfg, repo, real_cfg
+
+
+def file_bytes(path):
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def same_path(a, b):
+    return os.path.realpath(a) == os.path.realpath(b)
+
+
+def catalog_cli(args, env, cwd=None):
+    return subprocess.run(
+        [sys.executable, CATALOG_PY, *args],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=cwd,
+    )
+
+
+def isolated_cli_env(td, harnesses=ALL_HARNESSES, meters_doc=None):
+    bindir = os.path.join(td, "bin")
+    os.makedirs(bindir, exist_ok=True)
+    for name in harnesses:
+        path = os.path.join(bindir, name)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("#!/bin/sh\nexit 0\n")
+        os.chmod(path, 0o755)
+    cache = os.path.join(td, "usage.json")
+    if meters_doc is None:
+        meters_doc = {}
+    with open(cache, "w", encoding="utf-8") as f:
+        json.dump(meters_doc, f)
+        f.write("\n")
+    env = os.environ.copy()
+    env["PATH"] = bindir
+    env["DELEGATE_CACHE"] = cache
+    env.pop("CONSULT_CACHE", None)
+    return env
+
+
+def expected_picks_leaders(cwd, config_dir, present=ALL_HARNESSES, meters=EMPTY_METERS):
+    cat = catalog.load_catalog(cwd=cwd, config_dir=config_dir)
+    picks = {}
+    for cls in catalog.CLASSES:
+        rows = rank.rank(cls, cat, meters, present)
+        picks[cls] = next((row["lane"] for row in rows if row.get("pick")), None)
+    leaders = [
+        {"tier": preview["tier"], "leader": preview["leader"]}
+        for preview in rank.tier_leaders(cat, meters, present)
+    ]
+    return picks, leaders
+
+
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, _real = make_edit_fixture(td, project={"note": "keep me", "margin": 0.5})
+    present = ALL_HARNESSES
+    preview = catalog.edit_catalog(
+        "set",
+        field="routing.gate",
+        value=0.25,
+        scope="global",
+        cwd=repo,
+        config_dir=cfg,
+        present=present,
+        meters=EMPTY_METERS,
+    )
+    before_picks, before_leaders = expected_picks_leaders(repo, cfg)
+    record(
+        "10.1 set preview names files, revision, global/effective values and cached picks",
+        preview["op"] == "set"
+        and preview["scope"] == "global"
+        and preview["written"] is False
+        and preview["noop"] is False
+        and same_path(preview["target"]["file"], os.path.join(cfg, "routing.json"))
+        and same_path(preview["target"]["resolved"], os.path.join(cfg, "routing.json"))
+        and preview["sources"]["project"]["exists"] is True
+        and preview["values"]["original"]["global"] == 0.1
+        and preview["values"]["original"]["effective"] == 0.1
+        and preview["values"]["resulting"]["global"] == 0.25
+        and preview["values"]["resulting"]["effective"] == 0.25
+        and preview["changed"] == ["routing.gate"]
+        and preview["picks"]["before"] == before_picks
+        and preview["leaders"]["before"] == before_leaders
+        and preview["observations"] == "missing"
+        and set(preview["missing_observations"]) == set(lanes_sample["meters"]),
+        repr(preview),
+    )
+
+    routing_before = file_bytes(os.path.join(cfg, "routing.json"))
+    project_before = file_bytes(os.path.join(repo, ".delegate", "routing.json"))
+    lanes_before = file_bytes(os.path.join(cfg, "lanes.json"))
+    applied = catalog.edit_catalog(
+        "set",
+        field="routing.gate",
+        value=0.25,
+        scope="global",
+        cwd=repo,
+        config_dir=cfg,
+        apply=True,
+        expect=preview["revision"],
+        present=present,
+        meters=EMPTY_METERS,
+    )
+    routing_after = catalog.load_json(os.path.join(cfg, "routing.json"))
+    project_after = catalog.load_json(os.path.join(repo, ".delegate", "routing.json"))
+    after_picks, after_leaders = expected_picks_leaders(repo, cfg)
+    record(
+        "10.1b global apply writes only routing.json and preserves project bytes",
+        applied["written"] is True
+        and routing_after["gate"] == 0.25
+        and routing_after["margin"] == routing_sample["margin"]
+        and routing_after["classes"] == routing_sample["classes"]
+        and "project_order" not in routing_after
+        and file_bytes(os.path.join(repo, ".delegate", "routing.json")) == project_before
+        and file_bytes(os.path.join(cfg, "lanes.json")) == lanes_before
+        and file_bytes(os.path.join(cfg, "routing.json")) != routing_before
+        and applied["picks"]["after"] == after_picks
+        and applied["leaders"]["after"] == after_leaders
+        and project_after["note"] == "keep me"
+        and project_after["margin"] == 0.5,
+        repr(applied.get("changed")),
+    )
+
+    stale = check_catalog_error(
+        catalog.edit_catalog,
+        "set",
+        field="routing.gate",
+        value=0.3,
+        scope="global",
+        cwd=repo,
+        config_dir=cfg,
+        apply=True,
+        expect=preview["revision"],
+        present=present,
+        meters=EMPTY_METERS,
+    )
+    record(
+        "10.2 stale source revision is rejected without writing",
+        stale is not None and "intervening edit" in stale
+        and catalog.load_json(os.path.join(cfg, "routing.json"))["gate"] == 0.25,
+        stale,
+    )
+
+
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, real_cfg = make_edit_fixture(td, symlink=True)
+    lanes_link = os.path.join(cfg, "lanes.json")
+    routing_link = os.path.join(cfg, "routing.json")
+    preview = catalog.edit_catalog(
+        "set",
+        field="lanes.terra-high@codex.tier",
+        value=3,
+        scope="global",
+        cwd=repo,
+        config_dir=cfg,
+        present=ALL_HARNESSES,
+        meters=EMPTY_METERS,
+    )
+    record(
+        "10.3 preview reports the stow symlink and resolved target",
+        preview["target"]["symlink"] is True
+        and same_path(preview["target"]["file"], lanes_link)
+        and same_path(preview["target"]["resolved"], os.path.join(real_cfg, "lanes.json"))
+        and preview["values"]["resulting"]["tier"] == 3
+        and preview["values"]["resulting"]["order"] == 2
+        and "lanes.terra-high@codex.tier" in preview["changed"]
+        and "lanes.terra-high@codex.order" in preview["changed"],
+        repr(preview["target"]) + repr(preview["values"]),
+    )
+    catalog.edit_catalog(
+        "set",
+        field="lanes.terra-high@codex.tier",
+        value=3,
+        scope="global",
+        cwd=repo,
+        config_dir=cfg,
+        apply=True,
+        expect=preview["revision"],
+        present=ALL_HARNESSES,
+        meters=EMPTY_METERS,
+    )
+    record(
+        "10.3b apply writes through the symlink and leaves the link in place",
+        os.path.islink(lanes_link)
+        and os.path.islink(routing_link)
+        and same_path(lanes_link, os.path.join(real_cfg, "lanes.json"))
+        and catalog.load_json(os.path.join(real_cfg, "lanes.json"))["lanes"]["terra-high@codex"]["tier"] == 3
+        and catalog.load_json(os.path.join(real_cfg, "lanes.json"))["lanes"]["terra-high@codex"]["order"] == 2
+        and catalog.load_json(os.path.join(real_cfg, "lanes.json"))["lanes"]["sol-high@codex"]["tier"] == 3,
+    )
+
+    other = os.path.join(td, "other-lanes.json")
+    shutil.copy(os.path.join(real_cfg, "lanes.json"), other)
+    os.remove(lanes_link)
+    os.symlink(other, lanes_link)
+    msg = check_catalog_error(
+        catalog.edit_catalog,
+        "set",
+        field="lanes.terra-high@codex.tier",
+        value=1,
+        scope="global",
+        cwd=repo,
+        config_dir=cfg,
+        apply=True,
+        expect=preview["revision"],
+        present=ALL_HARNESSES,
+        meters=EMPTY_METERS,
+    )
+    record(
+        "10.3c retargeted symlink requires a fresh preview",
+        msg is not None and "intervening edit" in msg
+        and os.path.islink(lanes_link)
+        and catalog.load_json(other)["lanes"]["terra-high@codex"]["tier"] == 3,
+        msg,
+    )
+
+
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, _real = make_edit_fixture(td)
+    routing_path = os.path.join(cfg, "routing.json")
+    before = file_bytes(routing_path)
+    mtime = os.stat(routing_path).st_mtime_ns
+    preview = catalog.edit_catalog(
+        "set",
+        field="routing.gate",
+        value=0.1,
+        scope="global",
+        cwd=repo,
+        config_dir=cfg,
+        present=ALL_HARNESSES,
+        meters=EMPTY_METERS,
+    )
+    applied = catalog.edit_catalog(
+        "set",
+        field="routing.gate",
+        value=0.1,
+        scope="global",
+        cwd=repo,
+        config_dir=cfg,
+        apply=True,
+        expect=preview["revision"],
+        present=ALL_HARNESSES,
+        meters=EMPTY_METERS,
+    )
+    record(
+        "10.4 semantic no-op apply preserves file bytes",
+        preview["noop"] is True
+        and preview["changed"] == []
+        and applied["written"] is False
+        and applied["noop"] is True
+        and file_bytes(routing_path) == before
+        and os.stat(routing_path).st_mtime_ns == mtime,
+        repr(applied),
+    )
+
+    invalid_before = file_bytes(routing_path)
+    msg = check_catalog_error(
+        catalog.edit_catalog,
+        "set",
+        field="routing.gate",
+        value=2,
+        scope="global",
+        cwd=repo,
+        config_dir=cfg,
+        apply=True,
+        expect=catalog.catalog_revision(cwd=repo, config_dir=cfg),
+        present=ALL_HARNESSES,
+        meters=EMPTY_METERS,
+    )
+    record(
+        "10.4b invalid write preserves file bytes",
+        msg is not None and "gate" in msg
+        and file_bytes(routing_path) == invalid_before,
+        msg,
+    )
+
+    msg = check_catalog_error(
+        catalog.edit_catalog,
+        "set",
+        field="lanes.terra-high@codex.tier",
+        value=2,
+        scope="project",
+        cwd=repo,
+        config_dir=cfg,
+        present=ALL_HARNESSES,
+        meters=EMPTY_METERS,
+    )
+    record(
+        "10.4c project Lane Tier writes are rejected",
+        msg is not None and "global-only" in msg and "terra-high@codex" in msg,
+        msg,
+    )
+    msg = check_catalog_error(
+        catalog.edit_catalog,
+        "set",
+        field="routing.meters",
+        value=False,
+        scope="global",
+        cwd=repo,
+        config_dir=cfg,
+        present=ALL_HARNESSES,
+        meters=EMPTY_METERS,
+    )
+    record(
+        "10.4d routing.meters is reserved",
+        msg is not None and "routing.meters" in msg and "reserved" in msg,
+        msg,
+    )
+
+
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, _real = make_edit_fixture(td)
+    global_before = file_bytes(os.path.join(cfg, "routing.json"))
+    preview = catalog.edit_catalog(
+        "range",
+        cls="scout",
+        floor=4,
+        ceiling=4,
+        scope="project",
+        cwd=repo,
+        config_dir=cfg,
+        present=ALL_HARNESSES,
+        meters=EMPTY_METERS,
+    )
+    record(
+        "10.5 paired project Range preview sets both bounds against original globals",
+        preview["values"]["original"]["global"] == {"floor": 2, "ceiling": 3}
+        and preview["values"]["original"]["effective"] == {"floor": 2, "ceiling": 3}
+        and preview["values"]["resulting"]["global"] == {"floor": 2, "ceiling": 3}
+        and preview["values"]["resulting"]["effective"] == {"floor": 4, "ceiling": 4}
+        and preview["changed"] == ["classes.scout.floor", "classes.scout.ceiling"]
+        and preview["target"]["file"] == os.path.join(repo, ".delegate", "routing.json")
+        and preview["sources"]["project"]["exists"] is False,
+        repr(preview["values"]),
+    )
+    catalog.edit_catalog(
+        "range",
+        cls="scout",
+        floor=4,
+        ceiling=4,
+        scope="project",
+        cwd=repo,
+        config_dir=cfg,
+        apply=True,
+        expect=preview["revision"],
+        present=ALL_HARNESSES,
+        meters=EMPTY_METERS,
+    )
+    project_doc = catalog.load_json(os.path.join(repo, ".delegate", "routing.json"))
+    global_doc = catalog.load_json(os.path.join(cfg, "routing.json"))
+    record(
+        "10.5b project Range writes both bounds and does not leak into global routing",
+        project_doc["classes"]["scout"] == {"floor": 4, "ceiling": 4}
+        and file_bytes(os.path.join(cfg, "routing.json")) == global_before
+        and global_doc["classes"]["scout"] == {"floor": 2, "ceiling": 3}
+        and "project_order" not in global_doc,
+        repr(project_doc),
+    )
+    msg = check_catalog_error(
+        catalog.edit_catalog,
+        "range",
+        cls="scout",
+        floor=4,
+        ceiling=3,
+        scope="project",
+        cwd=repo,
+        config_dir=cfg,
+        present=ALL_HARNESSES,
+        meters=EMPTY_METERS,
+    )
+    record(
+        "10.5c floor above ceiling is rejected as a pair",
+        msg is not None and "floor (4) cannot exceed ceiling (3)" in msg,
+        msg,
+    )
+
+
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, _real = make_edit_fixture(
+        td,
+        project={"project_order": ["flash-high@agy"], "note": "other tiers stay"},
+    )
+    preview = catalog.edit_catalog(
+        "order",
+        lane="grok46-high@grok",
+        position=1,
+        scope="global",
+        cwd=repo,
+        config_dir=cfg,
+        present=ALL_HARNESSES,
+        meters=EMPTY_METERS,
+    )
+    record(
+        "10.6 same-Tier global Order renumbers only that Tier",
+        preview["values"]["tier"] == 2
+        and preview["values"]["sequence"]["original"] == ["terra-high@codex", "grok46-high@grok"]
+        and preview["values"]["sequence"]["resulting"] == ["grok46-high@grok", "terra-high@codex"]
+        and preview["changed"] == ["lanes.grok46-high@grok.order", "lanes.terra-high@codex.order"],
+        repr(preview["values"]),
+    )
+    catalog.edit_catalog(
+        "order",
+        lane="grok46-high@grok",
+        position=1,
+        scope="global",
+        cwd=repo,
+        config_dir=cfg,
+        apply=True,
+        expect=preview["revision"],
+        present=ALL_HARNESSES,
+        meters=EMPTY_METERS,
+    )
+    lanes_doc = catalog.load_json(os.path.join(cfg, "lanes.json"))
+    project_doc = catalog.load_json(os.path.join(repo, ".delegate", "routing.json"))
+    record(
+        "10.6b global Order does not write project_order or other Tiers",
+        lanes_doc["lanes"]["grok46-high@grok"]["order"] == 1
+        and lanes_doc["lanes"]["terra-high@codex"]["order"] == 2
+        and lanes_doc["lanes"]["luna-low@codex"]["order"] == 1
+        and lanes_doc["lanes"]["flash-high@agy"]["order"] == 2
+        and "project_order" not in lanes_doc
+        and project_doc["project_order"] == ["flash-high@agy"]
+        and project_doc["note"] == "other tiers stay",
+    )
+
+    rev = catalog.catalog_revision(cwd=repo, config_dir=cfg)
+    preview_p = catalog.edit_catalog(
+        "order",
+        lane="terra-high@codex",
+        position=1,
+        scope="project",
+        cwd=repo,
+        config_dir=cfg,
+        present=ALL_HARNESSES,
+        meters=EMPTY_METERS,
+    )
+    catalog.edit_catalog(
+        "order",
+        lane="terra-high@codex",
+        position=1,
+        scope="project",
+        cwd=repo,
+        config_dir=cfg,
+        apply=True,
+        expect=preview_p["revision"],
+        present=ALL_HARNESSES,
+        meters=EMPTY_METERS,
+    )
+    project_doc = catalog.load_json(os.path.join(repo, ".delegate", "routing.json"))
+    global_lanes = catalog.load_json(os.path.join(cfg, "lanes.json"))
+    effective = catalog.load_catalog(cwd=repo, config_dir=cfg)
+    tier1 = [
+        name for name, lane in sorted(
+            ((n, l) for n, l in effective["lanes"].items() if l["tier"] == 1),
+            key=lambda item: item[1]["order"],
+        )
+    ]
+    record(
+        "10.6c project Order rewrites only the selected Tier and keeps global lanes",
+        project_doc["project_order"]
+            == ["flash-high@agy", "terra-high@codex", "grok46-high@grok"]
+        and project_doc["note"] == "other tiers stay"
+        and global_lanes["lanes"]["grok46-high@grok"]["order"] == 1
+        and global_lanes["lanes"]["terra-high@codex"]["order"] == 2
+        and tier1[0] == "flash-high@agy"
+        and preview_p["revision"] == rev,
+        repr(project_doc),
+    )
+
+
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, _real = make_edit_fixture(td, dotted=True)
+    field = "lanes.gpt-5.6-luna-low@codex.tier"
+    kind, name = catalog.parse_set_field(field)
+    preview = catalog.edit_catalog(
+        "set",
+        field=field,
+        value=2,
+        scope="global",
+        cwd=repo,
+        config_dir=cfg,
+        present=ALL_HARNESSES,
+        meters=EMPTY_METERS,
+    )
+    record(
+        "10.7 dotted lane names use the prefix and final field",
+        kind == "lane_tier"
+        and name == "gpt-5.6-luna-low@codex"
+        and preview["values"]["lane"] == "gpt-5.6-luna-low@codex"
+        and preview["values"]["original"]["tier"] == 1
+        and preview["values"]["resulting"]["tier"] == 2
+        and preview["values"]["resulting"]["order"]
+            == 1 + max(
+                lanes_sample["lanes"]["terra-high@codex"].get("order") or 0,
+                2,
+            ),
+        repr(preview["values"]),
+    )
+    catalog.edit_catalog(
+        "set",
+        field=field,
+        value=2,
+        scope="global",
+        cwd=repo,
+        config_dir=cfg,
+        apply=True,
+        expect=preview["revision"],
+        present=ALL_HARNESSES,
+        meters=EMPTY_METERS,
+    )
+    written = catalog.load_json(os.path.join(cfg, "lanes.json"))
+    record(
+        "10.7b dotted lane Tier move appends to the new Tier Order",
+        written["lanes"]["gpt-5.6-luna-low@codex"]["tier"] == 2
+        and written["lanes"]["gpt-5.6-luna-low@codex"]["order"] == 3
+        and written["lanes"]["terra-high@codex"]["order"] == 1
+        and written["lanes"]["grok46-high@grok"]["order"] == 2,
+        repr(written["lanes"]["gpt-5.6-luna-low@codex"]),
+    )
+
+
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, _real = make_edit_fixture(td)
+    env = isolated_cli_env(td, meters_doc={})
+    helper = catalog.edit_catalog(
+        "set",
+        field="routing.margin",
+        value=0.4,
+        scope="global",
+        cwd=repo,
+        config_dir=cfg,
+        present=ALL_HARNESSES,
+        meters=EMPTY_METERS,
+    )
+    res = catalog_cli(
+        [
+            "set", "routing.margin", "0.4",
+            "--scope", "global",
+            "--cwd", repo,
+            "--config-dir", cfg,
+        ],
+        env,
+    )
+    cli = json.loads(res.stdout)
+    record(
+        "10.8 CLI preview matches helper picks with no vendor probe",
+        res.returncode == 0
+        and cli["picks"] == helper["picks"]
+        and cli["leaders"] == helper["leaders"]
+        and cli["revision"] == helper["revision"]
+        and cli["observations"] == "missing"
+        and cli["unavailable_harnesses"] == [],
+        res.stderr + res.stdout[:500],
+    )
+    res_apply = catalog_cli(
+        [
+            "set", "routing.margin", "0.4",
+            "--scope", "global",
+            "--cwd", repo,
+            "--config-dir", cfg,
+            "--apply",
+            "--expect", cli["revision"],
+        ],
+        env,
+    )
+    applied = json.loads(res_apply.stdout)
+    after_picks, after_leaders = expected_picks_leaders(repo, cfg)
+    record(
+        "10.8b CLI apply before/after predictions match rank on the fixture",
+        res_apply.returncode == 0
+        and applied["written"] is True
+        and applied["picks"]["after"] == after_picks
+        and applied["leaders"]["after"] == after_leaders
+        and catalog.load_json(os.path.join(cfg, "routing.json"))["margin"] == 0.4,
+        res_apply.stderr,
+    )
+    res_bad = catalog_cli(
+        [
+            "set", "routing.margin", "0.4",
+            "--scope", "global",
+            "--cwd", repo,
+            "--config-dir", cfg,
+            "--apply",
+        ],
+        env,
+    )
+    record(
+        "10.8c apply without --expect is refused",
+        res_bad.returncode == 1 and "--apply requires --expect" in res_bad.stderr,
+        res_bad.stderr,
+    )
+
+    absent_rev = catalog.catalog_revision(cwd=repo, config_dir=cfg)
+    os.makedirs(os.path.join(repo, ".delegate"), exist_ok=True)
+    catalog.write_json(os.path.join(repo, ".delegate", "routing.json"), {"gate": 0.2})
+    present_rev = catalog.catalog_revision(cwd=repo, config_dir=cfg)
+    record(
+        "10.9 absent project file is part of the revision",
+        absent_rev != present_rev,
+        f"{absent_rev} == {present_rev}",
+    )
+    msg = check_catalog_error(
+        catalog.edit_catalog,
+        "set",
+        field="routing.margin",
+        value=0.5,
+        scope="global",
+        cwd=repo,
+        config_dir=cfg,
+        apply=True,
+        expect=absent_rev,
+        present=ALL_HARNESSES,
+        meters=EMPTY_METERS,
+    )
+    record(
+        "10.9b creating the project file invalidates the previous revision",
+        msg is not None and "intervening edit" in msg,
+        msg,
+    )
+
+    env_partial = isolated_cli_env(td, harnesses=("codex",), meters_doc={})
+    # isolated_cli_env writes a second usage.json in the same td; rebuild PATH only
+    env_partial = env.copy()
+    bindir = os.path.join(td, "one-harness")
+    os.makedirs(bindir, exist_ok=True)
+    with open(os.path.join(bindir, "codex"), "w", encoding="utf-8") as f:
+        f.write("#!/bin/sh\nexit 0\n")
+    os.chmod(os.path.join(bindir, "codex"), 0o755)
+    env_partial["PATH"] = bindir
+    res_unavail = catalog_cli(
+        ["set", "routing.gate", "0.1", "--scope", "global", "--cwd", repo, "--config-dir", cfg],
+        env_partial,
+    )
+    unavail = json.loads(res_unavail.stdout)
+    record(
+        "10.10 unavailable harnesses are reported from PATH without probing",
+        res_unavail.returncode == 0
+        and unavail["unavailable_harnesses"] == ["agy", "claude", "grok"]
+        and unavail["noop"] is True,
+        res_unavail.stderr + repr(unavail.get("unavailable_harnesses")),
+    )
+
+
+
+# A destination Tier can contain legacy Lanes without Order.
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, _ = make_edit_fixture(td)
+    path = os.path.join(cfg, "lanes.json")
+    doc = catalog.load_json(path)
+    moving = "terra-high@codex"
+    dest = doc["lanes"]["luna-low@codex"]["tier"]
+    for item in doc["lanes"].values():
+        if item["tier"] == dest:
+            item.pop("order", None)
+    catalog.write_json(path, doc)
+    preview = catalog.edit_catalog("set", scope="global", cwd=repo, config_dir=cfg,
+        field=f"lanes.{moving}.tier", value=dest, meters={}, present=ALL_HARNESSES)
+    catalog.edit_catalog("set", scope="global", cwd=repo, config_dir=cfg,
+        field=f"lanes.{moving}.tier", value=dest, meters={}, present=ALL_HARNESSES,
+        apply=True, expect=preview["revision"])
+    after = catalog.load_json(path)["lanes"]
+    record("10.11 Tier move follows unordered destination Lanes",
+          catalog._carried_in_tier(after, dest)[-1] == moving, preview)
+
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, _ = make_edit_fixture(td)
+    preview = catalog.edit_catalog("set", scope="global", cwd=repo, config_dir=cfg,
+        field="routing.gate", value=0.2, meters={}, present=ALL_HARNESSES)
+    original_preview = catalog._rank_preview
+    path = os.path.join(cfg, "routing.json")
+    def intervening_write(*args):
+        doc = catalog.load_json(path)
+        doc["note"] = "intervening edit during preview"
+        catalog.write_json(path, doc)
+        return original_preview(*args)
+    catalog._rank_preview = intervening_write
+    try:
+        msg = check_catalog_error(lambda: catalog.edit_catalog("set", scope="global",
+            cwd=repo, config_dir=cfg, field="routing.gate", value=0.2, meters={},
+            present=ALL_HARNESSES, apply=True, expect=preview["revision"]))
+    finally:
+        catalog._rank_preview = original_preview
+    record("10.12 Re-read immediately before write rejects intervening change",
+          msg is not None and "intervening edit" in msg and
+          catalog.load_json(path)["gate"] == routing_sample["gate"], msg)
 
 sys.exit(1 if fails else 0)

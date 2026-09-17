@@ -17,12 +17,18 @@ CLI forms:
   catalog.py check FILE [--partial]
   catalog.py check-guide [FILE] [--overlay]
   catalog.py fmt FILE [--partial]
+  catalog.py set FIELD JSON_VALUE --scope global|project [--cwd DIR] [--config-dir DIR]
+  catalog.py range CLASS FLOOR CEILING --scope global|project [--cwd DIR] [--config-dir DIR]
+  catalog.py order LANE POSITION --scope global|project [--cwd DIR] [--config-dir DIR]
+  (set/range/order default to a JSON preview; --apply --expect REVISION writes)
 """
 import argparse
 import copy
+import hashlib
 import json
 import os
 import re
+import shutil
 import sys
 import tempfile
 
@@ -990,6 +996,690 @@ def show_catalog(cwd=None, config_dir=None, as_json=False):
                         print(f"classes.{cls}.ceiling: {c_val_ceil}  {c_src}")
 
 
+HERE_SCRIPTS = os.path.dirname(os.path.abspath(__file__))
+_SET_LANE_PREFIX = "lanes."
+_SET_LANE_TIER_SUFFIX = ".tier"
+_SET_ROUTING_FIELDS = {"gate": "routing.gate", "margin": "routing.margin"}
+
+
+def _rank_mod():
+    """Load rank.py lazily so catalog import stays one-way at module load."""
+    if "rank" in sys.modules:
+        return sys.modules["rank"]
+    if HERE_SCRIPTS not in sys.path:
+        sys.path.insert(0, HERE_SCRIPTS)
+    import rank as rank_mod
+    return rank_mod
+
+
+def _present_harnesses(present=None):
+    if present is not None:
+        return set(present)
+    return {h for h in HARNESSES if shutil.which(h)}
+
+
+def _cached_meters(meters=None):
+    if meters is not None:
+        return meters
+    return _rank_mod().load_cached_usage()
+
+
+def _loads_strict(content, path):
+    """Parse snapshot bytes with the same strict JSON rules as load_json."""
+    if content is None:
+        if os.path.basename(path) == "lanes.json":
+            raise CatalogError(
+                f"{path}: file is missing; copy samples/lanes.json there or run /delegate setup"
+            )
+        raise CatalogError(f"{path}: file is missing")
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError as e:
+        raise CatalogError(f"{path}: file: cannot read: {e}")
+
+    def _reject_constant(c):
+        raise ValueError(f"{c} is not allowed in strict JSON")
+
+    try:
+        return json.loads(text, parse_constant=_reject_constant)
+    except json.JSONDecodeError as e:
+        raise CatalogError(
+            f"{path}: line {e.lineno}, column {e.colno}: JSON syntax error: {e.msg}"
+        )
+    except ValueError as e:
+        raise CatalogError(f"{path}: number: NaN is not allowed in strict JSON ({e})")
+
+
+def _describe_source(path):
+    abs_path = os.path.abspath(os.path.expanduser(path))
+    is_link = os.path.islink(abs_path)
+    is_file = os.path.isfile(abs_path)
+    resolved = os.path.realpath(abs_path) if (is_link or is_file or os.path.lexists(abs_path)) else None
+    content = None
+    if is_file:
+        try:
+            with open(abs_path, "rb") as f:
+                content = f.read()
+        except OSError as e:
+            raise CatalogError(f"{path}: file: cannot read: {e}")
+    return {
+        "file": abs_path,
+        "resolved": resolved,
+        "symlink": is_link,
+        "exists": is_file,
+        "content": content,
+    }
+
+
+def _source_public(desc):
+    if desc is None:
+        return None
+    return {
+        "file": desc["file"],
+        "resolved": desc["resolved"],
+        "symlink": desc["symlink"],
+        "exists": desc["exists"],
+    }
+
+
+def _hash_source(hasher, key, desc):
+    hasher.update(key.encode("utf-8"))
+    hasher.update(b"\0")
+    if desc is None:
+        hasher.update(b"ABSENT\0")
+        return
+    hasher.update(desc["file"].encode("utf-8"))
+    hasher.update(b"\0")
+    hasher.update((desc["resolved"] or "").encode("utf-8"))
+    hasher.update(b"\0")
+    hasher.update(b"1" if desc["symlink"] else b"0")
+    hasher.update(b"\0")
+    hasher.update(b"1" if desc["exists"] else b"0")
+    hasher.update(b"\0")
+    hasher.update(desc["content"] or b"")
+    hasher.update(b"\0")
+
+
+def _source_snapshot(cwd=None, config_dir=None):
+    base_dir = os.path.abspath(os.path.expanduser(
+        config_dir if config_dir is not None else CONFIG_DIR
+    ))
+    lanes_path = os.path.join(base_dir, "lanes.json")
+    routing_path = os.path.join(base_dir, "routing.json")
+    git_root = find_git_root(cwd)
+    project_path = (
+        os.path.join(git_root, ".delegate", "routing.json") if git_root else None
+    )
+    lanes = _describe_source(lanes_path)
+    routing = _describe_source(routing_path)
+    if project_path is None:
+        project = None
+    else:
+        project = _describe_source(project_path)
+    hasher = hashlib.sha256()
+    _hash_source(hasher, "lanes", lanes)
+    _hash_source(hasher, "routing", routing)
+    _hash_source(hasher, "project", project)
+    return {
+        "lanes": lanes,
+        "routing": routing,
+        "project": project,
+        "git_root": git_root,
+        "revision": hasher.hexdigest(),
+        "files": {
+            "lanes": lanes["file"],
+            "routing": routing["file"],
+            "project": project["file"] if project is not None else None,
+        },
+    }
+
+
+def catalog_revision(cwd=None, config_dir=None):
+    """Hash global sources, project presence/content, and resolved paths."""
+    return _source_snapshot(cwd=cwd, config_dir=config_dir)["revision"]
+
+
+def _write_preserving_link(path, doc):
+    """Write through a symlink chain so the catalog link itself is not replaced."""
+    full_path = os.path.abspath(os.path.expanduser(path))
+    dest = full_path
+    seen = set()
+    while os.path.islink(dest):
+        if dest in seen:
+            raise CatalogError(f"{path}: symlink loop")
+        seen.add(dest)
+        link = os.readlink(dest)
+        dest = link if os.path.isabs(link) else os.path.abspath(
+            os.path.join(os.path.dirname(dest), link)
+        )
+    write_json(dest, doc)
+
+
+def _catalog_from_docs(lanes_doc, routing_doc, project_doc, files):
+    """Effective catalog from already-loaded source documents."""
+    lanes_source = files["lanes"]
+    routing_source = files["routing"]
+    project_source = files.get("project")
+    validate_lanes(lanes_doc, source=lanes_source)
+    if project_doc is not None:
+        validate_project_routing(
+            project_doc,
+            lanes_doc,
+            routing_doc,
+            source=project_source or "project routing.json",
+            lanes_source=lanes_source,
+            global_source=routing_source,
+        )
+        routing, sources = merge_routing(
+            routing_doc,
+            project_doc,
+            global_source=routing_source,
+            project_source=project_source,
+        )
+        _validate_merged_routing(
+            routing,
+            source=f"{project_source} merged with {routing_source}",
+        )
+    else:
+        validate_routing(routing_doc, source=routing_source, partial=False)
+        routing, sources = merge_routing(
+            routing_doc,
+            None,
+            global_source=routing_source,
+            project_source=None,
+        )
+        _validate_merged_routing(routing, source=routing_source)
+    lanes = _effective_lanes(
+        lanes_doc["lanes"],
+        routing,
+        sources,
+        lanes_source,
+    )
+    return {
+        "meters": lanes_doc["meters"],
+        "lanes": lanes,
+        "routing": routing,
+        "sources": sources,
+        "files": {
+            "lanes": lanes_source,
+            "routing": routing_source,
+            "project": project_source,
+        },
+    }
+
+
+def _rank_preview(cat, meters_doc, present):
+    rank = _rank_mod()
+    picks = {}
+    for cls in CLASSES:
+        rows = rank.rank(cls, cat, meters_doc, present)
+        picks[cls] = next((row["lane"] for row in rows if row.get("pick")), None)
+    leaders = [
+        {"tier": preview["tier"], "leader": preview["leader"]}
+        for preview in rank.tier_leaders(cat, meters_doc, present)
+    ]
+    return picks, leaders
+
+
+def _observations_report(meters_doc, meter_names):
+    rank = _rank_mod()
+    observed = rank.meter_observations(meters_doc)
+    names = list(meter_names)
+    if observed is None:
+        return "invalid", sorted(names)
+    missing = sorted(name for name in names if name not in observed)
+    status = "cached" if observed else "missing"
+    return status, missing
+
+
+def parse_set_field(field):
+    """Split an allowed set field on the known prefix and final name, not every dot."""
+    if not isinstance(field, str) or not field.strip():
+        raise CatalogError("field is required")
+    if field in ("routing.gate", "routing.margin"):
+        return ("routing", field.split(".", 1)[1])
+    if field == "routing.meters":
+        raise CatalogError(
+            "field 'routing.meters' is reserved; this command does not edit it"
+        )
+    if field.startswith("routing.classes."):
+        raise CatalogError(
+            f"field '{field}' is outside this command's allowlist; "
+            "use range CLASS FLOOR CEILING to set Floor and Ceiling together"
+        )
+    if field.startswith(_SET_LANE_PREFIX) and field.endswith(_SET_LANE_TIER_SUFFIX):
+        lane = field[len(_SET_LANE_PREFIX):-len(_SET_LANE_TIER_SUFFIX)]
+        if not lane:
+            raise CatalogError(f"field '{field}': missing lane name")
+        return ("lane_tier", lane)
+    if field.startswith(_SET_LANE_PREFIX):
+        raise CatalogError(
+            f"field '{field}' is outside this command's allowlist; "
+            "allowed lane field is lanes.<lane>.tier (global); "
+            "Order uses the order command and carry is not editable here"
+        )
+    raise CatalogError(
+        f"unknown field '{field}'; allowed fields are "
+        "lanes.<lane>.tier, routing.gate, routing.margin"
+    )
+
+
+def _carried_in_tier(lanes, tier):
+    names = [
+        name for name, lane in lanes.items()
+        if lane.get("enabled", True) and lane.get("tier") == tier
+    ]
+    names.sort(key=lambda name: (
+        lanes[name].get("order") is None,
+        lanes[name].get("order") or 0,
+        name,
+    ))
+    return names
+
+
+def _move_in_sequence(names, lane, position):
+    if lane not in names:
+        raise CatalogError(
+            f"lane '{lane}' is not a carried lane in this Tier; "
+            "Order is one-based among carried Lanes"
+        )
+    n = len(names)
+    if type(position) is not int or position < 1 or position > n:
+        raise CatalogError(
+            f"position {position!r} is out of range 1..{n} for this Tier"
+        )
+    rest = [name for name in names if name != lane]
+    rest.insert(position - 1, lane)
+    return rest
+
+
+def _append_order_in_tier(lanes, lane_name, new_tier):
+    """Place a lane at the end of the destination Tier's existing Order."""
+    names = [name for name in _carried_in_tier(lanes, new_tier) if name != lane_name]
+    # Materialize the existing effective Order before appending. An unordered
+    # Lane sorts after every numbered Lane, so max(order)+1 is not sufficient.
+    for order, name in enumerate(names, 1):
+        lanes[name]["order"] = order
+    lanes[lane_name]["order"] = len(names) + 1
+
+
+
+def _load_docs_from_snapshot(snap):
+    lanes_doc = _loads_strict(snap["lanes"]["content"], snap["files"]["lanes"])
+    routing_doc = _loads_strict(snap["routing"]["content"], snap["files"]["routing"])
+    project_desc = snap["project"]
+    if project_desc is None:
+        project_doc = None
+    elif not project_desc["exists"]:
+        project_doc = None
+    else:
+        project_doc = _loads_strict(project_desc["content"], project_desc["file"])
+        if project_doc is not None:
+            validate_routing(project_doc, source=project_desc["file"], partial=True)
+    validate_lanes(lanes_doc, source=snap["files"]["lanes"])
+    validate_routing(routing_doc, source=snap["files"]["routing"], partial=False)
+    if project_doc is not None:
+        validate_project_routing(
+            project_doc,
+            lanes_doc,
+            routing_doc,
+            source=snap["files"]["project"],
+            lanes_source=snap["files"]["lanes"],
+            global_source=snap["files"]["routing"],
+        )
+    return lanes_doc, routing_doc, project_doc
+
+
+def _target_from_scope(snap, scope, dest):
+    """dest is 'lanes', 'routing', or 'project'."""
+    if dest == "project":
+        desc = snap["project"]
+        if desc is None:
+            git_root = snap["git_root"]
+            if git_root is None:
+                raise CatalogError(
+                    "scope 'project' needs a git root so .delegate/routing.json can be written"
+                )
+            path = os.path.join(git_root, ".delegate", "routing.json")
+            return {
+                "file": path,
+                "resolved": path,
+                "symlink": False,
+                "exists": False,
+            }
+        return _source_public(desc)
+    return _source_public(snap[dest])
+
+
+def _require_scope(scope):
+    if scope not in ("global", "project"):
+        raise CatalogError("scope must be 'global' or 'project'")
+    return scope
+
+
+def _plan_set(field, value, scope, lanes_doc, routing_doc, project_doc):
+    kind, name = parse_set_field(field)
+    if kind == "lane_tier":
+        if scope != "global":
+            raise CatalogError(
+                f"field 'lanes.{name}.tier' is global-only; "
+                "project Lane Tier writes are rejected"
+            )
+        if name not in lanes_doc["lanes"]:
+            raise CatalogError(f"lane '{name}' is not in the global lane catalog")
+        proposed_lanes = copy.deepcopy(lanes_doc)
+        proposed_routing = copy.deepcopy(routing_doc)
+        proposed_project = copy.deepcopy(project_doc)
+        lane = proposed_lanes["lanes"][name]
+        old_tier = lane["tier"]
+        lane["tier"] = value
+        if old_tier != value:
+            _append_order_in_tier(proposed_lanes["lanes"], name, value)
+        return "lanes", proposed_lanes, proposed_routing, proposed_project, {
+            "field": f"lanes.{name}.tier",
+            "lane": name,
+            "original": {
+                "tier": lanes_doc["lanes"][name]["tier"],
+                "order": lanes_doc["lanes"][name].get("order"),
+            },
+            "resulting": {
+                "tier": proposed_lanes["lanes"][name]["tier"],
+                "order": proposed_lanes["lanes"][name].get("order"),
+            },
+        }
+    if kind == "routing":
+        key = name
+        proposed_lanes = copy.deepcopy(lanes_doc)
+        proposed_routing = copy.deepcopy(routing_doc)
+        proposed_project = copy.deepcopy(project_doc)
+        dest = "routing" if scope == "global" else "project"
+        if scope == "global":
+            proposed_routing[key] = value
+        else:
+            if proposed_project is None:
+                proposed_project = {}
+            proposed_project[key] = value
+        original_global = routing_doc.get(key)
+        original_effective = (
+            project_doc.get(key, original_global)
+            if project_doc is not None else original_global
+        )
+        resulting_global = proposed_routing.get(key)
+        resulting_effective = (
+            proposed_project.get(key, resulting_global)
+            if proposed_project is not None else resulting_global
+        )
+        return dest, proposed_lanes, proposed_routing, proposed_project, {
+            "field": _SET_ROUTING_FIELDS[key],
+            "original": {"global": original_global, "effective": original_effective},
+            "resulting": {"global": resulting_global, "effective": resulting_effective},
+        }
+    raise CatalogError(f"unknown field '{field}'")
+
+
+def _plan_range(cls, floor, ceiling, scope, lanes_doc, routing_doc, project_doc):
+    if cls not in CLASSES:
+        raise CatalogError(
+            f"unknown class '{cls}'; must be one of {', '.join(CLASSES)}"
+        )
+    if type(floor) is not int or type(ceiling) is not int:
+        raise CatalogError(
+            f"class '{cls}': floor and ceiling must be integers from 1 to 4"
+        )
+    proposed_lanes = copy.deepcopy(lanes_doc)
+    proposed_routing = copy.deepcopy(routing_doc)
+    proposed_project = copy.deepcopy(project_doc)
+    dest = "routing" if scope == "global" else "project"
+    if scope == "global":
+        proposed_routing.setdefault("classes", {})
+        proposed_routing["classes"].setdefault(cls, {})
+        proposed_routing["classes"][cls]["floor"] = floor
+        proposed_routing["classes"][cls]["ceiling"] = ceiling
+    else:
+        if proposed_project is None:
+            proposed_project = {}
+        proposed_project.setdefault("classes", {})
+        proposed_project["classes"].setdefault(cls, {})
+        proposed_project["classes"][cls]["floor"] = floor
+        proposed_project["classes"][cls]["ceiling"] = ceiling
+    original_global = copy.deepcopy(routing_doc.get("classes", {}).get(cls, {}))
+    if project_doc and "classes" in project_doc and cls in project_doc.get("classes", {}):
+        original_effective = copy.deepcopy(original_global)
+        original_effective.update(project_doc["classes"][cls])
+    else:
+        original_effective = copy.deepcopy(original_global)
+    resulting_global = copy.deepcopy(proposed_routing.get("classes", {}).get(cls, {}))
+    if proposed_project and "classes" in proposed_project and cls in proposed_project.get("classes", {}):
+        resulting_effective = copy.deepcopy(resulting_global)
+        resulting_effective.update(proposed_project["classes"][cls])
+    else:
+        resulting_effective = copy.deepcopy(resulting_global)
+    return dest, proposed_lanes, proposed_routing, proposed_project, {
+        "class": cls,
+        "original": {"global": original_global, "effective": original_effective},
+        "resulting": {"global": resulting_global, "effective": resulting_effective},
+    }
+
+
+def _plan_order(lane, position, scope, lanes_doc, routing_doc, project_doc, files):
+    if lane not in lanes_doc["lanes"]:
+        raise CatalogError(f"lane '{lane}' is not in the global lane catalog")
+    if not lanes_doc["lanes"][lane].get("enabled", True):
+        raise CatalogError(
+            f"lane '{lane}' is globally off; Order is among carried Lanes"
+        )
+    tier = lanes_doc["lanes"][lane]["tier"]
+    proposed_lanes = copy.deepcopy(lanes_doc)
+    proposed_routing = copy.deepcopy(routing_doc)
+    proposed_project = copy.deepcopy(project_doc)
+    if scope == "global":
+        current = _carried_in_tier(proposed_lanes["lanes"], tier)
+        new_seq = _move_in_sequence(current, lane, position)
+        for order, name in enumerate(new_seq, 1):
+            proposed_lanes["lanes"][name]["order"] = order
+        return "lanes", proposed_lanes, proposed_routing, proposed_project, {
+            "lane": lane,
+            "tier": tier,
+            "position": {
+                "original": current.index(lane) + 1,
+                "resulting": position,
+            },
+            "sequence": {"original": current, "resulting": new_seq},
+        }
+    before_cat = _catalog_from_docs(lanes_doc, routing_doc, project_doc, files)
+    current = _carried_in_tier(before_cat["lanes"], tier)
+    new_seq = _move_in_sequence(current, lane, position)
+    existing = list((project_doc or {}).get("project_order", []))
+    kept = [
+        name for name in existing
+        if name in lanes_doc["lanes"] and lanes_doc["lanes"][name]["tier"] != tier
+    ]
+    if proposed_project is None:
+        proposed_project = {}
+    else:
+        proposed_project = copy.deepcopy(proposed_project)
+    proposed_project["project_order"] = kept + new_seq
+    return "project", proposed_lanes, proposed_routing, proposed_project, {
+        "lane": lane,
+        "tier": tier,
+        "position": {
+            "original": current.index(lane) + 1,
+            "resulting": position,
+        },
+        "sequence": {"original": current, "resulting": new_seq},
+    }
+
+
+def _changed_fields(op, values, original_doc, proposed_doc, dest):
+    changed = []
+    if op == "set":
+        field = values.get("field")
+        if dest == "lanes":
+            lane = values["lane"]
+            old = original_doc["lanes"][lane]
+            new = proposed_doc["lanes"][lane]
+            if old.get("tier") != new.get("tier"):
+                changed.append(f"lanes.{lane}.tier")
+            for name, proposed_lane in proposed_doc["lanes"].items():
+                if original_doc["lanes"][name].get("order") != proposed_lane.get("order"):
+                    changed.append(f"lanes.{name}.order")
+        else:
+            if field == "routing.gate" and original_doc.get("gate") != proposed_doc.get("gate"):
+                changed.append("routing.gate")
+            if field == "routing.margin" and original_doc.get("margin") != proposed_doc.get("margin"):
+                changed.append("routing.margin")
+        return changed
+    if op == "range":
+        cls = values["class"]
+        old = (original_doc.get("classes") or {}).get(cls) or {}
+        new = (proposed_doc.get("classes") or {}).get(cls) or {}
+        if old.get("floor") != new.get("floor"):
+            changed.append(f"classes.{cls}.floor")
+        if old.get("ceiling") != new.get("ceiling"):
+            changed.append(f"classes.{cls}.ceiling")
+        return changed
+    if op == "order":
+        if dest == "project":
+            if original_doc.get("project_order") != proposed_doc.get("project_order"):
+                changed.append("project_order")
+            return changed
+        old_lanes = original_doc["lanes"]
+        new_lanes = proposed_doc["lanes"]
+        for name in sorted(set(old_lanes) | set(new_lanes)):
+            if old_lanes.get(name, {}).get("order") != new_lanes.get(name, {}).get("order"):
+                changed.append(f"lanes.{name}.order")
+        return changed
+    return changed
+
+
+def edit_catalog(
+    op,
+    *,
+    scope,
+    cwd=None,
+    config_dir=None,
+    apply=False,
+    expect=None,
+    present=None,
+    meters=None,
+    field=None,
+    value=None,
+    cls=None,
+    floor=None,
+    ceiling=None,
+    lane=None,
+    position=None,
+):
+    """Preview or apply one focused catalog edit. Public for setup reuse.
+
+    ``meters`` is a cached usage document; omitted means load_cached_usage().
+    ``present`` is the harness set; omitted means CLIs found on PATH.
+    Applying requires ``expect`` equal to the current source revision.
+    """
+    scope = _require_scope(scope)
+    if op not in ("set", "range", "order"):
+        raise CatalogError(f"unknown operation '{op}'")
+    if apply and not expect:
+        raise CatalogError("--apply requires --expect REVISION")
+    if expect and not apply:
+        raise CatalogError("--expect is only valid with --apply")
+
+    snap = _source_snapshot(cwd=cwd, config_dir=config_dir)
+    if scope == "project" and snap["git_root"] is None:
+        raise CatalogError(
+            "scope 'project' needs a git root so .delegate/routing.json can be written"
+        )
+    if apply and snap["revision"] != expect:
+        raise CatalogError(
+            "intervening edit: source documents or resolved paths changed; preview again"
+        )
+
+    lanes_doc, routing_doc, project_doc = _load_docs_from_snapshot(snap)
+    files = snap["files"]
+    if op == "set":
+        dest, proposed_lanes, proposed_routing, proposed_project, values = _plan_set(
+            field, value, scope, lanes_doc, routing_doc, project_doc
+        )
+    elif op == "range":
+        dest, proposed_lanes, proposed_routing, proposed_project, values = _plan_range(
+            cls, floor, ceiling, scope, lanes_doc, routing_doc, project_doc
+        )
+    else:
+        dest, proposed_lanes, proposed_routing, proposed_project, values = _plan_order(
+            lane, position, scope, lanes_doc, routing_doc, project_doc, files
+        )
+
+    # Validate the proposal against the original global documents, then
+    # the effective catalog the ranker would see after this one write.
+    original_by_dest = {
+        "lanes": lanes_doc,
+        "routing": routing_doc,
+        "project": project_doc if project_doc is not None else {},
+    }
+    proposed_by_dest = {
+        "lanes": proposed_lanes,
+        "routing": proposed_routing,
+        "project": proposed_project if proposed_project is not None else {},
+    }
+    _catalog_from_docs(proposed_lanes, proposed_routing, proposed_project, files)
+
+    before_cat = _catalog_from_docs(lanes_doc, routing_doc, project_doc, files)
+    after_cat = _catalog_from_docs(
+        proposed_lanes, proposed_routing, proposed_project, files
+    )
+    present_set = _present_harnesses(present)
+    meters_doc = _cached_meters(meters)
+    picks_before, leaders_before = _rank_preview(before_cat, meters_doc, present_set)
+    picks_after, leaders_after = _rank_preview(after_cat, meters_doc, present_set)
+    observations, missing = _observations_report(meters_doc, before_cat["meters"])
+    unavailable = sorted(h for h in HARNESSES if h not in present_set)
+
+    changed = _changed_fields(
+        op,
+        values,
+        original_by_dest[dest],
+        proposed_by_dest[dest],
+        dest,
+    )
+    noop = proposed_by_dest[dest] == original_by_dest[dest]
+    if dest == "project" and project_doc is None:
+        noop = proposed_project in (None, {})
+        if proposed_project:
+            noop = False
+
+    target = _target_from_scope(snap, scope, dest)
+    written = False
+    if apply and not noop:
+        if _source_snapshot(cwd=cwd, config_dir=config_dir)["revision"] != snap["revision"]:
+            raise CatalogError(
+                "intervening edit: source documents or resolved paths changed; preview again"
+            )
+        write_doc = proposed_by_dest[dest]
+        _write_preserving_link(target["file"], write_doc)
+        written = True
+
+    return {
+        "op": op,
+        "scope": scope,
+        "revision": snap["revision"],
+        "target": target,
+        "sources": {
+            "lanes": _source_public(snap["lanes"]),
+            "routing": _source_public(snap["routing"]),
+            "project": _source_public(snap["project"]),
+        },
+        "values": values,
+        "changed": changed,
+        "picks": {"before": picks_before, "after": picks_after},
+        "leaders": {"before": leaders_before, "after": leaders_after},
+        "unavailable_harnesses": unavailable,
+        "missing_observations": missing,
+        "observations": observations,
+        "noop": noop,
+        "written": written,
+    }
+
+
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
@@ -1025,6 +1715,38 @@ def main(argv=None):
     p_fmt.add_argument("file", help="path to file to format")
     p_fmt.add_argument("--partial", action="store_true", help="allow partial routing file")
 
+    def add_edit_flags(p):
+        p.add_argument(
+            "--scope",
+            required=True,
+            choices=("global", "project"),
+            help="which source document to change",
+        )
+        p.add_argument("--cwd", default=None, help="working directory to find git root from")
+        p.add_argument(
+            "--config-dir",
+            default=None,
+            help="config directory containing lanes.json and routing.json",
+        )
+        p.add_argument("--apply", action="store_true", help="write the selected source document")
+        p.add_argument("--expect", default=None, help="revision from a preview of the same sources")
+
+    p_set = sub.add_parser("set", help="preview or apply one allowed field edit")
+    p_set.add_argument("field", help="lanes.<lane>.tier, routing.gate, or routing.margin")
+    p_set.add_argument("value", help="JSON value")
+    add_edit_flags(p_set)
+
+    p_range = sub.add_parser("range", help="preview or apply a paired Floor and Ceiling")
+    p_range.add_argument("cls", metavar="CLASS", help="class name")
+    p_range.add_argument("floor", type=int, help="new floor")
+    p_range.add_argument("ceiling", type=int, help="new ceiling")
+    add_edit_flags(p_range)
+
+    p_order = sub.add_parser("order", help="preview or apply a one-based Order in a Tier")
+    p_order.add_argument("lane", help="carried lane name")
+    p_order.add_argument("position", type=int, help="one-based position among carried lanes in the Tier")
+    add_edit_flags(p_order)
+
     args = parser.parse_args(argv)
 
     try:
@@ -1040,6 +1762,35 @@ def main(argv=None):
         elif args.cmd == "fmt":
             fmt_file(args.file, partial=args.partial)
             print(f"formatted: {args.file}")
+        elif args.cmd in ("set", "range", "order"):
+            kwargs = {
+                "scope": args.scope,
+                "cwd": args.cwd,
+                "config_dir": args.config_dir,
+                "apply": args.apply,
+                "expect": args.expect,
+            }
+            if args.cmd == "set":
+                def _reject_constant(c):
+                    raise ValueError(f"{c} is not allowed in strict JSON")
+                try:
+                    value = json.loads(args.value, parse_constant=_reject_constant)
+                except json.JSONDecodeError as e:
+                    raise CatalogError(
+                        f"value is not strict JSON: {e.msg} at column {e.colno}"
+                    )
+                except ValueError as e:
+                    raise CatalogError(f"value is not strict JSON: {e}")
+                result = edit_catalog("set", field=args.field, value=value, **kwargs)
+            elif args.cmd == "range":
+                result = edit_catalog(
+                    "range", cls=args.cls, floor=args.floor, ceiling=args.ceiling, **kwargs
+                )
+            else:
+                result = edit_catalog(
+                    "order", lane=args.lane, position=args.position, **kwargs
+                )
+            sys.stdout.write(format_json(result))
     except CatalogError as e:
         sys.stderr.write(f"catalog: {e}\n")
         sys.exit(1)
