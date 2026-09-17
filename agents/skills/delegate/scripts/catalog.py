@@ -1314,8 +1314,7 @@ def _load_docs_from_snapshot(snap):
         project_doc = None
     else:
         project_doc = _loads_strict(project_desc["content"], project_desc["file"])
-        if project_doc is not None:
-            validate_routing(project_doc, source=project_desc["file"], partial=True)
+        validate_routing(project_doc, source=project_desc["file"], partial=True)
     validate_lanes(lanes_doc, source=snap["files"]["lanes"])
     validate_routing(routing_doc, source=snap["files"]["routing"], partial=False)
     if project_doc is not None:

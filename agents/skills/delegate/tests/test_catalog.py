@@ -1947,4 +1947,16 @@ with tempfile.TemporaryDirectory() as td:
           msg is not None and "intervening edit" in msg and
           catalog.load_json(path)["gate"] == routing_sample["gate"], msg)
 
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, _ = make_edit_fixture(td)
+    project_dir = os.path.join(repo, ".delegate")
+    os.makedirs(project_dir)
+    path = os.path.join(project_dir, "routing.json")
+    with open(path, "w") as f:
+        f.write("null\n")
+    msg = check_catalog_error(catalog.edit_catalog, "set", scope="project", cwd=repo,
+        config_dir=cfg, field="routing.gate", value=0.2, meters={}, present=ALL_HARNESSES)
+    record("10.13 Present null project is invalid, not an absent overlay",
+        msg is not None and "must be a JSON object" in msg and file_bytes(path) == b"null\n", msg)
+
 sys.exit(1 if fails else 0)
