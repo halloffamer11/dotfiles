@@ -18,6 +18,23 @@ Every term this skill uses (harness, lane, meter, class, tier, floor, ceiling, r
 - `assets/classes.md`: Class judgment (intent, signals, examples, counter-examples, when to raise `--tier` inside the live Range). A project may overlay matching `##` Class sections at `<git-root>/.delegate/classes.md`; the overlay cannot add a Class or declare Floor or Ceiling. `python3 ~/.claude/skills/delegate/scripts/catalog.py check-guide [file] [--overlay]` validates headings against the closed Class set.
 - Both JSON files are strict JSON, validated on read with a plain-language message naming the field and the rule, formatted on write, and accept `note` fields anywhere. `python3 ~/.claude/skills/delegate/scripts/catalog.py show` prints the effective catalog for the current directory; `scripts/catalog.py check <file>` validates one file. The starting catalog ships in `assets/samples/`; `/delegate setup` is the wizard that builds or revises it (direct command: `python3 ~/.claude/skills/delegate/scripts/setup.py`). When `$ARGUMENTS` asks for setup (e.g. `/delegate setup`), run `python3 ~/.claude/skills/delegate/scripts/setup.py`.
 
+## Focused catalog changes
+
+Use `scripts/catalog.py set FIELD JSON_VALUE --scope global|project`,
+`range CLASS FLOOR CEILING --scope global|project`, or
+`order LANE POSITION --scope global|project`. Tier uses `lanes.<lane>.tier`
+(global only); routing fields are `routing.gate` and `routing.margin`.
+Order is one-based among carried Lanes in the same Tier. All accept `--cwd`
+and `--config-dir`.
+
+Each command first returns a JSON preview: source files and resolved targets,
+changed fields, values, Picks and exact-Tier leaders using cached observations.
+Apply the same operation with `--apply --expect REVISION` from that preview.
+An explicit request for the desired value authorizes preview and apply; do not
+ask again. A source change requires a fresh preview. Apply preserves stow links
+and writes only the chosen source document. Focused edits preserve other choices;
+bulk tier-line imports still turn omitted carried Lanes off.
+
 ## 1. Classify and write the brief
 
 Read CONTEXT.md terms if this session has not. Read `assets/classes.md`. If the git root has `.delegate/classes.md`, use each of its `##` Class sections in place of the matching section from the skill guide. Pick exactly one Class; when two seem to fit, the counter-examples decide. Named dispatch skips Range and still writes the Class on the prompt.

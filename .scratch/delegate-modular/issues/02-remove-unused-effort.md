@@ -12,11 +12,20 @@ Remove the unused effort argument from rank and update its callers. Lane identit
 
 ## Acceptance
 
-**Status:** ready-for-agent
+**Status:** landed 2026-09-16 (`7934c95`); acceptance checks passed.
 
-- [ ] All rank call sites are inspected and updated; no caller depends on the removed parameter.
-- [ ] Ranking fixture outputs and existing rank tests remain unchanged.
+- [x] All rank call sites are inspected and updated; no caller depends on the removed parameter.
+- [x] Ranking fixture outputs and existing rank tests remain unchanged.
 
 ## Recorded, 2026-09-16
 
 Cut after Orin accepted the agy recommendation and instructed Fable to proceed with consultation C1–C8 plus scope M1–M5. Ticket creation was interrupted by Claude access failure. This ticket records work to do, not implementation or acceptance of the deferred Domain design.
+
+## Landed, 2026-09-16
+
+`7934c95` implements this ticket. Root reviewed the worker diff and reran the
+affected suites against local fixtures. The Meter work additionally fixes
+import-time timestamps, validates before agy normalization, and preserves bounded
+acquisition; setup saved-discovery inputs perform no live probes. Independent
+review of the integrated foundation is running; any findings will be recorded
+with their follow-up fixes. No live catalog policy was edited by this work.

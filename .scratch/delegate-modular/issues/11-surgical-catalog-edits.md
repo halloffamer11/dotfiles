@@ -12,7 +12,7 @@ Provide focused Tier, Order, paired Floor/Ceiling and Gate/Margin edits with exp
 
 ## Acceptance
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 - [ ] Preview shows actual file and resolved stow target, global/effective values, changed fields and affected Picks using one cached observation snapshot.
 - [ ] Apply validates the full document, rejects intervening edits and preserves symlinks; no-op and invalid writes preserve file bytes.
@@ -64,3 +64,11 @@ current decisions, does not apply carry proposals on entry, and goes to a review
 of the chosen edits before confirm. Reject incompatible plain/non-TTY use with
 a clear suggestion to use the surgical CLI. Move bulk tier-line helpers in a
 separate pure change; keep compatibility imports for current callers.
+
+## CLI landed, 2026-09-16
+
+`43f3eb1` adds `set`, paired `range`, and `order` previews and revision-checked
+apply. Root review corrected the immediate pre-write revision check and Tier
+moves into a destination with unordered Lanes. Catalog and rank fixtures pass;
+all 13 delegate script suites passed after integration. Focused setup screens
+and bulk helper relocation are still in the active setup worker.

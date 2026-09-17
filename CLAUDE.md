@@ -26,8 +26,9 @@ claims to discount. On 2026-09-16, recovered Orin's approval from Fable's sessio
 agy combined Remaining/Pace stays unknown; proceed with tickets. The coding-only cut
 (C1–C8 plus M1–M5, with overlaps combined) is now in
 `.scratch/delegate-modular/issues/`, with the agy change as ticket 13. Read
-`.scratch/delegate-modular/CLAUDE.md` before resuming. Implementation has not started;
-M6–M11 and the remaining consultation steps are still proposals.
+`.scratch/delegate-modular/CLAUDE.md` before resuming. Implementation is in progress;
+tickets 01–07, 09, 10 and 13 are integrated through `49a628b`, with independent
+review running. M6–M11 and the remaining consultation steps are still proposals.
 
 **Project routing backend** (2026-09-15, from the dashboard prototype): a
 project's `.delegate/routing.json` may carry `project_order`, a flat list of carried

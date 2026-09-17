@@ -12,13 +12,22 @@ Create a guide for the existing five Classes with intent, signals, examples, cou
 
 ## Acceptance
 
-**Status:** needs-triage
+**Status:** implemented 2026-09-16 (`ca03156`); code checks pass, guide examples await Orin’s review.
 
-- [ ] Guide covers exactly the existing Classes; overlay cannot create a Class or change numeric policy.
-- [ ] Validation rejects unknown/missing Class sections and duplicated numeric Floor/Ceiling declarations.
-- [ ] The skill loads the guide at classification and states the STOP interaction without an interactive Python prompt.
+- [x] Guide covers exactly the existing Classes; overlay cannot create a Class or change numeric policy.
+- [x] Validation rejects unknown/missing Class sections and duplicated numeric Floor/Ceiling declarations.
+- [x] The skill loads the guide at classification and states the STOP interaction without an interactive Python prompt.
 - [ ] Catalog and existing STOP tests pass; guide examples receive maintainer review.
 
 ## Recorded, 2026-09-16
 
 Cut after Orin accepted the agy recommendation and instructed Fable to proceed with consultation C1–C8 plus scope M1–M5. Ticket creation was interrupted by Claude access failure. This ticket records work to do, not implementation or acceptance of the deferred Domain design.
+
+## Landed, 2026-09-16
+
+`ca03156` adds the guide and check-guide CLI. The grok worker return was
+reviewed against the ticket; root removed an unrequested Class-section-order
+constraint, corrected the guide hierarchy and a glossary inconsistency, and
+made the missing-file fixture use its own temporary directory. Root reran
+catalog and rank tests and the skill validator; all pass. The remaining checkbox
+is Orin's review of the examples, not an implementation blocker.
