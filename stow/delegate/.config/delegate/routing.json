@@ -23,6 +23,6 @@
     }
   },
   "margin": 0.2,
-  "gate": 0.0,
+  "gate": 0.05,
   "note": "floor is the default tier; ceiling is the maximum tier. override per project: e.g. {\"classes\": {\"scout\": {\"floor\": 3}}}"
 }
