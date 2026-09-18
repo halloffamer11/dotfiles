@@ -20,6 +20,7 @@ MUTED = "#8d8d89"
 FOREGROUND = "#e7e7e7"
 ERROR = "#d76563"
 SUCCESS = "#78bd74"
+METERS_OFF_EFFECT = "Gate, Margin and Pace inactive; Remaining is cached"
 
 KEY_SEQUENCES = (
     "\x1b[1;2A",
@@ -90,6 +91,22 @@ def paint(text: str, color: str = FOREGROUND, *, bold: bool = False, width: int)
     return f"{weight}{foreground(color)}{text}{RESET}"
 
 
+def paint_line(line, width: int) -> str:
+    """Paint one compose line; an optional 4th item is mixed-color segments."""
+    text, color, bold = line[0], line[1], line[2]
+    parts = line[3] if len(line) > 3 else None
+    if not parts:
+        return paint(text, color, bold=bold, width=width)
+    remaining = max(0, width)
+    painted = []
+    for part_text, part_color, part_bold in parts:
+        if remaining <= 0:
+            break
+        painted.append(paint(part_text, part_color, bold=part_bold, width=remaining))
+        remaining -= min(len(part_text), remaining)
+    return "".join(painted)
+
+
 def percent(value):
     return "—" if value is None else f"{round(value * 100):g}%"
 
@@ -98,12 +115,28 @@ def pace(value):
     return "—" if value is None else f"{value:.2f}×"
 
 
-def source_label(source, state):
+def source_label(source, state, *, empty="unknown"):
     if not source:
-        return "unknown"
+        return empty
     if source == state["project"]["policy"]:
         return "project:.delegate/routing.json"
     return f"global:{os.path.basename(source)}"
+
+
+def meters_policy(state):
+    """Read sourced metering state; `effect` may be absent until the model lands."""
+    meters = (state.get("policy") or {}).get("meters") or {}
+    value = meters.get("value", True)
+    display = meters.get("display") or ("on" if value else "off")
+    effect = meters.get("effect")
+    if not effect and value is False:
+        effect = METERS_OFF_EFFECT
+    return {
+        "value": value,
+        "display": display,
+        "source": meters.get("source"),
+        "effect": effect or "",
+    }
 
 
 def order_label(row, state):
@@ -117,6 +150,8 @@ def order_label(row, state):
 
 def body_lines(state, width, selected_lane=None):
     """Return semantic terminal lines; spacing is deliberately not a test seam."""
+    meters_off = meters_policy(state)["value"] is False
+    cached = " cached" if meters_off else ""
     lines = []
     for tier in state["tiers"]:
         color = tier["color"]
@@ -142,14 +177,32 @@ def body_lines(state, width, selected_lane=None):
             eligible = "yes" if row["eligible"] else "no"
             row_color = color if leader_mark == "◆" else FOREGROUND
             is_leader = leader_mark == "◆"
+            rem_text = percent(row["remaining"])
+            pace_text = pace(row["pace"])
             if width >= 132:
-                text = (
+                left = (
                     f"┃ {cursor_mark}{leader_mark} {order:>3}  {row['lane']:<24} "
                     f"{row['model']:<20} {row['effort']:<7} {row['harness']:<8} "
-                    f"{row['meter']:<17} {percent(row['remaining']):>4}  "
-                    f"{pace(row['pace']):>6}  {eligible:<3} {row['reason']}"
+                    f"{row['meter']:<17} {rem_text:>4}{cached}"
                 )
-                lines.append((text, row_color, is_leader))
+                pace_col = f"  {pace_text:>6}"
+                right = f"  {eligible:<3} {row['reason']}"
+                text = left + pace_col + right
+                if meters_off:
+                    lines.append(
+                        (
+                            text,
+                            row_color,
+                            is_leader,
+                            (
+                                (left, row_color, is_leader),
+                                (pace_col, MUTED, False),
+                                (right, row_color, is_leader),
+                            ),
+                        )
+                    )
+                else:
+                    lines.append((text, row_color, is_leader))
             else:
                 lines.append(
                     (
@@ -159,14 +212,25 @@ def body_lines(state, width, selected_lane=None):
                         is_leader,
                     )
                 )
-                lines.append(
-                    (
-                        f"┃       Remaining {percent(row['remaining'])} · Pace {pace(row['pace'])} · "
-                        f"eligible {eligible} · {row['reason']}",
-                        row_color,
-                        is_leader,
+                prefix = f"┃       Remaining {rem_text}{cached}"
+                pace_part = f" · Pace {pace_text}"
+                suffix = f" · eligible {eligible} · {row['reason']}"
+                text = prefix + pace_part + suffix
+                if meters_off:
+                    lines.append(
+                        (
+                            text,
+                            row_color,
+                            is_leader,
+                            (
+                                (prefix, row_color, is_leader),
+                                (pace_part, MUTED, False),
+                                (suffix, row_color, is_leader),
+                            ),
+                        )
                     )
-                )
+                else:
+                    lines.append((text, row_color, is_leader))
         lines.append(("", FOREGROUND, False))
     return lines
 
@@ -184,6 +248,8 @@ def compose(
     """Compose a clipped viewport with persistent project identity and key help."""
     gate = state["policy"]["gate"]
     margin = state["policy"]["margin"]
+    meters = meters_policy(state)
+    inactive = " inactive" if meters["value"] is False else ""
     project = state["project"]
     usage = state["usage"]
     header = [
@@ -191,17 +257,22 @@ def compose(
         ("Delegate project routing  /  prototype", FOREGROUND, True),
         ("Ord: p=project · g=global/fallback (derived from global Order/name)", MUTED, False),
         (
-            f"Gate {gate['display']} [{source_label(gate['source'], state)}]   "
-            f"Margin {margin['display']} [{source_label(margin['source'], state)}]",
+            f"Gate {gate['display']} [{source_label(gate['source'], state)}]{inactive}   "
+            f"Margin {margin['display']} [{source_label(margin['source'], state)}]{inactive}   "
+            f"Meters {meters['display']} [{source_label(meters['source'], state, empty='default')}]",
             MUTED,
             False,
         ),
+    ]
+    if meters["value"] is False:
+        header.append((meters["effect"], MUTED, False))
+    header.append(
         (
             f"{usage['label']} · cached, display-only · {usage['status']} · {usage['path']}",
             MUTED if usage["status"] == "ok" else ERROR,
             False,
-        ),
-    ]
+        )
+    )
     if usage.get("detail"):
         header.append((usage["detail"], ERROR, False))
     if state.get("error"):
@@ -233,7 +304,7 @@ def compose(
     max_offset = max(0, len(body) - available)
     offset = min(max(0, offset), max_offset)
     selected_line = next(
-        (index for index, (text, _color, _bold) in enumerate(body) if text.startswith("┃ >")),
+        (index for index, line in enumerate(body) if line[0].startswith("┃ >")),
         None,
     )
     if follow_selection and selected_line is not None:
@@ -263,7 +334,7 @@ def draw(state, offset, selected_lane=None, *, follow_selection=True, editor=Non
         follow_selection=follow_selection,
         editor=editor,
     )
-    rendered = [paint(text, color, bold=bold, width=size.columns) for text, color, bold in lines]
+    rendered = [paint_line(line, size.columns) for line in lines]
     rendered.extend([""] * max(0, size.lines - len(rendered)))
     sys.stdout.write("\033[H" + "\033[K\n".join(rendered[: size.lines]) + "\033[K")
     sys.stdout.flush()
