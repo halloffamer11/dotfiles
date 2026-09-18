@@ -52,8 +52,8 @@ carry their Landed notes here. Orin's verdict, 2026-09-15: a Herdr plugin is the
 right host for a persistent delegation control surface, and project Order, Gate and
 Margin give useful manual steering. The prototype UI, tickets 05-09 with their live
 evidence, and the verdict record on tickets 01 and 09 stay on branch
-`worktree/delegate-monitor-herdr`, as the spec requires. Its worktree was reopened for the compatibility pass. A
-production control surface is not ticketed yet.
+`worktree/delegate-monitor-herdr`, as the spec requires. Its worktree is reopened for ticket 10's compatibility pass.
+A production control surface is not ticketed yet.
 
 **Delegate redesign follow-ups:** spec
 `docs/superpowers/specs/2026-09-08-delegate-redesign.md`; tickets in
@@ -181,6 +181,11 @@ Local markdown: tickets in `.scratch/<effort>/issues/`, specs in
 
 The five default roles, written as a waiting ticket's `**Status:**` value. See
 `docs/agents/triage-labels.md`.
+
+### Worktrees
+
+One slug names the `.scratch/` effort, the `worktree/<slug>` branch and the Herdr
+checkout under `~/.herdr/worktrees/`; never `/tmp`. See `docs/agents/worktrees.md`.
 
 ### Domain docs
 

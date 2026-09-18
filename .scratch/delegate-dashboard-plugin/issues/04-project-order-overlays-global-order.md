@@ -12,7 +12,7 @@ Lands on `main`.
 
 **Blocked by:** 03 Tier leaders from the ranking boundary
 
-**Status:** implemented 2026-09-14 (`0c293b9`, integrated as `bea657d`); not landed on `main`
+**Status:** landed on `main` 2026-09-15 (`2571451`, `bc11b37`, `dc7f5f1`, `8f96d7f`); first implemented 2026-09-14 (`0c293b9`, integrated as `bea657d`)
 
 - [x] Project routing validation accepts Project order as a list of lane names and rejects duplicates, unknown lanes and globally off lanes, each with a message naming the lane and the rule.
 - [x] A project cannot change a lane's Tier or restore an off lane through Project order.
