@@ -553,7 +553,7 @@ def _footer_text(
     if state.get("error"):
         return [(fit(str(state["error"]), width), pal["veto"], True)]
     filt = " elig" if view.get("eligible_only") else ""
-    body = f"0/G top/end  [] Tier  f elig  c fold  ?  {NAME}{filt}"
+    body = f"j/k sel  J/K move  [] Tier  f elig  c fold  ? help  layout: {NAME} (v next){filt}"
     return [(fit(body, width), pal["mute"], False)]
 
 
