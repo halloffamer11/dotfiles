@@ -4,3 +4,4 @@ local.mk
 __pycache__/
 aa-key
 *.key
+.scratch/*/_work/

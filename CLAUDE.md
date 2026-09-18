@@ -15,15 +15,18 @@ Machine configuration and agent tooling managed as one Git repository.
 
 ## Active work
 
-**Next session: dashboard compatibility WIP** (2026-09-17). Resume branch
-`worktree/delegate-monitor-herdr` in `/private/tmp/delegate-monitor-herdr`. The
-Git worktree exists; its Herdr workspace is closed. Read its `tools/delegate-dashboard/CLAUDE.md` and
-`.scratch/delegate-dashboard-plugin/issues/10-current-backend-compatibility.md`.
-Main was merged into the prototype at `70cf9bb`; partial model edits are kept,
-with two failing dashboard checks. Both workers are stopped. Orin approved the
-compatibility pass and a delegate-selected TUI fallback after Claude Opus returned
-403; agy/Grok remain authorized. Keep the branch's project policy off main.
-Production scope, UI integration into main, and the Rust monitor remain separate.
+**Dashboard compatibility pass: waits for Orin's review** (2026-09-18). Branch
+`worktree/delegate-monitor-herdr`, checkout
+`~/.herdr/worktrees/dotfiles/worktree-delegate-monitor-herdr` (the `/private/tmp`
+checkout was cleared and is gone). Ticket 10,
+`.scratch/delegate-dashboard-plugin/issues/10-current-backend-compatibility.md` on that
+branch, is implemented: 42 dashboard checks pass, an independent review is adjudicated,
+and the live Herdr check is recorded there. It also records one decision Orin may
+overrule: project saves keep the canonical `catalog.edit_catalog` document shape, not
+the complete Order list. Test it from a Herdr pane with
+`make -C ~/.herdr/worktrees/dotfiles/worktree-delegate-monitor-herdr delegate-dashboard`.
+Keep the branch's project policy off main. Production scope, UI integration into main,
+and the Rust monitor remain separate.
 
 **Delegate modular batch complete** (2026-09-16): tickets 01–13 landed, all 13
 script suites and full/focused terminal checks passed, and independent review
@@ -178,6 +181,11 @@ Local markdown: tickets in `.scratch/<effort>/issues/`, specs in
 
 The five default roles, written as a waiting ticket's `**Status:**` value. See
 `docs/agents/triage-labels.md`.
+
+### Worktrees
+
+One slug names the `.scratch/` effort, the `worktree/<slug>` branch and the Herdr
+checkout under `~/.herdr/worktrees/`; never `/tmp`. See `docs/agents/worktrees.md`.
 
 ### Domain docs
 
