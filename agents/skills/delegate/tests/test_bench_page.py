@@ -331,6 +331,36 @@ except Exception as e:
     record("the page marks what the wizard marks, names it at the top, and shows the arithmetic",
            False, repr(e))
 
+# ticket 30: a dominated agy point is marked exactly as a dominated codex one is
+AGY_LANES = {
+    "version": "delegate-lanes.v1",
+    "lanes": {
+        "flash-medium@agy": {"harness": "agy", "model": "gemini-3.8-flash-medium",
+                             "effort": "medium", "tier": 1, "meter": "agy-gemini"},
+        "flash-high@agy": {"harness": "agy", "model": "gemini-3.8-flash-high", "effort": "high",
+                           "tier": 2, "meter": "agy-gemini"},
+    },
+}
+AGY_SWEEP = [
+    {"source": "aa", "model": "gemini-3.8-flash", "effort": e, "benchmark": "B",
+     "score": s, "cost_usd": c, "uncertain": False}
+    for e, s, c in (("medium", 0.60, 1.0), ("high", 0.50, 2.0))
+]
+
+try:
+    data = bench_page.plot_data(AGY_SWEEP, AGY_LANES)
+    points = board_named(data, "B")["points"]
+    struck = [p for p in points if p["kind"] == "lane_off"]
+    record("the page marks a dominated agy effort the way it marks a codex one",
+           len(struck) == 1 and struck[0]["effort"] == "high"
+           and struck[0]["beatenBy"] == "medium" and struck[0]["carryKind"] == "dominated"
+           and struck[0]["off"] == "medium wins on aa" and struck[0]["source"] == "aa"
+           and struck[0]["competitor"] == "medium"
+           and [p["kind"] for p in points if p["effort"] == "medium"] == ["lane"],
+           f"points={[(p['effort'], p['kind'], p.get('beatenBy')) for p in points]}")
+except Exception as e:
+    record("the page marks a dominated agy effort the way it marks a codex one", False, repr(e))
+
 try:
     missing = bench_page.render(None, LANES, None)
     empty = bench_page.render(None, LANES, [])

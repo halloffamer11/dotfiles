@@ -28,6 +28,7 @@ from bench import (
     group_lanes,
     is_dominated_reason,
     lane_order,
+    model_families,
     model_group,
     propose_enabled,
     recorded_reason,

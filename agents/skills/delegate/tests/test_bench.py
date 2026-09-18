@@ -719,6 +719,141 @@ except Exception as e:
     record("equal score at equal cost does not dominate; a cheaper equal score does",
            False, repr(e))
 
+
+# --- ticket 30: the carry rule groups an agy slug family ----------------------
+AGY_CARRY_LANES = {
+    "version": "delegate-lanes.v1",
+    "lanes": {
+        "flash-low@agy": {"harness": "agy", "model": "gemini-3.8-flash-low", "effort": "low",
+                          "tier": 1, "meter": "agy-gemini"},
+        "flash-medium@agy": {"harness": "agy", "model": "gemini-3.8-flash-medium",
+                             "effort": "medium", "tier": 1, "meter": "agy-gemini"},
+        "flash-high@agy": {"harness": "agy", "model": "gemini-3.8-flash-high", "effort": "high",
+                           "tier": 2, "meter": "agy-gemini"},
+    },
+}
+
+# A non-agy slug that happens to end in an effort word is still one model of its
+# own: the family key follows the harness, not the spelling. Under a spelling
+# rule gpt-6-edge-low would dominate gpt-6-edge-high here.
+GUARD_LANES = {
+    "version": "delegate-lanes.v1",
+    "lanes": {
+        "edge-low@codex": {"harness": "codex", "model": "gpt-6-edge-low", "effort": "low",
+                           "tier": 1, "meter": "codex"},
+        "edge-high@codex": {"harness": "codex", "model": "gpt-6-edge-high", "effort": "high",
+                            "tier": 1, "meter": "codex"},
+        "grok46-high@grok": {"harness": "grok", "model": "grok-4.6", "effort": "high",
+                             "tier": 2, "meter": "grok"},
+        "opus-high@claude": {"harness": "claude", "model": "claude-opus-5", "effort": "high",
+                             "tier": 3, "meter": "claude"},
+    },
+}
+
+
+def agy_row(effort, benchmark, score, cost, source="aa", model="gemini-3.8-flash", **extra):
+    """A row as a source prints it: the family name, with the effort beside it."""
+    row = {"model": model, "effort": effort, "benchmark": benchmark, "score": score,
+           "cost_usd": cost, "uncertain": False, "source": source}
+    row.update(extra)
+    return row
+
+
+try:
+    rows = [
+        agy_row("medium", "b1", 0.60, 1.0), agy_row("high", "b1", 0.50, 2.0),
+        agy_row("medium", "b2", 0.60, 1.0), agy_row("high", "b2", 0.50, 2.0),
+    ]
+    proposals = bench.propose_enabled(AGY_CARRY_LANES, rows)
+    high = proposals["flash-high@agy"]
+    record(
+        "an agy effort is dominated by another effort of the same slug family",
+        high == {"lane": "flash-high@agy", "enabled": False, "kind": "dominated",
+                 "source": "aa", "competitor": "medium"}
+        and bench.carry_reason(high) == "medium wins on aa"
+        and proposals["flash-medium@agy"]["kind"] == "not_dominated"
+        and proposals["flash-low@agy"]["kind"] == "no_rows",
+        str(proposals),
+    )
+except Exception as e:
+    record("an agy effort is dominated by another effort of the same slug family",
+           False, repr(e))
+
+try:
+    rows = [agy_row("medium", "b1", 0.60, 1.0), agy_row("high", "b2", 0.50, 2.0)]
+    proposals = bench.propose_enabled(AGY_CARRY_LANES, rows)
+    record(
+        "two agy efforts sharing no benchmark propose nothing",
+        proposals["flash-high@agy"]["kind"] == "not_dominated"
+        and proposals["flash-medium@agy"]["kind"] == "not_dominated"
+        and all(d["enabled"] for d in proposals.values()),
+        str(proposals),
+    )
+except Exception as e:
+    record("two agy efforts sharing no benchmark propose nothing", False, repr(e))
+
+try:
+    families = bench.model_families(AGY_CARRY_LANES)
+    guard_families = bench.model_families(GUARD_LANES)
+    guard_rows = [
+        agy_row("low", "b1", 0.90, 0.5, model="gpt-6-edge-low"),
+        agy_row("low", "b2", 0.90, 0.5, model="gpt-6-edge-low"),
+        agy_row("high", "b1", 0.50, 2.0, model="gpt-6-edge-high"),
+        agy_row("high", "b2", 0.50, 2.0, model="gpt-6-edge-high"),
+    ]
+    guard = bench.propose_enabled(GUARD_LANES, guard_rows)
+    record(
+        "every harness but agy keys the carry rule on the model string",
+        families == {"gemini-3.8-flash-low": "gemini-3.8-flash",
+                     "gemini-3.8-flash-medium": "gemini-3.8-flash",
+                     "gemini-3.8-flash-high": "gemini-3.8-flash"}
+        and guard_families == {"gpt-6-edge-low": "gpt-6-edge-low",
+                               "gpt-6-edge-high": "gpt-6-edge-high",
+                               "grok-4.6": "grok-4.6",
+                               "claude-opus-5": "claude-opus-5"}
+        and guard["edge-high@codex"]["kind"] == "not_dominated"
+        and guard["edge-low@codex"]["kind"] == "not_dominated"
+        and guard["grok46-high@grok"]["kind"] == "no_rows"
+        and guard["opus-high@claude"]["kind"] == "no_rows",
+        f"agy={families} guard={guard_families} proposals={guard}",
+    )
+except Exception as e:
+    record("every harness but agy keys the carry rule on the model string", False, repr(e))
+
+try:
+    resolved, _unmatched = bench.resolve_effort_rows(AGY_CARRY_LANES, [
+        agy_row("medium", "b1", 0.60, 1.0), agy_row("high", "b1", 0.50, 2.0),
+        agy_row("medium", "b2", 0.60, 1.0), agy_row("high", "b2", 0.50, 2.0),
+    ])
+    certain = bench.certain_effort_rows(resolved)
+    families = bench.model_families(AGY_CARRY_LANES)
+    target = next(r for r in certain if r["effort"] == "high" and r["benchmark"] == "b1")
+    other = bench.dominating_row(target, certain, families)
+    record(
+        "dominating_row gives the agy competitor's point on the row's own board",
+        other is not None and other["effort"] == "medium" and other["benchmark"] == "b1"
+        and other["model"] == "gemini-3.8-flash-medium"
+        and bench.dominating_row(target, certain) is None,
+        str(other),
+    )
+except Exception as e:
+    record("dominating_row gives the agy competitor's point on the row's own board",
+           False, repr(e))
+
+try:
+    record(
+        "the agy family rule has one implementation, in the catalog",
+        catalog.agy_family("gemini-3.8-flash-high") == ("gemini-3.8-flash", "high")
+        and catalog.agy_family("gemini-3.8-flash") == ("gemini-3.8-flash", None)
+        # xhigh, max and ultra are not agy efforts, so such a slug is not a family
+        and catalog.agy_family("gpt-6-astra-xhigh") == ("gpt-6-astra-xhigh", None),
+        str([catalog.agy_family(s) for s in
+             ("gemini-3.8-flash-high", "gemini-3.8-flash", "gpt-6-astra-xhigh")]),
+    )
+except Exception as e:
+    record("the agy family rule has one implementation, in the catalog", False, repr(e))
+
+
 try:
     with tempfile.TemporaryDirectory() as td:
         csv_path = os.path.join(td, "epoch.csv")

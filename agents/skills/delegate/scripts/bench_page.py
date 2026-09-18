@@ -34,6 +34,7 @@ from bench import (
     fmt_cost,
     group_lanes,
     lane_order,
+    model_families,
     model_group,
     propose_enabled,
 )
@@ -279,9 +280,10 @@ def _annotate(effort_rows, lanes_doc, proposals):
         row["model"] = item["_lane_model"] or item.get("model")
         keyed.append(row)
     certain = certain_effort_rows(keyed)
+    families = model_families(lanes_doc)
     comparable = {id(row) for row in certain}
     for item, row in zip(annotated, keyed):
-        other = dominating_row(row, certain) if id(row) in comparable else None
+        other = dominating_row(row, certain, families) if id(row) in comparable else None
         item["_dominated_by"] = other["effort"] if other else None
     return annotated
 

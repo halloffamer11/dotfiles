@@ -104,7 +104,7 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 import catalog
-from catalog import CatalogError, EFFORTS, HARNESSES, HARNESS_EFFORTS, load_catalog, strip_effort_suffix
+from catalog import CatalogError, EFFORTS, HARNESSES, HARNESS_EFFORTS, load_catalog
 
 # Harness evaluation order: harnesses with discover commands first, then claude
 DISCOVER_HARNESSES = ("codex", "agy", "grok", "claude")
@@ -316,9 +316,7 @@ def group_agy_models(raw_models):
     families, order = {}, []
     for item in raw_models:
         slug = item["slug"]
-        base, effort = strip_effort_suffix(slug)
-        if effort not in HARNESS_EFFORTS["agy"] or not base:
-            base, effort = slug, None
+        base, effort = catalog.agy_family(slug)
         family = families.get(base)
         if family is None:
             display = item.get("display_name")

@@ -189,6 +189,25 @@ def strip_effort_suffix(model):
     return model, None
 
 
+def agy_family(slug):
+    """The agy slug family a model slug belongs to: (base, effort).
+
+    agy carries the effort in the slug, so `gemini-3.8-flash-high` is the model
+    `gemini-3.8-flash` at effort high. A slug whose suffix is not an effort agy
+    offers is a family of its own, with no effort: `(slug, None)`.
+
+    One rule in one place. Discovery groups a harness listing with it
+    (`discover.group_agy_models`) and the carry rule groups a lane's rows with it
+    (`bench.model_families`), so the wizard can never disagree with the models
+    discovery reported (ticket 30).
+    """
+    text = slug or ""
+    base, effort = strip_effort_suffix(text)
+    if not base or effort not in HARNESS_EFFORTS["agy"]:
+        return text, None
+    return base, effort
+
+
 def published_as_map(lanes_doc):
     """{normalized published name: lane model} from every lane's published_as."""
     out = {}
