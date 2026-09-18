@@ -2255,4 +2255,23 @@ try:
 except Exception as e:
     record("focused edit preservation regressions", False, repr(e))
 
+
+try:
+    # Ticket 29 A: the review page names a Tier whose carried Lanes all drain
+    # one Meter. It is coverage, not a judgment of the Tier, and it reads the
+    # carry and Tier this session holds, not the ones the catalog came with.
+    w = wizard()
+    not_carried(w, "grok46-high@grok")
+    mark_as(w, {"fable-xhigh@claude": 4, "sol-high@codex": 3,
+                "terra-high@codex": 2, "luna-low@codex": 1, "flash-high@agy": 1})
+    legend = w.view()["legend"]
+    record("62 the review page names a Tier one Meter serves, and only such a Tier",
+           w.screen == "review"
+           and any(line.startswith("Tier 2 depends on Meter codex") for line in legend)
+           and not any(line.startswith("Tier 1 depends") for line in legend)
+           and all(len(line) <= 79 for line in legend),
+           repr(legend))
+except Exception as e:
+    record("62 the review page names a Tier one Meter serves", False, repr(e))
+
 sys.exit(1 if fails else 0)

@@ -1112,6 +1112,44 @@ def main():
             usage.acquire = orig_acquire
         record("34b meters on still probes unless --no-probe", ok34b, repr(acquire_on))
 
+        # -------------------------------------------------------------
+        # 35. run prints the overflow header and picks in the admitted Tier
+        # (ticket 29). flash-high@agy moves to tier 4 for this case: its Meter
+        # is unknown by decision, so in the mechanical Range it would always be
+        # eligible and the Range could never stop.
+        _lanes_path35 = os.path.join(t_env["config_dir"], "lanes.json")
+        with open(_lanes_path35, encoding="utf-8") as _f:
+            _lanes35 = _json.load(_f)
+        _lanes35["lanes"]["flash-high@agy"]["tier"] = 4
+        with open(_lanes_path35, "w", encoding="utf-8") as _f:
+            _json.dump(_lanes35, _f, indent=2)
+
+        # codex and grok under the Gate; claude-general healthy at tier 3
+        over_meters35 = write_meters_doc(os.path.join(tmpdir, "over_meters35.json"), [
+            meter("codex", weekly=0.02, five_h=0.02, pace=0.05, status="unavailable"),
+            meter("grok", weekly=0.02, pace=0.05, status="unavailable"),
+            meter("claude-fable", weekly=0.90, five_h=0.90, pace=1.10, status="ok"),
+            meter("claude-general", weekly=0.90, five_h=0.90, pace=1.10, status="ok"),
+            meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
+        ])
+        b35 = make_brief("b35.md", "Brief 35.")
+        runs_before35 = set(os.listdir(t_env["runs_dir"]))
+        res35 = run_run(t_env, ["mechanical", "--brief", b35, "--cwd", cwd,
+                                "--meters", over_meters35, "--dry-run"])
+        runs_after35 = set(os.listdir(t_env["runs_dir"]))
+        lines35 = res35.stdout.strip().splitlines()
+        ok35 = (
+            res35.returncode == 0 and
+            lines35[0].startswith("# mechanical") and "floor=1 ceiling=2" in lines35[0] and
+            lines35[1] == "# overflow: ceiling 2 -> 3, all in-Range Lanes under Gate" and
+            "1. opus-high@claude" in lines35[2] and
+            any("terra-high@codex" in line and "vetoed:gate" in line for line in lines35) and
+            "delegate: dry run, nothing dispatched" in res35.stdout and
+            runs_after35 == runs_before35
+        )
+        record("35. run --dry-run prints the overflow header and a Tier 3 pick", ok35,
+               f"rc={res35.returncode} stdout={res35.stdout} stderr={res35.stderr}")
+
     if fails > 0:
         print(f"FAIL: {fails} tests failed", file=sys.stderr)
         sys.exit(1)

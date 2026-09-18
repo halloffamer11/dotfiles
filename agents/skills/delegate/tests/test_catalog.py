@@ -2074,4 +2074,133 @@ with tempfile.TemporaryDirectory() as td:
         and catalog.load_json(os.path.join(real_cfg, "routing.json"))["meters"] is False,
     )
 
+# 12. Ticket 29 A: one Meter serving every carried Lane of a Tier is a warning.
+# It names the Tier and the one Meter, never fails a check, and never says the
+# Tier is wrong: which Lanes a Tier carries is Orin's decision.
+sample_tiers = catalog.single_meter_tiers(lanes_sample["lanes"])
+sample_lines = catalog.meter_dependency_lines(lanes_sample["lanes"])
+record(
+    "12.1 a Tier whose carried Lanes share one Meter is named; a Tier on two is not",
+    [(tier, meter) for tier, meter, _names in sample_tiers]
+        == [(3, "codex"), (4, "claude-fable")]
+    and any(line.startswith("Tier 3 depends on Meter codex") for line in sample_lines)
+    and not any(line.startswith("Tier 1 ") or line.startswith("Tier 2 ")
+                for line in sample_lines)
+    and all(len(line) <= 79 for line in sample_lines),
+    repr(sample_lines),
+)
+
+lanes_one_meter = copy.deepcopy(lanes_sample)
+lanes_one_meter["lanes"]["grok46-high@grok"]["enabled"] = False
+record(
+    "12.2 switching the second Meter's Lane off makes the Tier depend on one Meter",
+    any(line.startswith("Tier 2 depends on Meter codex")
+        for line in catalog.meter_dependency_lines(lanes_one_meter["lanes"])),
+    repr(catalog.meter_dependency_lines(lanes_one_meter["lanes"])),
+)
+
+lanes_empty_tier = copy.deepcopy(lanes_sample)
+for _name in ("luna-low@codex", "flash-high@agy"):
+    lanes_empty_tier["lanes"][_name]["enabled"] = False
+record(
+    "12.3 a Tier with no carried Lane is not named",
+    not any(line.startswith("Tier 1 ")
+            for line in catalog.meter_dependency_lines(lanes_empty_tier["lanes"])),
+    repr(catalog.meter_dependency_lines(lanes_empty_tier["lanes"])),
+)
+
+with tempfile.TemporaryDirectory() as td:
+    lanes_check_path = os.path.join(td, "lanes.json")
+    catalog.write_json(lanes_check_path, lanes_one_meter)
+    res_check = subprocess.run(
+        [sys.executable, CATALOG_PY, "check", lanes_check_path],
+        capture_output=True, text=True,
+    )
+    record(
+        "12.4 check warns on stderr, names the Lanes, and still passes",
+        res_check.returncode == 0
+        and res_check.stdout.strip() == f"ok: {lanes_check_path}"
+        and "warning: Tier 2 depends on Meter codex" in res_check.stderr
+        and "terra-high@codex" in res_check.stderr,
+        res_check.stdout + res_check.stderr,
+    )
+
+    routing_check_path = os.path.join(td, "routing.json")
+    catalog.write_json(routing_check_path, copy.deepcopy(routing_sample))
+    res_routing = subprocess.run(
+        [sys.executable, CATALOG_PY, "check", routing_check_path],
+        capture_output=True, text=True,
+    )
+    record(
+        "12.5 a routing file has no Lanes, so check prints no warning",
+        res_routing.returncode == 0
+        and "warning:" not in res_routing.stdout + res_routing.stderr,
+        res_routing.stdout + res_routing.stderr,
+    )
+
+# 13. Ticket 29 B: routing.overflow, a boolean that defaults on and that a
+# project may override, exactly as routing.meters does.
+doc_o = copy.deepcopy(routing_sample)
+record("13.1 legacy routing without overflow defaults on",
+       "overflow" not in doc_o and catalog.overflow_enabled(doc_o) is True
+       and catalog.validate_routing(doc_o) is not None)
+
+doc_o["overflow"] = False
+record("13.2 overflow false is valid and effective off",
+       catalog.validate_routing(doc_o) is not None
+       and catalog.overflow_enabled(doc_o) is False)
+
+doc_o["overflow"] = True
+record("13.3 overflow true is valid and effective on",
+       catalog.validate_routing(doc_o) is not None
+       and catalog.overflow_enabled(doc_o) is True)
+
+for bad in (0, 1, "false", None, 0.0):
+    doc_bad = copy.deepcopy(routing_sample)
+    doc_bad["overflow"] = bad
+    msg_bad = check_catalog_error(catalog.validate_routing, doc_bad)
+    record(
+        f"13.4 overflow rejects {bad!r}",
+        msg_bad is not None and "overflow" in msg_bad and "boolean" in msg_bad,
+        msg_bad,
+    )
+
+record(
+    "13.5 routing.overflow is a set field",
+    catalog.parse_set_field("routing.overflow") == ("routing", "overflow"),
+    repr(catalog.parse_set_field("routing.overflow")),
+)
+
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, _real = make_edit_fixture(td)
+    routing_path = os.path.join(cfg, "routing.json")
+    preview_o = catalog.edit_catalog(
+        "set", field="routing.overflow", value=False, scope="global",
+        cwd=repo, config_dir=cfg, present=ALL_HARNESSES, meters=EMPTY_METERS,
+    )
+    catalog.edit_catalog(
+        "set", field="routing.overflow", value=False, scope="global",
+        cwd=repo, config_dir=cfg, apply=True, expect=preview_o["revision"],
+        present=ALL_HARNESSES, meters=EMPTY_METERS,
+    )
+    record(
+        "13.6 set routing.overflow false writes global routing",
+        preview_o["changed"] == ["routing.overflow"]
+        and preview_o["values"]["field"] == "routing.overflow"
+        and preview_o["values"]["original"]["effective"] is True
+        and preview_o["values"]["resulting"]["effective"] is False
+        and catalog.load_json(routing_path)["overflow"] is False,
+        repr(preview_o["values"]),
+    )
+
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, _real = make_edit_fixture(td, project={"overflow": False})
+    cat_o = catalog.load_catalog(cwd=repo, config_dir=cfg)
+    record(
+        "13.7 project overflow false overrides global default on",
+        catalog.overflow_enabled(cat_o["routing"]) is False
+        and "overflow" not in catalog.load_json(os.path.join(cfg, "routing.json")),
+        repr(cat_o["routing"].get("overflow")),
+    )
+
 sys.exit(1 if fails else 0)

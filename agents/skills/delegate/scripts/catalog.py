@@ -14,11 +14,12 @@ Locations:
 
 CLI forms:
   catalog.py show [--cwd DIR] [--config-dir DIR] [--json]
-  catalog.py check FILE [--partial]
+  catalog.py check FILE [--partial]   (warns when one Meter serves a whole Tier)
   catalog.py check-guide [FILE] [--overlay]
   catalog.py fmt FILE [--partial]
   catalog.py set FIELD JSON_VALUE --scope global|project [--cwd DIR] [--config-dir DIR]
-      FIELD is lanes.<lane>.tier, routing.gate, routing.margin, or routing.meters
+      FIELD is lanes.<lane>.tier, routing.gate, routing.margin, routing.meters,
+      or routing.overflow
   catalog.py range CLASS FLOOR CEILING --scope global|project [--cwd DIR] [--config-dir DIR]
   catalog.py order LANE POSITION --scope global|project [--cwd DIR] [--config-dir DIR]
   (set/range/order default to a JSON preview; --apply --expect REVISION writes)
@@ -513,7 +514,7 @@ def validate_routing(doc, source="routing.json", partial=False):
             "cannot appear in global routing"
         )
 
-    allowed_top = {"version", "classes", "margin", "gate", "meters", "note"}
+    allowed_top = {"version", "classes", "margin", "gate", "meters", "overflow", "note"}
     if partial:
         allowed_top.add("project_order")
     for k in doc:
@@ -596,6 +597,15 @@ def validate_routing(doc, source="routing.json", partial=False):
                 f"{source}: key 'meters': meters must be a JSON boolean, got {m!r}"
             )
 
+    if "overflow" in doc:
+        o = doc["overflow"]
+        if type(o) is not bool:
+            raise CatalogError(
+                f"{source}: key 'overflow': overflow must be a JSON boolean, got {o!r}; "
+                "true lets a Range whose carried Lanes are all under the Gate admit the "
+                "next Tier instead of stopping"
+            )
+
     if "project_order" in doc:
         project_order = doc["project_order"]
         if not isinstance(project_order, list):
@@ -664,6 +674,59 @@ def meters_enabled(routing):
     if not isinstance(routing, dict) or "meters" not in routing:
         return True
     return routing["meters"] is True
+
+
+def overflow_enabled(routing):
+    """Effective routing.overflow: JSON true or false, absent defaults on.
+
+    On, a Class whose carried in-Range Lanes are every one of them under the
+    Gate admits the next Tier above its Ceiling rather than stopping the job
+    (ticket 29). Off keeps the stop. The default is on because a Gate-only
+    outage costs the job, while the Tier above it costs usage.
+    """
+    if not isinstance(routing, dict) or "overflow" not in routing:
+        return True
+    return routing["overflow"] is True
+
+
+def single_meter_tiers(lanes):
+    """[(tier, meter, [lane, ...]), ...] for each Tier one Meter wholly serves.
+
+    Coverage, not judgment (ticket 29): when every carried Lane of a Tier drains
+    one Meter, that Meter falling under the Gate takes the whole Tier with it.
+    Which Lanes a Tier carries is Orin's decision and this never questions it.
+    A Tier with no carried Lane is not named.
+    """
+    out = []
+    for tier in range(1, 5):
+        carried = sorted(
+            name for name, lane in (lanes or {}).items()
+            if isinstance(lane, dict)
+            and lane.get("enabled", True)
+            and lane.get("tier") == tier
+        )
+        if not carried:
+            continue
+        used = {lanes[name].get("meter") for name in carried}
+        if len(used) == 1:
+            out.append((tier, used.pop(), carried))
+    return out
+
+
+def meter_dependency_lines(lanes, names=False):
+    """One line per Tier that `single_meter_tiers` names.
+
+    `names=True` appends the carried Lanes, which `check` has room for. The
+    wizard's review page does not: a legend line past 79 places is clipped, so
+    that page takes the short form.
+    """
+    lines = []
+    for tier, meter, lane_names in single_meter_tiers(lanes):
+        line = f"Tier {tier} depends on Meter {meter}; a Gate stop there stops the Tier."
+        if names:
+            line += f" Carried: {', '.join(lane_names)}"
+        lines.append(line)
+    return lines
 
 
 def _validate_merged_routing(routing, source):
@@ -1145,7 +1208,15 @@ def show_catalog(cwd=None, config_dir=None, as_json=False):
 HERE_SCRIPTS = os.path.dirname(os.path.abspath(__file__))
 _SET_LANE_PREFIX = "lanes."
 _SET_LANE_TIER_SUFFIX = ".tier"
-_SET_ROUTING_FIELDS = {"gate": "routing.gate", "margin": "routing.margin", "meters": "routing.meters"}
+_SET_ROUTING_FIELDS = {
+    "gate": "routing.gate",
+    "margin": "routing.margin",
+    "meters": "routing.meters",
+    "overflow": "routing.overflow",
+}
+# The routing switches whose value is a boolean defaulting on, each with the
+# reader that says what the merged documents come to.
+_BOOL_ROUTING_KEYS = {"meters": meters_enabled, "overflow": overflow_enabled}
 
 
 def _rank_mod():
@@ -1382,7 +1453,7 @@ def parse_set_field(field):
     """Split an allowed set field on the known prefix and final name, not every dot."""
     if not isinstance(field, str) or not field.strip():
         raise CatalogError("field is required")
-    if field in ("routing.gate", "routing.margin", "routing.meters"):
+    if field in ("routing.gate", "routing.margin", "routing.meters", "routing.overflow"):
         return ("routing", field.split(".", 1)[1])
     if field.startswith("routing.classes."):
         raise CatalogError(
@@ -1402,7 +1473,8 @@ def parse_set_field(field):
         )
     raise CatalogError(
         f"unknown field '{field}'; allowed fields are "
-        "lanes.<lane>.tier, routing.gate, routing.margin, routing.meters"
+        "lanes.<lane>.tier, routing.gate, routing.margin, routing.meters, "
+        "routing.overflow"
     )
 
 
@@ -1535,18 +1607,19 @@ def _plan_set(field, value, scope, lanes_doc, routing_doc, project_doc):
         proposed_project = copy.deepcopy(project_doc)
         dest = "routing" if scope == "global" else "project"
         write_value = True
-        if key == "meters":
+        effective_reader = _BOOL_ROUTING_KEYS.get(key)
+        if effective_reader is not None:
             if type(value) is not bool:
                 raise CatalogError(
-                    f"key 'meters': meters must be a JSON boolean, got {value!r}"
+                    f"key '{key}': {key} must be a JSON boolean, got {value!r}"
                 )
-            # A no-op of the default on a legacy document must not add meters.
+            # A no-op of the default on a legacy document must not add the key.
             if value is True:
-                if scope == "global" and "meters" not in routing_doc:
+                if scope == "global" and key not in routing_doc:
                     write_value = False
                 elif scope == "project":
-                    global_on = meters_enabled(routing_doc)
-                    project_has = project_doc is not None and "meters" in project_doc
+                    global_on = effective_reader(routing_doc)
+                    project_has = project_doc is not None and key in project_doc
                     if global_on and not project_has:
                         write_value = False
         if write_value:
@@ -1559,7 +1632,7 @@ def _plan_set(field, value, scope, lanes_doc, routing_doc, project_doc):
         original_global = routing_doc.get(key) if key in routing_doc else None
         original_merged, _sources = merge_routing(routing_doc, project_doc)
         original_effective = (
-            meters_enabled(original_merged) if key == "meters"
+            effective_reader(original_merged) if effective_reader is not None
             else (
                 project_doc.get(key, original_global)
                 if project_doc is not None else original_global
@@ -1568,7 +1641,7 @@ def _plan_set(field, value, scope, lanes_doc, routing_doc, project_doc):
         resulting_global = proposed_routing.get(key) if key in proposed_routing else None
         resulting_merged, _sources = merge_routing(proposed_routing, proposed_project)
         resulting_effective = (
-            meters_enabled(resulting_merged) if key == "meters"
+            effective_reader(resulting_merged) if effective_reader is not None
             else (
                 proposed_project.get(key, resulting_global)
                 if proposed_project is not None else resulting_global
@@ -1695,6 +1768,8 @@ def _changed_fields(op, values, original_doc, proposed_doc, dest):
                 changed.append("routing.margin")
             if field == "routing.meters" and original_doc.get("meters") != proposed_doc.get("meters"):
                 changed.append("routing.meters")
+            if field == "routing.overflow" and original_doc.get("overflow") != proposed_doc.get("overflow"):
+                changed.append("routing.overflow")
         return changed
     if op == "range":
         cls = values["class"]
@@ -1899,7 +1974,11 @@ def main(argv=None):
         p.add_argument("--expect", default=None, help="revision from a preview of the same sources")
 
     p_set = sub.add_parser("set", help="preview or apply one allowed field edit")
-    p_set.add_argument("field", help="lanes.<lane>.tier, routing.gate, routing.margin, or routing.meters")
+    p_set.add_argument(
+        "field",
+        help="lanes.<lane>.tier, routing.gate, routing.margin, routing.meters, "
+             "or routing.overflow",
+    )
     p_set.add_argument("value", help="JSON value")
     add_edit_flags(p_set)
 
@@ -1920,7 +1999,12 @@ def main(argv=None):
         if args.cmd == "show":
             show_catalog(cwd=args.cwd, config_dir=args.config_dir, as_json=args.json)
         elif args.cmd == "check":
-            check_file(args.file, partial=args.partial)
+            doc = check_file(args.file, partial=args.partial)
+            # Coverage warnings, never failures: a valid catalog can still
+            # leave a Tier resting on one Meter (ticket 29). They go to stderr
+            # so that `ok: <file>` stays the whole of this command's stdout.
+            for line in meter_dependency_lines(doc.get("lanes"), names=True):
+                sys.stderr.write(f"warning: {line}\n")
             print(f"ok: {args.file}")
         elif args.cmd == "check-guide":
             guide_path = args.file if args.file is not None else default_class_guide_path()

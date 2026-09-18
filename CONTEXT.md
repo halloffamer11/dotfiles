@@ -77,6 +77,17 @@ _Avoid_: cap, max tier
 The tiers from the floor to the ceiling of a class. It is the normal range of operation for that class.
 _Avoid_: band
 
+**Overflow**:
+Admitting the tier above a class's ceiling for one job, when subscription usage
+is the only thing stopping the range: at least one carried lane in it is under
+the gate, and every veto there is a gate veto or an absent harness CLI. A lane
+whose CLI is absent counts like a lane switched off, because the catalog is
+shared across machines and this one cannot run that lane. Overflow steps one
+tier at a time, never goes below the floor, and never reaches tier 4. Any other
+veto in the range, and a range with no gated lane in it, stop the job instead.
+The routing key `overflow` turns it off.
+_Avoid_: fallback, escalation, exception
+
 **Named dispatch**:
 A job sent to a lane the caller chose. Ranking and the range are skipped.
 

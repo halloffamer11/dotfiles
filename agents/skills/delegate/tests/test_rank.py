@@ -478,9 +478,10 @@ with tempfile.TemporaryDirectory() as td:
     data12 = json.loads(res12.stdout)
     required_row_keys = {
         "lane", "harness", "model", "effort", "tier", "order", "meter",
-        "pace", "r", "remaining_weekly", "meter_status", "eligible", "pick", "reason"
+        "pace", "r", "remaining_weekly", "meter_status", "eligible", "veto",
+        "pick", "overflow", "reason"
     }
-    top_keys_ok = all(k in data12 for k in ("class", "floor", "ceiling", "margin", "gate", "pick", "rows"))
+    top_keys_ok = all(k in data12 for k in ("class", "floor", "ceiling", "margin", "gate", "overflow", "pick", "rows"))
     pick_matches = (data12["pick"] == data12["rows"][0]["lane"] and data12["rows"][0]["pick"] is True)
     all_keys_ok = all(set(r.keys()) == required_row_keys for r in data12["rows"])
     record("case 12 CLI --json output schema", res12.returncode == 0 and top_keys_ok and pick_matches and all_keys_ok)
@@ -1050,6 +1051,278 @@ with tempfile.TemporaryDirectory() as td:
         catalog.meters_enabled(cat_proj["routing"]) is False
         and terra_proj["eligible"] is True,
         terra_proj["reason"],
+    )
+
+    # -------------------------------------------------------------
+    # 26. Overflow past the Ceiling (ticket 29). A Range whose carried Lanes
+    # are every one of them under the Gate admits the next Tier instead of
+    # stopping the Class. These fixture tiers are deliberately local: no
+    # expectation here depends on the live catalog's assignments. agy sits in
+    # Tier 4 throughout, because agy Remaining is unknown by decision (modular
+    # ticket 13) and an unknown Meter is eligible, never Gate-vetoed.
+    over_cat = copy.deepcopy(cat)
+    over_layout = {
+        "luna-low@codex": 1,       # codex
+        "terra-high@codex": 2,     # codex
+        "grok46-high@grok": 2,     # grok
+        "sol-high@codex": 3,       # codex
+        "fable-xhigh@claude": 3,   # claude-fable
+        "flash-high@agy": 4,       # agy-gemini, Remaining unknown
+    }
+    for lane_name, lane_tier in over_layout.items():
+        over_cat["lanes"][lane_name]["tier"] = lane_tier
+        over_cat["lanes"][lane_name].pop("order", None)
+
+    # codex and grok under the Gate of 10%; claude healthy in Tier 3
+    m26 = [
+        meter("codex", weekly=0.02, five_h=0.02, pace=0.05, status="unavailable"),
+        meter("grok", weekly=0.02, pace=0.05, status="unavailable"),
+        meter("claude-fable", weekly=0.90, five_h=0.90, pace=1.10, status="ok"),
+        meter("claude-general", weekly=0.90, five_h=0.90, pace=1.10, status="ok"),
+        meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
+    ]
+    doc26 = write_meters_doc(meters_path, m26)
+
+    rows26 = rank.rank("mechanical", over_cat, doc26, ALL_HARNESSES)
+    record(
+        "case 26a a Gate-only outage admits the Tier above the Ceiling and ranks it",
+        rows26[0]["lane"] == "fable-xhigh@claude" and rows26[0]["pick"] is True
+        and rows26[0].get("overflow") == {
+            "from": 2, "to": 3, "why": "all in-Range Lanes under Gate"},
+        repr(rows26[0]),
+    )
+
+    # A Lane whose CLI is absent counts like a Lane switched off: it neither
+    # causes the outage nor blocks the answer to one. grok is healthy but its
+    # CLI is gone, codex is under the Gate, and the Range still overflows.
+    m26b = [
+        meter("codex", weekly=0.02, five_h=0.02, pace=0.05, status="unavailable"),
+        meter("grok", weekly=0.80, pace=0.90, status="ok"),
+        meter("claude-fable", weekly=0.90, five_h=0.90, pace=1.10, status="ok"),
+        meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
+    ]
+    doc26b = write_meters_doc(meters_path, m26b)
+    rows26b = rank.rank("mechanical", over_cat, doc26b, {"claude", "codex", "agy"})
+    grok26b = next(r for r in rows26b if r["lane"] == "grok46-high@grok")
+    record(
+        "case 26b a Gate and cli-absent mix still overflows; the absent CLI does not block it",
+        rows26b[0]["lane"] == "fable-xhigh@claude" and rows26b[0]["pick"] is True
+        and rows26b[0].get("overflow") == {
+            "from": 2, "to": 3, "why": "all in-Range Lanes under Gate"}
+        and grok26b["reason"] == "vetoed:cli, grok46-high@grok: grok not on PATH",
+        repr(rows26b[0]),
+    )
+
+    off_cat26 = copy.deepcopy(over_cat)
+    off_cat26["routing"]["overflow"] = False
+    rows26c = rank.rank("mechanical", off_cat26, doc26, ALL_HARNESSES)
+    record(
+        "case 26c routing.overflow false keeps today's stop",
+        catalog.overflow_enabled(off_cat26["routing"]) is False
+        and rows26c[0]["pick"] is False
+        and all(r.get("overflow") is None for r in rows26c),
+        rows26c[0]["reason"],
+    )
+
+    empty_cat26 = copy.deepcopy(over_cat)
+    for lane_name in ("luna-low@codex", "terra-high@codex", "grok46-high@grok"):
+        empty_cat26["lanes"][lane_name]["enabled"] = False
+    rows26d = rank.rank("mechanical", empty_cat26, doc26, ALL_HARNESSES)
+    record(
+        "case 26d a Range with no carried Lane stops; overflow needs a Gate outage",
+        rows26d[0]["pick"] is False and all(r.get("overflow") is None for r in rows26d),
+        rows26d[0]["reason"],
+    )
+
+    # Tier 4 is named-only. The Range 2-3 is wholly under the Gate and the one
+    # Tier 4 Lane would be eligible, and overflow still refuses to admit it.
+    m26e = [
+        meter("codex", weekly=0.02, five_h=0.02, pace=0.05, status="unavailable"),
+        meter("grok", weekly=0.02, pace=0.05, status="unavailable"),
+        meter("claude-fable", weekly=0.02, five_h=0.02, pace=0.05, status="unavailable"),
+        meter("claude-general", weekly=0.02, five_h=0.02, pace=0.05, status="unavailable"),
+        meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
+    ]
+    doc26e = write_meters_doc(meters_path, m26e)
+    rows26e = rank.rank("impl", over_cat, doc26e, ALL_HARNESSES)
+    flash26e = next(r for r in rows26e if r["lane"] == "flash-high@agy")
+    record(
+        "case 26e Tier 4 is never admitted by overflow",
+        rows26e[0]["pick"] is False
+        and all(r.get("overflow") is None for r in rows26e)
+        and flash26e["reason"].startswith("vetoed:ceiling"),
+        flash26e["reason"],
+    )
+
+    # One Tier at a time, and as many steps as it takes below Tier 4.
+    step_cat26 = copy.deepcopy(over_cat)
+    step_cat26["routing"]["classes"]["mechanical"] = {"floor": 1, "ceiling": 1}
+    rows26f = rank.rank("mechanical", step_cat26, doc26, ALL_HARNESSES)
+    record(
+        "case 26f overflow steps again when the admitted Tier is also all under the Gate",
+        rows26f[0]["lane"] == "fable-xhigh@claude"
+        and rows26f[0].get("overflow") == {
+            "from": 1, "to": 3, "why": "all in-Range Lanes under Gate"},
+        repr(rows26f[0].get("overflow")),
+    )
+
+    # With metering off there are no Gate vetoes, so overflow cannot fire.
+    meters_off26 = copy.deepcopy(over_cat)
+    meters_off26["routing"]["meters"] = False
+    rows26g = rank.rank("mechanical", meters_off26, doc26, ALL_HARNESSES)
+    record(
+        "case 26g with routing.meters off the Gate never vetoes, so overflow never fires",
+        rows26g[0]["lane"] == "luna-low@codex" and rows26g[0]["tier"] == 1
+        and all(r.get("overflow") is None for r in rows26g),
+        rows26g[0]["reason"],
+    )
+
+    cfg26_dir = os.path.join(td, "cfg26")
+    os.makedirs(cfg26_dir)
+    lanes26 = catalog.load_json(os.path.join(SAMPLES_DIR, "lanes.json"))
+    for lane_name, lane_tier in over_layout.items():
+        lanes26["lanes"][lane_name]["tier"] = lane_tier
+    catalog.write_json(os.path.join(cfg26_dir, "lanes.json"), lanes26)
+    shutil.copy(os.path.join(SAMPLES_DIR, "routing.json"), cfg26_dir)
+    meters26_path = os.path.join(td, "meters26.json")
+    write_meters_doc(meters26_path, m26)
+
+    res26 = subprocess.run(
+        [sys.executable, RANK_PY, "mechanical", "--config-dir", cfg26_dir,
+         "--meters", meters26_path, "--harnesses", ALL_HARNESSES_ARG],
+        capture_output=True,
+        text=True,
+    )
+    lines26 = res26.stdout.strip().splitlines()
+    record(
+        "case 26h the rank header says overflow fired, from which Ceiling and why",
+        res26.returncode == 0
+        and lines26[0].startswith("# mechanical")
+        and "floor=1 ceiling=2" in lines26[0]
+        and lines26[1] == "# overflow: ceiling 2 -> 3, all in-Range Lanes under Gate"
+        and "1. fable-xhigh@claude" in lines26[2],
+        res26.stdout + res26.stderr,
+    )
+
+    res26j = subprocess.run(
+        [sys.executable, RANK_PY, "mechanical", "--config-dir", cfg26_dir,
+         "--meters", meters26_path, "--harnesses", ALL_HARNESSES_ARG, "--json"],
+        capture_output=True,
+        text=True,
+    )
+    data26 = json.loads(res26j.stdout) if res26j.returncode == 0 else {}
+    record(
+        "case 26i --json carries the same overflow record beside the policy Ceiling",
+        res26j.returncode == 0
+        and data26.get("pick") == "fable-xhigh@claude"
+        and data26.get("ceiling") == 2
+        and data26.get("overflow") == {
+            "from": 2, "to": 3, "why": "all in-Range Lanes under Gate"},
+        res26j.stdout[:400] + res26j.stderr,
+    )
+
+    # Nothing under the Gate, so nothing for overflow to answer: the whole
+    # Range is simply not runnable on this machine.
+    m26healthy = [
+        meter("codex", weekly=0.80, five_h=0.80, pace=0.80, status="ok"),
+        meter("grok", weekly=0.80, pace=0.90, status="ok"),
+        meter("claude-fable", weekly=0.90, five_h=0.90, pace=1.10, status="ok"),
+        meter("claude-general", weekly=0.90, five_h=0.90, pace=1.10, status="ok"),
+        meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
+    ]
+    meters26h_path = os.path.join(td, "meters26h.json")
+    write_meters_doc(meters26h_path, m26healthy)
+    res26k = subprocess.run(
+        [sys.executable, RANK_PY, "mechanical", "--config-dir", cfg26_dir,
+         "--meters", meters26h_path, "--harnesses", "claude", "--json"],
+        capture_output=True,
+        text=True,
+    )
+    data26k = json.loads(res26k.stdout) if res26k.stdout.strip() else {}
+    record(
+        "case 26j --json says overflow is null when it did not fire",
+        res26k.returncode == 1 and data26k.get("pick") is None
+        and data26k.get("overflow") is None,
+        res26k.stdout[:400] + res26k.stderr,
+    )
+
+    # A Lane switched off is not in the Range either, so a healthy Meter behind
+    # a disabled Lane neither saves the Range nor blocks the overflow.
+    disabled26 = copy.deepcopy(over_cat)
+    disabled26["lanes"]["grok46-high@grok"]["enabled"] = False
+    rows26k = rank.rank("mechanical", disabled26, doc26b, ALL_HARNESSES)
+    grok26k = next(r for r in rows26k if r["lane"] == "grok46-high@grok")
+    record(
+        "case 26k a disabled Lane on a healthy Meter does not block the overflow",
+        rows26k[0]["lane"] == "fable-xhigh@claude"
+        and rows26k[0].get("overflow") == {
+            "from": 2, "to": 3, "why": "all in-Range Lanes under Gate"}
+        and grok26k["veto"] == "disabled",
+        repr(rows26k[0].get("overflow")),
+    )
+
+    # Every carried in-Range Lane cli-absent and none of them gated: there is
+    # no Gate outage to answer, so the Class stops.
+    doc26healthy = write_meters_doc(meters_path, m26healthy)
+    rows26l = rank.rank("mechanical", over_cat, doc26healthy, {"claude"})
+    record(
+        "case 26l all in-Range Lanes cli-absent and none gated stops, and never overflows",
+        rows26l[0]["pick"] is False
+        and all(r.get("overflow") is None for r in rows26l)
+        and all(r["veto"] == "cli" for r in rows26l
+                if r["tier"] in (1, 2) and r["veto"] != "disabled"),
+        rows26l[0]["reason"],
+    )
+
+    # Overflow reaches up, never down: a healthy Lane below the Floor stays
+    # vetoed:floor while the Tier above the Ceiling takes the job.
+    floor26 = copy.deepcopy(over_cat)
+    floor26["lanes"]["flash-high@agy"]["tier"] = 1   # unknown Meter, so eligible
+    floor26["routing"]["classes"]["impl"] = {"floor": 2, "ceiling": 2}
+    rows26m = rank.rank("impl", floor26, doc26, ALL_HARNESSES)
+    flash26m = next(r for r in rows26m if r["lane"] == "flash-high@agy")
+    record(
+        "case 26m overflow never reaches below the Floor for a healthy Lane",
+        rows26m[0]["lane"] == "fable-xhigh@claude"
+        and rows26m[0].get("overflow") == {
+            "from": 2, "to": 3, "why": "all in-Range Lanes under Gate"}
+        and flash26m["veto"] == "floor" and flash26m["pick"] is False,
+        flash26m["reason"],
+    )
+
+    # The admitted Tier is ranked by the ordinary rule, Margin steal included.
+    steal26 = copy.deepcopy(over_cat)
+    steal26["lanes"]["grok46-high@grok"]["tier"] = 3
+    steal26["lanes"]["grok46-high@grok"]["order"] = 1
+    steal26["lanes"]["fable-xhigh@claude"]["order"] = 2
+    m26steal = [
+        meter("codex", weekly=0.02, five_h=0.02, pace=0.05, status="unavailable"),
+        meter("grok", weekly=0.80, pace=0.90, status="ok"),
+        meter("claude-fable", weekly=0.90, five_h=0.90, pace=1.30, status="ok"),
+        meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
+    ]
+    doc26steal = write_meters_doc(meters_path, m26steal)
+    rows26n = rank.rank("mechanical", steal26, doc26steal, ALL_HARNESSES)
+    record(
+        "case 26n a Margin steal happens inside the admitted Tier",
+        rows26n[0]["lane"] == "fable-xhigh@claude"
+        and rows26n[0]["reason"].startswith("stolen by pace")
+        and rows26n[0].get("overflow") == {
+            "from": 2, "to": 3, "why": "all in-Range Lanes under Gate"}
+        and rows26n[1]["lane"] == "grok46-high@grok",
+        rows26n[0]["reason"],
+    )
+
+    # Metering off removes the Gate, so a stop there is never an overflow.
+    off_meters26 = copy.deepcopy(over_cat)
+    off_meters26["routing"]["meters"] = False
+    rows26o = rank.rank("mechanical", off_meters26, doc26, {"claude"})
+    record(
+        "case 26o with meters off a stop stays a stop and never overflows",
+        rows26o[0]["pick"] is False
+        and all(r.get("overflow") is None for r in rows26o)
+        and all(r["veto"] != "gate" for r in rows26o),
+        rows26o[0]["reason"],
     )
 
 sys.exit(1 if fails else 0)
