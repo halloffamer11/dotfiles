@@ -64,15 +64,15 @@ for agy would let it take Margin steals. Reopen it only with Orin's word.
 
 ## Acceptance
 
-**Status:** ready-for-agent
+**Status:** implemented 2026-09-18 (`b750d60`) on `worktree/delegate-redesign`; all boxes ticked. The merge to `main` is Orin's, and he may overrule two session decisions below.
 
 - [x] Orin chooses A, B, or both, and whether `overflow` defaults on. (Both, 2026-09-18.)
-- [ ] `catalog.py check` and the review page warn when one Meter serves every carried
+- [x] `catalog.py check` and the review page warn when one Meter serves every carried
       Lane of a Tier; fixtures cover it; the check never judges Orin's Tiers.
-- [ ] With overflow on, a Range whose vetoes are all Gate vetoes ranks the next Tier and
+- [x] With overflow on, a Range whose vetoes are all Gate vetoes ranks the next Tier and
       says so in the header; any other veto mix still stops; Tier 4 is never admitted.
-- [ ] `SKILL.md` and `CONTEXT.md` carry the new term and rule.
-- [ ] `tests/test_rank.py` and `tests/test_catalog.py` pass.
+- [x] `SKILL.md` and `CONTEXT.md` carry the new term and rule.
+- [x] `tests/test_rank.py` and `tests/test_catalog.py` pass.
 
 ## Decision, 2026-09-18
 
@@ -81,3 +81,29 @@ Orin: "both". A, the one-Meter warning, and B, overflow past the ceiling, are bo
 session, and a default of off would keep today's stop. That default is the session's
 choice, not Orin's word; he may overrule it. The Tier coverage itself (which Lanes he
 carries in Tiers 1 and 2) stays his, on the wizard's Tier pages. C is not built.
+
+## Landed, 2026-09-18
+
+`b750d60`. Implemented by `opus-high@claude` (ranked `impl --tier 3`, a Margin steal
+from grok), run `20260918T212338Z-opus-high@claude-19d3b745`. Independent review: the first
+try on `flash-high@agy` returned no text after 110 s (logged failed); `grok46-high@grok`,
+run `20260918T214251Z-grok46-high@grok-30b2580b`, 549 s, found two defects and missing
+tests. All were fixed by the implementer.
+
+Two decisions are the session's, not Orin's: `overflow` defaults on (see Decision above),
+and a carried Lane whose Harness CLI is absent does not block overflow. The second reverses
+the first Brief, after review: the catalog serves every machine, so a Lane this machine
+cannot run must not keep a Gate-only stop in place. The rule: at least one carried in-Range
+Lane is under the Gate, and every veto there is `gate` or `cli`. A Range whose carried Lanes
+are all cli-absent still stops. Rank rows now carry a `veto` kind so the rule never parses
+message text.
+
+Checked by the session: every suite under `agents/skills/delegate/tests/` exits 0; live
+`rank.py scout` with codex at 1% prints `# overflow: ceiling 2 -> 3, all in-Range Lanes
+under Gate` and picks `opus-high@claude`; `catalog.py check` on the stowed catalog warns
+that Tiers 1 and 2 depend on Meter codex and still exits 0. The implementer reports
+mutation checks on the new cases (26b, 26j-26o, dispatch 35).
+
+Known effect, not a defect: while codex stays under the Gate, every overflowed `scout` and
+`mechanical` job lands on a Claude Lane by Margin steal, because agy Pace is unknown and
+sorts last. Carrying an agy or Claude Lane in Tiers 1-2 (option A) is what changes that.

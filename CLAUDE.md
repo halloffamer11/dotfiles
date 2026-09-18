@@ -82,7 +82,7 @@ read the redesign tickets rather than reconstructing deleted worker branches.
 
 **Open, in priority order:**
 
-1. **A Range served by one Meter stops the Class** (ticket 29, `ready-for-agent`): on
+1. **A Range served by one Meter stops the Class** (ticket 29, implemented 2026-09-18 on the branch below): on
    2026-09-18 `scout` stopped because every carried Tier 1-2 Lane drains `codex`, which
    was under the Gate. The ticket holds the options (catalog coverage with a one-Meter
    warning; overflow past the ceiling) and why agy is underused. Orin chose both on
