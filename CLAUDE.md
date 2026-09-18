@@ -38,7 +38,7 @@ consultation steps are still proposals.
 **Retained work** (2026-09-16): `.scratch/dotfiles-bootstrap/issues/` holds five
 unimplemented bootstrap and maintenance tickets, separate from the monitor work.
 `prompt.md` is the original modular-research brief, retained as scope history.
-Orin confirmed the global Gate of 0%; it is an intentional configuration choice.
+Orin set the global Gate to 5% on 2026-09-18 (`5be0848`).
 
 **Project routing backend** (2026-09-15, from the dashboard prototype): a
 project's `.delegate/routing.json` may carry `project_order`, a flat list of carried
@@ -82,13 +82,20 @@ read the redesign tickets rather than reconstructing deleted worker branches.
 
 **Open, in priority order:**
 
-1. **Provisional figures**: the `PROVISIONAL` notes on the generated lanes still say
-   "Confirm in the wizard". The tiers are now Orin's; `meter_weight` and `timeout` on
-   those lanes are still copies, and `astra-high@codex` has `price` null with the note
-   "not sourced" (`6e0f0b1` quoted `10 / 1 / 12.5 / 50` without a source). Find the
-   source before pasting the figures, then reword the notes.
-2. **Carry-rule limit**: the carry page never proposes an agy flash lane off, because
-   each agy effort is a separate model name (ticket 19).
+1. **A Range served by one Meter stops the Class** (ticket 29, `ready-for-agent`): on
+   2026-09-18 `scout` stopped because every carried Tier 1-2 Lane drains `codex`, which
+   was under the Gate. The ticket holds the options (catalog coverage with a one-Meter
+   warning; overflow past the ceiling) and why agy is underused. Orin chose both on
+   2026-09-18; the Tier 1-2 coverage itself is his to set in the wizard.
+2. **Unmeasured figures**: `meter_weight` and `timeout` on the generated Lanes are still
+   copies; each Lane's note says `UNMEASURED` and from which Lane. Prices are sourced
+   since 2026-09-18 (OpenAI and Anthropic pricing pages, named in each note) except the
+   grok and agy cache-write prices.
+
+Tickets 29 and 30, the price and note changes, and the 2026-09-18 Status-line cleanup sit
+on branch `worktree/delegate-redesign` (Herdr checkout
+`~/.herdr/worktrees/dotfiles/worktree-delegate-redesign`) until Orin merges it. Ticket 30
+closed the carry-rule limit for agy.
 
 **Waiting on Orin** (nothing else blocks on these):
 
