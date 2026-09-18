@@ -256,14 +256,20 @@ def compose(
         (f"Pinned project  {project['name']}  {project['root']}", FOREGROUND, True),
         ("Delegate project routing  /  prototype", FOREGROUND, True),
         ("Ord: p=project · g=global/fallback (derived from global Order/name)", MUTED, False),
-        (
-            f"Gate {gate['display']} [{source_label(gate['source'], state)}]{inactive}   "
-            f"Margin {margin['display']} [{source_label(margin['source'], state)}]{inactive}   "
-            f"Meters {meters['display']} [{source_label(meters['source'], state, empty='default')}]",
-            MUTED,
-            False,
-        ),
     ]
+    policy_text = (
+        f"Gate {gate['display']} [{source_label(gate['source'], state)}]{inactive}   "
+        f"Margin {margin['display']} [{source_label(margin['source'], state)}]{inactive}"
+    )
+    meters_text = (
+        f"Meters {meters['display']} [{source_label(meters['source'], state, empty='default')}]"
+    )
+    # A narrow pane must not clip the Meters source off the end of the policy line.
+    if len(policy_text) + 3 + len(meters_text) <= width:
+        header.append((f"{policy_text}   {meters_text}", MUTED, False))
+    else:
+        header.append((policy_text, MUTED, False))
+        header.append((meters_text, MUTED, False))
     if meters["value"] is False:
         header.append((meters["effect"], MUTED, False))
     header.append(
