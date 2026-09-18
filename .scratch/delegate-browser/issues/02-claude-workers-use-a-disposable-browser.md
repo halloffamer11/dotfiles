@@ -10,7 +10,7 @@ Facts and setup rules: `../research/2026-09-10-browser-routes.md`.
 
 **Blocked by:** 01 — Browser probes, proven on agy with a disposable browser.
 
-**Status:** open; rescoped 2026-09-12 after ticket 22. Raised by Orin 2026-09-10.
+**Status:** ready-for-human; rescoped 2026-09-12 after ticket 22. Raised by Orin 2026-09-10.
 
 - [x] Setup on both machines: a `playwright` server in Claude's user config that follows the setup rules. Orin added it 2026-09-12 with `claude mcp add -s user playwright -- npx -y @playwright/mcp@latest --isolated --headless --output-dir ~/.cache/playwright-mcp`; `claude mcp list` shows it Connected on the Mac and on omarchy.
 - [ ] A session must restart before its native workers see a new MCP server. Restart, then confirm the session itself has the Playwright tools.

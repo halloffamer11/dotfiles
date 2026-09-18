@@ -15,7 +15,7 @@ a default, because the best score for the money is not the whole decision.
 
 **Blocked by:** None.
 
-**Status:** landed 2026-09-11 on `bench-aa-effort-slugs`. Orin read the page and
+**Status:** landed 2026-09-11 (`221283c`) on `main`. Orin read the page and
 approved it ("much better").
 
 - [x] Each plot shows one board, chosen from a menu grouped by source. The page opens on two plots: the board a decision is made on, and the best board from another source (or the next board of the same source). "Add a plot" adds more, and each plot can be removed.

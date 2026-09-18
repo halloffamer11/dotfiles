@@ -6,7 +6,7 @@ Facts and setup rules: `../research/2026-09-10-browser-routes.md`.
 
 **Blocked by:** 05 and 06.
 
-**Status:** open, ready-for-agent, raised by Orin 2026-09-10
+**Status:** ready-for-agent, raised by Orin 2026-09-10
 
 - [ ] omarchy runs the same delegate code as the Mac, including 06.
 - [ ] Setup, in conversation with Orin: a new GenAI profile in Helium on omarchy, signed in to the same accounts, with the Playwright extension installed only there, its token kept on the machine, and an `agent-browser` server in all four harness configs following the setup rules.

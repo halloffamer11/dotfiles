@@ -13,10 +13,9 @@ ceiling routing this reads.
 
 **Category:** enhancement
 
-**Status:** implemented 2026-09-11 on branch `worktree/quiet-forest-811d`; the
-last box is Orin's and needs `main` to carry the branch first (the installed
-skill is `main`'s), then one `usage.py --refresh` so the cache gains
-`remaining_weekly_model`. Raised by Orin 2026-09-11 ("some sort of TUI thing
+**Status:** implemented 2026-09-11 (`4a9f815`, `2191462`, `fec4395`, `ddbb9f7`)
+on `main`; the last box is Orin's: one press of ⌥⌘D in each direction, after one
+`usage.py --refresh` so the cache gains `remaining_weekly_model`. Raised by Orin 2026-09-11 ("some sort of TUI thing
 in Claude that will give me some indication of how many agents are running on
 which harness and then some of the harness usage levels ... ideally it's
 something collapsible"). Prototyped the same day; Orin chose variant H. Branch

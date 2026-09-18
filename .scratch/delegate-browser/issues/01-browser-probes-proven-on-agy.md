@@ -6,7 +6,7 @@ Orin's goal: the dispatch path must not block a browser that a harness already h
 
 **Blocked by:** None — can start immediately.
 
-**Status:** done 2026-09-11 on branch `worktree/silver-river-1847` (not merged); raised by Orin 2026-09-10
+**Status:** landed 2026-09-11 (`b445ecb`, `ea792df`, `9eba270`) on `main`. All boxes ticked; raised by Orin 2026-09-10
 
 - [x] Disposable probe: the worker reads a page title, then submits the `httpbin.org/forms/post` form and reports the value the response echoes back. The brief forbids web fetch, curl and built-in web tools, so a pass proves the browser was used, and it ends in an exact PASS or FAIL marker.
 - [x] Agent-profile probe: the worker reports the signed-in account name shown at `facebook.com/marketplace` and clicks nothing that changes state. Exact PASS or FAIL marker.

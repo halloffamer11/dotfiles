@@ -53,7 +53,7 @@ Read those before inventing anything.
 chunking (a 656KB Artificial Analysis packet against agy's ~128KB prompt cap); land
 that first or expect a conflict.
 
-**Status:** landed 2026-09-10 on `bench-aa-effort-slugs`. Found the same day while
+**Status:** landed 2026-09-10 (`7460393`) on `main`. Found the same day while
 extracting Terminal-Bench to close the coverage gap.
 
 - [x] A row whose model is a published display name is matched to the catalog lane it denotes

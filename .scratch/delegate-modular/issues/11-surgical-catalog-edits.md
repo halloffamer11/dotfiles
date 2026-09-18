@@ -12,7 +12,7 @@ Provide focused Tier, Order, paired Floor/Ceiling and Gate/Margin edits with exp
 
 ## Acceptance
 
-**Status:** landed
+**Status:** landed 2026-09-16 (`43f3eb1`, `6173d51`); acceptance checks passed.
 
 - [x] Preview shows actual file and resolved stow target, global/effective values, changed fields and affected Picks using one cached observation snapshot.
 - [x] Apply validates the full document, rejects intervening edits and preserves symlinks; no-op and invalid writes preserve file bytes.

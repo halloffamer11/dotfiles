@@ -6,7 +6,7 @@ Tier and trust values are human-set. Nothing in this ticket computes them.
 
 **Blocked by:** None — can start immediately.
 
-**Status:** landed 2026-09-09, committed on `bench-aa-effort-slugs`. All boxes ticked.
+**Status:** landed 2026-09-09 (`7c76843`) on `main`. All boxes ticked.
 
 - [x] The sample catalog from the spec loads and prints without error
 - [x] A lane that names a missing meter, a tier outside 1..4, or a trust outside 1..5 is rejected with a message naming the lane and the rule

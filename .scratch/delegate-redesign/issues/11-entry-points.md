@@ -18,7 +18,7 @@ The wrapper reads `$ARGUMENTS` as prose constraints, not flags. It resolves the 
 
 **Blocked by:** 10 (the script paths move; writing them twice is waste). 07b for `setup_tui.py` to exist behind the setup entry.
 
-**Status:** implemented 2026-09-10 (`a0893ee`). The one unticked box is Orin's and needs the merge first: the four `/delegate-*` wrappers are only reachable once `~/.claude/skills/delegate` resolves to a checkout that has them.
+**Status:** implemented 2026-09-10 (`a0893ee`) on `main`; the merge is done. The one unticked box is Orin's: type each of the four `/delegate-*` wrappers once with a plain-language constraint.
 
 - [x] The four wrappers keep `disable-model-invocation: true` and gain an `argument-hint` naming plain-language constraints
 - [x] No wrapper body documents a flag grammar; each reads `$ARGUMENTS` as prose

@@ -10,7 +10,7 @@ Facts and setup rules: `../research/2026-09-10-browser-routes.md`.
 
 **Blocked by:** 01 — Browser probes, proven on agy with a disposable browser.
 
-**Status:** code done 2026-09-12 on branch `worktree/silver-river-1847`; waiting on Orin's machine setup and the end-to-end probe. Raised by Orin 2026-09-10.
+**Status:** code done 2026-09-12 (`06265cd`) on `main`; the one open box waits on Orin's machine setup on omarchy and the end-to-end probe. Raised by Orin 2026-09-10.
 
 - [x] `delegate.py` points `CODEX_HOME` at `~/.local/share/delegate/codex-home` when that home exists, and drops `--ignore-user-config` for that run. A machine with no home keeps the old isolation, which stays correct and has no browser. `codex_home()` holds the rule; `DELEGATE_CODEX_HOME` overrides the path for tests.
 - [x] The home holds one MCP server and nothing else: no plugins (Gmail, GitHub, documents, browser, chrome, computer-use), no `codex-cli`, no `node_repl`, no `context7`, no hooks, no `notify`, no `AGENTS.md`. Verified with `codex mcp list` (one row, `playwright`) and `codex doctor` ("1 server (1 stdio) · 0 disabled").
