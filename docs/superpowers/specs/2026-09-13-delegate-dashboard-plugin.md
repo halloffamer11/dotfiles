@@ -1,6 +1,8 @@
 # Project delegation dashboard prototype
 
-Date: 2026-09-13. Status: design agreed; prototype not started.
+Date: 2026-09-13. Status: prototype implemented on `worktree/delegate-monitor-herdr`,
+checked and independently reviewed 2026-09-14; Orin's verdict 2026-09-15 is on tickets 01
+and 09; the compatibility pass with current main (ticket 10) is implemented 2026-09-18.
 
 ## Problem Statement
 

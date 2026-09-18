@@ -19,8 +19,8 @@ Machine configuration and agent tooling managed as one Git repository.
 `worktree/delegate-monitor-herdr`, checkout
 `~/.herdr/worktrees/dotfiles/worktree-delegate-monitor-herdr` (the `/private/tmp`
 checkout was cleared and is gone). Ticket 10,
-`.scratch/delegate-dashboard-plugin/issues/10-current-backend-compatibility.md` on that
-branch, is implemented: 42 dashboard checks pass, an independent review is adjudicated,
+`.scratch/delegate-dashboard-plugin/issues/10-current-backend-compatibility.md`, is
+implemented: 42 dashboard checks pass, an independent review is adjudicated,
 and the live Herdr check is recorded there. It also records one decision Orin may
 overrule: project saves keep the canonical `catalog.edit_catalog` document shape, not
 the complete Order list. Test it from a Herdr pane with
@@ -50,9 +50,11 @@ owns Meter cache validity. Spec
 `.scratch/delegate-dashboard-plugin/issues/`, of which 02-04 are this backend and
 carry their Landed notes here. Orin's verdict, 2026-09-15: a Herdr plugin is the
 right host for a persistent delegation control surface, and project Order, Gate and
-Margin give useful manual steering. The prototype UI, tickets 05-09 with their live
-evidence, and the verdict record on tickets 01 and 09 stay on branch
-`worktree/delegate-monitor-herdr`, as the spec requires. Its worktree is reopened for ticket 10's compatibility pass.
+Margin give useful manual steering. Since 2026-09-18 the effort's
+records (tickets 01-10 and `research/`) are on main and are the copy to edit; only the
+prototype code (`tools/delegate-dashboard/`, its Makefile target, and the branch's own
+`.delegate/routing.json`) stays on branch `worktree/delegate-monitor-herdr`, as the spec
+requires for the UI.
 A production control surface is not ticketed yet.
 
 **Delegate redesign follow-ups:** spec

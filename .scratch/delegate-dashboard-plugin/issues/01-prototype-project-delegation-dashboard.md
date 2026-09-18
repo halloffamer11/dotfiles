@@ -13,28 +13,72 @@ throwaway branch. 09 closes this ticket's boxes.
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** done — technical acceptance, independent review and Orin's 2026-09-15 verdict complete
 
 ## Acceptance
 
-- [ ] The project routing schema accepts a validated Project order as one flat list of lane names, grouped by each lane's global Tier, and preserves global fallback when it is absent.
-- [ ] A project can reorder globally carried lanes inside a Tier but cannot change Tier, restore an off lane, name an unknown lane, or list a lane twice.
-- [ ] Existing rank and dispatch callers consume the effective Project order without a second ranking implementation.
-- [ ] The canonical ranking boundary returns one deterministic Tier leader for each exact Tier with the existing eligibility and Margin-steal behavior.
-- [ ] Project Gate and Margin remain valid hot-loaded overrides and measured Meter fields remain read-only.
-- [ ] The terminal dashboard shows four Tier sections, lane identity, model, effort, harness, Meter observations, reasons, Project order, and a color-plus-marker Tier leader.
-- [ ] Moving a lane with the keyboard stays inside its Tier, validates the complete policy, atomically saves it, and updates the marker immediately.
-- [ ] Editing Gate or Margin validates, atomically saves, and updates affected Tier leaders immediately.
-- [ ] Dashboard writes preserve unrelated project routing keys and do not overwrite a concurrent external edit silently.
-- [ ] External project policy and Meter-cache changes reload without restarting the dashboard.
-- [ ] The Herdr plugin opens the dashboard pinned to the invoking project in a targeted split and supports the same pane entrypoint in the other documented placements.
-- [ ] One documented task-runner command builds or prepares, links, and opens the local prototype.
-- [ ] Existing catalog and ranking tests pass, and new high-seam tests cover Project order, Gate, Margin, Tier leaders, invalid writes, and hot reload.
-- [ ] A live Herdr check proves split plus one other placement without dispatching a worker or repeatedly probing a vendor.
-- [ ] The prototype UI is committed only to a throwaway branch; this ticket records the tested question, verdict, and branch pointer.
+- [x] The project routing schema accepts a validated Project order as one flat list of lane names, grouped by each lane's global Tier, and preserves global fallback when it is absent.
+- [x] A project can reorder globally carried lanes inside a Tier but cannot change Tier, restore an off lane, name an unknown lane, or list a lane twice.
+- [x] Existing rank and dispatch callers consume the effective Project order without a second ranking implementation.
+- [x] The canonical ranking boundary returns one deterministic Tier leader for each exact Tier with the existing eligibility and Margin-steal behavior.
+- [x] Project Gate and Margin remain valid hot-loaded overrides and measured Meter fields remain read-only.
+- [x] The terminal dashboard shows four Tier sections, lane identity, model, effort, harness, Meter observations, reasons, Project order, and a color-plus-marker Tier leader.
+- [x] Moving a lane with the keyboard stays inside its Tier, validates the complete policy, atomically saves it, and updates the marker immediately.
+- [x] Editing Gate or Margin validates, atomically saves, and updates affected Tier leaders immediately.
+- [x] Dashboard writes preserve unrelated project routing keys and do not overwrite a concurrent external edit silently.
+- [x] External project policy and Meter-cache changes reload without restarting the dashboard.
+- [x] The Herdr plugin opens the dashboard pinned to the invoking project in a targeted split and supports the same pane entrypoint in the other documented placements.
+- [x] One documented task-runner command builds or prepares, links, and opens the local prototype.
+- [x] Existing catalog and ranking tests pass, and new high-seam tests cover Project order, Gate, Margin, Tier leaders, invalid writes, and hot reload.
+- [x] A live Herdr check proves split plus one other placement without dispatching a worker or repeatedly probing a vendor.
+- [x] The prototype UI is committed only to a throwaway branch; this ticket records the tested question, verdict, and branch pointer.
 
 ## Notes
 
 The accepted testing seam is the effective catalog-and-ranking boundary. Terminal
 rendering details are not the contract. The live Herdr check covers only the plugin
 host, project pinning, and interaction that cannot be established below that boundary.
+
+## Landed, 2026-09-14
+
+Scope: committed on `worktree/delegate-monitor-herdr`, not merged to `main`.
+
+Branch: `worktree/delegate-monitor-herdr`. Backend commits for eventual `main`
+integration are `06a2f27`, `71eb342`, `bea657d`, the validation fix `aceaf2f`,
+canonical Meter validity `3058e23`, and timestamp validation `37dfa3c`.
+The UI and launcher remain on the prototype branch. No merge to `main` or push
+was performed.
+
+The seven completed ticket checkouts and Herdr workspaces were removed after
+clean-status checks; `delegate-dashboard-t02` through `delegate-dashboard-t08`
+branches remain available. The prototype checkout and local plugin link remain.
+
+Questions: Is Herdr the right host for this persistent control surface? Do
+Project order, Gate, and Margin provide useful manual steering?
+
+Technical verdict: Herdr is suitable for this prototype. The same entrypoint
+worked as a split and tab, stayed pinned, and saved all three controls with the
+predicted canonical leader changes. Invalid and stale input preserved existing
+bytes. This establishes correct hosting and steering behavior, not Orin's
+usability verdict or production readiness. Ticket 09 records the live evidence;
+Orin's prediction check remains open.
+
+Verification after review fixes: all 13 delegate test scripts passed, as did all 28 dashboard tests,
+Python compilation, and `git diff --check`. The report tests ran with
+`NO_COLOR=` because the session's inherited `NO_COLOR=1` suppresses their color
+fixture output.
+
+Independent two-axis review used baseline `ea60b33` and frozen implementation
+`51b9328`: Grok checked Standards; Claude checked Spec. Orin chose remaining
+Grok/Claude capacity below Gate for these narrow tasks; global Gate was unchanged
+and no Antigravity permission exception was used. Reports, adjudication, and fix
+evidence are in [the review record](../research/2026-09-14-review.md).
+
+## Verdict, 2026-09-15
+
+Question tested: is a Herdr plugin the right host for a persistent delegation control
+surface, and do project-level Order, Gate and Margin controls give useful manual
+steering? Orin: yes to both. Branch: `worktree/delegate-monitor-herdr`. Backend
+integration into `main` is prepared as branch `dashboard-backend`; ticket 09 lists
+its commits and checks. Production work on a control surface is the next decision,
+not part of this ticket.

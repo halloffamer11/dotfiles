@@ -13,14 +13,16 @@ Lands on `main`.
 
 **Blocked by:** 02 Split the ranking rule from Class filtering
 
-**Status:** implemented 2026-09-14 in the ticket worktree; not landed on `main`
+**Status:** landed on `main` 2026-09-15 (`33f0030`); first implemented as `71eb342` on the prototype branch
 
 - [x] One operation returns, for each of the four Tiers, the Tier leader (or none) and every lane row with eligibility and reason.
 - [x] A command prints that result for the current project, in text and JSON.
 - [x] Tests on fixtures cover: the first eligible lane in Order leads; a lane below Gate is vetoed and the next lane leads; a later lane steals by Margin inside the Tier; an unknown Meter keeps its existing safe behavior; a missing harness is vetoed; lane name breaks ties deterministically; a Tier with no eligible lane has no leader.
 - [x] Tests assert the rule on fixtures, never Orin's live tiers.
 
-## Implemented, 2026-09-14
+## Landed, 2026-09-14
+
+Scope: committed on `worktree/delegate-monitor-herdr`, not merged to `main`.
 
 Added `tier_leaders(cat, meters, present)` on the ranking boundary and the
 `rank.py tiers` text/JSON command. Exact-Tier previews reuse `rank_range`; the

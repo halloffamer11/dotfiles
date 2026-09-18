@@ -16,11 +16,34 @@ Throwaway branch only; never merged to `main`.
 
 **Blocked by:** 03 Tier leaders from the ranking boundary
 
-**Status:** ready-for-agent
+**Status:** implemented as `b2f7122`, integrated as `a3fc419`; live checks recorded in ticket 09
 
-- [ ] The command opens on a given directory, pins that project, and shows its identity.
-- [ ] Four Tier sections show only globally carried lanes with the listed fields, reasons and a color-plus-marker Tier leader.
-- [ ] Remaining, Pace and reset times are display-only.
-- [ ] Changing the project routing fixture or the Meter fixture produces a new leader and reason in the dashboard model without a restart (tested as model state, not terminal output).
-- [ ] The dashboard never dispatches and never forces a vendor re-probe.
-- [ ] No snapshot tests of colors, borders or spacing.
+- [x] The command opens on a given directory, pins that project, and shows its identity.
+- [x] Four Tier sections show only globally carried lanes with the listed fields, reasons and a color-plus-marker Tier leader.
+- [x] Remaining, Pace and reset times are display-only.
+- [x] Changing the project routing fixture or the Meter fixture produces a new leader and reason in the dashboard model without a restart (tested as model state, not terminal output).
+- [x] The dashboard never dispatches and never forces a vendor re-probe.
+- [x] No snapshot tests of colors, borders or spacing.
+
+## Landed, 2026-09-14
+
+Scope: committed on `worktree/delegate-monitor-herdr`, not merged to `main`.
+
+`tools/delegate-dashboard/dashboard.py` is the stdlib terminal entrypoint and
+`model.py` is its public, JSON-safe state boundary. The model resolves one Git root
+at construction, reads the effective catalog, calls `rank.tier_leaders`, restores
+effective Order for display, and watches the pinned project policy and cached Meter
+file by content bytes. Missing or malformed Meter data is shown as unknown rather
+than synthesized. `test_dashboard.py` covers fixed identity, carried filtering,
+four Tier previews, both hot-reload inputs, malformed caches, and the JSON command.
+
+Verified in the ticket worktree (no commit):
+
+- `python3 tools/delegate-dashboard/test_dashboard.py`
+- `python3 agents/skills/delegate/tests/test_rank.py`
+- `python3 -m py_compile tools/delegate-dashboard/dashboard.py tools/delegate-dashboard/model.py tools/delegate-dashboard/test_dashboard.py`
+- `python3 tools/delegate-dashboard/dashboard.py --help`
+- `python3 tools/delegate-dashboard/dashboard.py --cwd . --config-dir stow/delegate/.config/delegate --meters /tmp/delegate-dashboard-missing-meter.json --json`
+
+The plain terminal view was inspected at 80 columns. Live split/placement checks,
+plugin installation, and the prototype verdict remain exclusively in ticket 09.

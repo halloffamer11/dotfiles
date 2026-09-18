@@ -14,13 +14,15 @@ Landing target: `main`; this ticket worktree is not merged.
 
 **Blocked by:** None — can start immediately.
 
-**Status:** implemented in this isolated ticket worktree; not landed on `main`
+**Status:** landed on `main` 2026-09-15 (`b32c3c2`); first implemented as `06a2f27` on the prototype branch
 
 - [x] The selection rule exists once in `rank_range`; Class ranking calls it with the Class floor (or per-job Tier) and the Class ceiling.
 - [x] Every Class Pick, reason, veto text and row order is unchanged for the same catalog, Meters and harnesses.
 - [x] The existing catalog, ranking, dispatch and report suites pass without edits to their expectations.
 
-## Implementation and evidence
+## Landed, 2026-09-14
+
+Scope: committed on `worktree/delegate-monitor-herdr`, not merged to `main`.
 
 - `agents/skills/delegate/scripts/rank.py` exposes `rank_range` as the canonical
   inclusive-Tier selection boundary; `rank` only resolves Class bounds and
