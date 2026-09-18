@@ -2,11 +2,11 @@
 """State model for the delegate dashboard prototype.
 
 The model resolves one Git project during construction, reads only cached Meter
-observations, and delegates every eligibility and leader decision to
-``rank.tier_leaders``.  It never imports or executes ``usage.py``.  Gate, Margin,
-and Project-order saves go through ``catalog.edit_catalog`` with ``scope='project'``,
-cached meters, and the construction-time harness set.  Direct catalog writes are
-not a dashboard save path.
+observations, and never runs a vendor probe or acquires Meter data.  Eligibility
+and leader decisions go to ``rank.tier_leaders``.  Gate, Margin, and Project-order
+saves go through ``catalog.edit_catalog`` with ``scope='project'``, cached meters,
+and the construction-time harness set.  Direct catalog writes are not a dashboard
+save path.
 """
 
 from __future__ import annotations
@@ -39,6 +39,12 @@ TIER_COLORS = {
 }
 
 _CURRENT_POLICY = object()
+
+# catalog.edit_catalog raises CatalogError with this exact text on a stale expect.
+INTERVENING_EDIT_MARK = (
+    "intervening edit: source documents or resolved paths changed; preview again"
+)
+METERS_OFF_EFFECT = "Gate, Margin and Pace inactive; Remaining is cached"
 
 
 class DashboardError(Exception):
@@ -333,6 +339,7 @@ class DashboardModel:
                     "value": meters_on,
                     "display": "on" if meters_on else "off",
                     "source": sources.get("meters"),
+                    "effect": "" if meters_on else METERS_OFF_EFFECT,
                 },
             },
             "usage": {
@@ -466,11 +473,56 @@ class DashboardModel:
             return "set", {"field": "routing.gate", "value": proposal["gate"]}
         if changed == ["margin"] and "margin" in proposal:
             return "set", {"field": "routing.margin", "value": proposal["margin"]}
-        if not changed and "gate" in proposal:
-            return "set", {"field": "routing.gate", "value": proposal["gate"]}
-        if not changed and "margin" in proposal:
-            return "set", {"field": "routing.margin", "value": proposal["margin"]}
         return None, None
+
+    def _target_is_project_policy(self, target: Any) -> bool:
+        """True when a catalog target file resolves to the pinned project policy."""
+        if not isinstance(target, dict):
+            return False
+        file_name = target.get("file")
+        if not isinstance(file_name, str) or not file_name:
+            return False
+        return (
+            Path(file_name).expanduser().resolve(strict=False)
+            == self.project_policy_path.resolve(strict=False)
+        )
+
+    def _fail_catalog_call(self, exc: BaseException) -> bool:
+        """Map a catalog preview/apply failure to save state. Never catches interrupts."""
+        if isinstance(exc, catalog.CatalogError) and INTERVENING_EDIT_MARK in str(exc):
+            self.refresh()
+            self._set_save_state(
+                "conflict",
+                "Conflict: catalog sources changed during save; reloaded. Repeat the action to save.",
+            )
+            return False
+        if isinstance(exc, (catalog.CatalogError, OSError, ValueError)):
+            self._set_save_state("error", f"Not saved: {exc}")
+            return False
+        raise exc
+
+    def _refuse_if_unsafe_or_stale(
+        self,
+        expected: bytes | None,
+    ) -> bool:
+        """Return True when save must stop: unsafe path or stale project bytes."""
+        unsafe = self._unsafe_policy_target()
+        if unsafe is not None:
+            self._set_save_state("error", f"Not saved: {unsafe}")
+            return True
+        try:
+            current_raw = self._read_optional_bytes(self.project_policy_path)
+        except OSError as exc:
+            self._set_save_state("error", f"Not saved: cannot recheck project policy: {exc}")
+            return True
+        if current_raw != expected:
+            self.refresh()
+            self._set_save_state(
+                "conflict",
+                "Conflict: project routing changed externally; reloaded it. Repeat the action to save.",
+            )
+            return True
+        return False
 
     def _apply_catalog_edit(
         self,
@@ -480,47 +532,28 @@ class DashboardModel:
         **edit_kwargs: Any,
     ) -> bool:
         """Preview and apply one project catalog edit; refuse symlink targets."""
-        unsafe = self._unsafe_policy_target()
-        if unsafe is not None:
-            self._set_save_state("error", f"Not saved: {unsafe}")
-            return False
-
-        try:
-            current_raw = self._read_optional_bytes(self.project_policy_path)
-        except OSError as exc:
-            self._set_save_state("error", f"Not saved: cannot recheck project policy: {exc}")
-            return False
         expected = (
             self._loaded_policy_bytes
             if expected_policy_bytes is _CURRENT_POLICY
             else expected_policy_bytes
         )
-        if current_raw != expected:
-            self.refresh()
-            self._set_save_state(
-                "conflict",
-                "Conflict: project routing changed externally; reloaded it. Repeat the action to save.",
-            )
+        if self._refuse_if_unsafe_or_stale(expected):
             return False
 
         kwargs = {**self._catalog_edit_kwargs(), **edit_kwargs}
         try:
             preview = catalog.edit_catalog(op, apply=False, **kwargs)
-        except catalog.CatalogError as exc:
-            self._set_save_state("error", f"Not saved: {exc}")
+        except (catalog.CatalogError, OSError, ValueError) as exc:
+            return self._fail_catalog_call(exc)
+
+        if not self._target_is_project_policy(preview.get("target")):
+            self._set_save_state(
+                "error",
+                "Not saved: catalog preview targeted a file other than the pinned project policy.",
+            )
             return False
 
-        try:
-            current_raw = self._read_optional_bytes(self.project_policy_path)
-        except OSError as exc:
-            self._set_save_state("error", f"Not saved: cannot recheck project policy: {exc}")
-            return False
-        if current_raw != expected:
-            self.refresh()
-            self._set_save_state(
-                "conflict",
-                "Conflict: project routing changed externally; reloaded it. Repeat the action to save.",
-            )
+        if self._refuse_if_unsafe_or_stale(expected):
             return False
 
         if preview.get("noop"):
@@ -528,22 +561,21 @@ class DashboardModel:
             return True
 
         try:
-            catalog.edit_catalog(
+            result = catalog.edit_catalog(
                 op,
                 apply=True,
                 expect=preview["revision"],
                 **kwargs,
             )
-        except catalog.CatalogError as exc:
-            message = str(exc)
-            if "intervening edit" in message:
-                self.refresh()
-                self._set_save_state(
-                    "conflict",
-                    "Conflict: catalog sources changed during save; reloaded. Repeat the action to save.",
-                )
-                return False
-            self._set_save_state("error", f"Not saved: {exc}")
+        except (catalog.CatalogError, OSError, ValueError) as exc:
+            return self._fail_catalog_call(exc)
+
+        if not self._target_is_project_policy(result.get("target")):
+            self.refresh()
+            self._set_save_state(
+                "error",
+                "Saved, but the catalog reported a file other than the pinned project policy.",
+            )
             return False
 
         self.refresh()
@@ -608,8 +640,6 @@ class DashboardModel:
             return False
 
         proposal = copy.deepcopy(edit.project_doc)
-        if not proposal:
-            proposal["version"] = catalog.ROUTING_VERSION
         proposal[edit.field] = fraction
         error = self._validate_project_proposal(proposal)
         if error is not None:
@@ -648,8 +678,41 @@ class DashboardModel:
             )
             return False
 
+        displayed_names = [row["lane"] for row in selected_tier["rows"]]
+        try:
+            fresh_names = self._fresh_carried_lane_names(selected_tier["tier"])
+        except (catalog.CatalogError, OSError, ValueError) as exc:
+            self._set_save_state("error", f"Not saved: {exc}")
+            return False
+        if fresh_names != displayed_names:
+            self.refresh()
+            self._set_save_state(
+                "conflict",
+                "Conflict: catalog Order or Tier changed; reloaded. Repeat the action to save.",
+            )
+            return False
+
         return self._apply_catalog_edit(
             "order",
             lane=lane_name,
             position=destination + 1,
         )
+
+    def _fresh_carried_lane_names(self, tier_number: int) -> list[str]:
+        """Carried lane names for one Tier from a freshly loaded effective catalog."""
+        effective = catalog.load_catalog(
+            cwd=str(self.project_root),
+            config_dir=str(self.config_dir) if self.config_dir is not None else None,
+        )
+        previews = rank.tier_leaders(effective, self._cached_meters_doc(), self.present)
+        for preview in previews:
+            if preview["tier"] != tier_number:
+                continue
+            carried = [
+                row
+                for row in preview["rows"]
+                if not row["reason"].startswith("vetoed:disabled")
+            ]
+            carried.sort(key=self._display_order)
+            return [row["lane"] for row in carried]
+        return []

@@ -14,7 +14,7 @@ HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
-from model import DashboardModel
+from model import DashboardModel, INTERVENING_EDIT_MARK, METERS_OFF_EFFECT
 from dashboard import PercentageEditor, pop_key
 
 import catalog
@@ -330,6 +330,11 @@ class DashboardModelTest(unittest.TestCase):
         self.assertFalse(dashboard.save_percentage_edit(edit, "25"))
         self.assertEqual(project_policy.read_bytes(), external)
         self.assertEqual(dashboard.state["save"]["status"], "conflict")
+        edit2 = dashboard.begin_percentage_edit("gate")
+        self.assertTrue(dashboard.save_percentage_edit(edit2, "25"))
+        self.assertEqual(json.loads(project_policy.read_text())["gate"], 0.25)
+        self.assertEqual(json.loads(project_policy.read_text())["note"], "external")
+        self.assertEqual(dashboard.state["save"]["status"], "saved")
 
     def test_percentage_editor_escape_cancels_without_saving(self):
         project_policy = self.root / ".delegate" / "routing.json"
@@ -368,7 +373,29 @@ class DashboardModelTest(unittest.TestCase):
         self.assertFalse(active)
         self.assertEqual(dashboard.state["policy"]["margin"]["display"], "10.01%")
 
-    def test_move_stays_in_tier_and_saves_complete_order(self):
+    def _tier_lane_names(self, state):
+        return {tier["tier"]: [row["lane"] for row in tier["rows"]] for tier in state["tiers"]}
+
+    def _plan_project_order(self, lane, position, project_doc, project_policy):
+        lanes_doc = json.loads((self.config / "lanes.json").read_text())
+        routing_doc = json.loads((self.config / "routing.json").read_text())
+        files = {
+            "lanes": str((self.config / "lanes.json").resolve()),
+            "routing": str((self.config / "routing.json").resolve()),
+            "project": str(project_policy.resolve()),
+        }
+        _dest, _lanes, _routing, planned, values = catalog._plan_order(
+            lane,
+            position,
+            "project",
+            lanes_doc,
+            routing_doc,
+            project_doc,
+            files,
+        )
+        return planned["project_order"], values
+
+    def test_move_writes_plan_order_and_preserves_other_tiers(self):
         project_policy = self.root / ".delegate" / "routing.json"
         original = {
             "version": "delegate-routing.v1",
@@ -378,30 +405,43 @@ class DashboardModelTest(unittest.TestCase):
             "project_order": ["opus-high@claude", "fable-xhigh@claude"],
         }
         write_json(project_policy, original)
+        before = project_policy.read_bytes()
         dashboard = self.make_model()
+        other_tiers_before = {
+            tier: names
+            for tier, names in self._tier_lane_names(dashboard.state).items()
+            if tier != 2
+        }
+        planned_order, planned_values = self._plan_project_order(
+            "sol-high@codex", 1, original, project_policy
+        )
 
         self.assertFalse(dashboard.move_lane("terra-high@codex", -1))
-        self.assertEqual(json.loads(project_policy.read_text()), original)
+        self.assertEqual(project_policy.read_bytes(), before)
         self.assertEqual(dashboard.state["save"]["status"], "error")
         self.assertFalse(dashboard.move_lane("sol-high@codex", 1))
-        self.assertEqual(json.loads(project_policy.read_text()), original)
+        self.assertEqual(project_policy.read_bytes(), before)
 
         self.assertTrue(dashboard.move_lane("sol-high@codex", -1))
         saved = json.loads(project_policy.read_text())
-        self.assertEqual(saved["classes"], original["classes"])
-        self.assertEqual(saved["gate"], original["gate"])
-        self.assertEqual(saved["note"], original["note"])
+        for key in ("classes", "gate", "note", "version"):
+            self.assertEqual(saved[key], original[key])
+            self.assertEqual(json.dumps(saved[key], sort_keys=True), json.dumps(original[key], sort_keys=True))
+        self.assertEqual(saved["project_order"], planned_order)
+        self.assertEqual(
+            planned_values["sequence"]["resulting"],
+            ["sol-high@codex", "terra-high@codex"],
+        )
         self.assertEqual(
             saved["project_order"],
-            [
-                "luna-low@codex",
-                "sol-high@codex",
-                "terra-high@codex",
-                "opus-high@claude",
-                "fable-xhigh@claude",
-                "grok46-high@grok",
-            ],
+            ["opus-high@claude", "fable-xhigh@claude", "sol-high@codex", "terra-high@codex"],
         )
+        other_tiers_after = {
+            tier: names
+            for tier, names in self._tier_lane_names(dashboard.state).items()
+            if tier != 2
+        }
+        self.assertEqual(other_tiers_after, other_tiers_before)
         self.assertEqual(dashboard.state["save"]["status"], "saved")
         self.assertEqual(dashboard.state["tiers"][1]["leader"], "sol-high@codex")
 
@@ -413,16 +453,39 @@ class DashboardModelTest(unittest.TestCase):
             {"codex", "claude", "grok"},
         )
         self.assertEqual(rows[0]["lane"], "sol-high@codex")
+        self.assertEqual(
+            [name for name, lane in sorted(
+                ((n, l) for n, l in effective["lanes"].items() if l["tier"] == 2),
+                key=lambda item: item[1]["order"],
+            )],
+            ["sol-high@codex", "terra-high@codex"],
+        )
 
     def test_first_move_creates_project_policy(self):
         dashboard = self.make_model()
         project_policy = self.root / ".delegate" / "routing.json"
         self.assertFalse(project_policy.exists())
+        planned_order, planned_values = self._plan_project_order(
+            "sol-high@codex", 1, None, project_policy
+        )
 
         self.assertTrue(dashboard.move_lane("sol-high@codex", -1))
         saved = json.loads(project_policy.read_text())
-        self.assertEqual(saved["version"], "delegate-routing.v1")
-        self.assertEqual(saved["project_order"][1:3], ["sol-high@codex", "terra-high@codex"])
+        self.assertEqual(set(saved), {"project_order"})
+        self.assertNotIn("version", saved)
+        self.assertEqual(saved["project_order"], planned_order)
+        self.assertEqual(
+            planned_values["sequence"]["resulting"],
+            ["sol-high@codex", "terra-high@codex"],
+        )
+        effective = catalog.load_catalog(cwd=self.root, config_dir=self.config)
+        self.assertEqual(
+            [name for name, lane in sorted(
+                ((n, l) for n, l in effective["lanes"].items() if l["tier"] == 2),
+                key=lambda item: item[1]["order"],
+            )],
+            ["sol-high@codex", "terra-high@codex"],
+        )
 
     def test_save_validates_original_global_documents_and_rejects_invalid_proposal(self):
         project_policy = self.root / ".delegate" / "routing.json"
@@ -592,6 +655,12 @@ class DashboardModelTest(unittest.TestCase):
         self.assertEqual((self.config / "routing.json").read_bytes(), global_before)
         self.assertEqual(dashboard.state["save"]["status"], "error")
 
+        edit = dashboard.begin_percentage_edit("gate")
+        self.assertFalse(dashboard.save_percentage_edit(edit, "25"))
+        self.assertTrue(project_policy.is_symlink())
+        self.assertEqual((self.config / "routing.json").read_bytes(), global_before)
+        self.assertEqual(dashboard.state["save"]["status"], "error")
+
     def test_symlinked_policy_directory_cannot_write_outside_pinned_project(self):
         outside = Path(self.temp.name) / "other-policy"
         target = outside / "routing.json"
@@ -601,6 +670,11 @@ class DashboardModelTest(unittest.TestCase):
         dashboard = self.make_model()
 
         self.assertFalse(dashboard.move_lane("sol-high@codex", -1))
+        self.assertEqual(target.read_bytes(), before)
+        self.assertEqual(dashboard.state["save"]["status"], "error")
+
+        edit = dashboard.begin_percentage_edit("margin")
+        self.assertFalse(dashboard.save_percentage_edit(edit, "10"))
         self.assertEqual(target.read_bytes(), before)
         self.assertEqual(dashboard.state["save"]["status"], "error")
 
@@ -692,6 +766,302 @@ class DashboardModelTest(unittest.TestCase):
                 self.assertEqual(canonical, rank.rank("impl", effective, expected_input, dashboard.present))
                 json.dumps(canonical, allow_nan=False)
 
+    def test_meters_absent_is_on_with_empty_effect(self):
+        state = self.make_model().state
+        meters = state["policy"]["meters"]
+        self.assertEqual(
+            set(meters),
+            {"value", "display", "source", "effect"},
+        )
+        self.assertEqual(meters["value"], True)
+        self.assertEqual(meters["display"], "on")
+        self.assertIsNone(meters["source"])
+        self.assertEqual(meters["effect"], "")
+
+    def test_meters_off_from_global_or_project_and_gate_does_not_veto(self):
+        self.write_meters(a_r=0.05, a_pace=0.5, b_r=0.7, b_pace=0.8)
+        cases = (
+            ("global", self.config / "routing.json"),
+            ("project", self.root / ".delegate" / "routing.json"),
+        )
+        for source_kind, expected_source in cases:
+            with self.subTest(source=source_kind):
+                routing = json.loads((self.config / "routing.json").read_text())
+                routing.pop("meters", None)
+                write_json(self.config / "routing.json", routing)
+                project_policy = self.root / ".delegate" / "routing.json"
+                if project_policy.exists() or project_policy.is_symlink():
+                    project_policy.unlink()
+                if source_kind == "global":
+                    routing["meters"] = False
+                    write_json(self.config / "routing.json", routing)
+                else:
+                    write_json(project_policy, {"meters": False})
+                dashboard = self.make_model()
+                meters = dashboard.state["policy"]["meters"]
+                self.assertEqual(meters["value"], False)
+                self.assertEqual(meters["display"], "off")
+                self.assertEqual(meters["source"], str(expected_source.resolve()))
+                self.assertEqual(meters["effect"], METERS_OFF_EFFECT)
+                self.assertEqual(
+                    meters["effect"],
+                    "Gate, Margin and Pace inactive; Remaining is cached",
+                )
+                effective = catalog.load_catalog(cwd=self.root, config_dir=self.config)
+                previews = rank.tier_leaders(
+                    effective,
+                    json.loads(self.meters.read_text()),
+                    dashboard.present,
+                )
+                self.assertEqual(
+                    [tier["leader"] for tier in dashboard.state["tiers"]],
+                    [preview["leader"] for preview in previews],
+                )
+                terra = next(
+                    row
+                    for row in dashboard.state["tiers"][1]["rows"]
+                    if row["lane"] == "terra-high@codex"
+                )
+                self.assertNotIn("vetoed:gate", terra["reason"])
+                self.assertEqual(dashboard.state["tiers"][1]["leader"], "terra-high@codex")
+                self.assertEqual(dashboard.state["tiers"][1]["leader"], previews[1]["leader"])
+
+    def test_intervening_edit_mark_matches_catalog_message(self):
+        source = Path(catalog.__file__).read_text(encoding="utf-8")
+        self.assertIn(INTERVENING_EDIT_MARK, source)
+        self.assertEqual(
+            INTERVENING_EDIT_MARK,
+            "intervening edit: source documents or resolved paths changed; preview again",
+        )
+
+    def test_intervening_global_edit_between_preview_and_apply_is_conflict(self):
+        project_policy = self.root / ".delegate" / "routing.json"
+        original = {"version": "delegate-routing.v1", "gate": 0.15, "note": "keep"}
+        write_json(project_policy, original)
+        real_edit = catalog.edit_catalog
+
+        def wrap_with_global_change(which):
+            def wrapper(*args, **kwargs):
+                if kwargs.get("apply"):
+                    if which == "lanes":
+                        path = self.config / "lanes.json"
+                    else:
+                        path = self.config / "routing.json"
+                    doc = json.loads(path.read_text())
+                    doc["note"] = "intervening global"
+                    write_json(path, doc)
+                return real_edit(*args, **kwargs)
+            return wrapper
+
+        for action, which in (("move", "lanes"), ("gate", "routing")):
+            with self.subTest(action=action, source=which):
+                write_json(project_policy, original)
+                dashboard = self.make_model()
+                before = project_policy.read_bytes()
+                with mock.patch.object(catalog, "edit_catalog", side_effect=wrap_with_global_change(which)):
+                    if action == "move":
+                        saved = dashboard.move_lane("sol-high@codex", -1)
+                    else:
+                        saved = dashboard.save_percentage_edit(
+                            dashboard.begin_percentage_edit("gate"),
+                            "20",
+                        )
+                self.assertFalse(saved)
+                self.assertEqual(dashboard.state["save"]["status"], "conflict")
+                self.assertEqual(project_policy.read_bytes(), before)
+                self.assertEqual(json.loads(project_policy.read_text()), original)
+
+    def test_noop_gate_save_leaves_bytes_and_mtime_and_reports_saved(self):
+        project_policy = self.root / ".delegate" / "routing.json"
+        write_json(project_policy, {"version": "delegate-routing.v1", "gate": 0.15, "note": "same"})
+        dashboard = self.make_model()
+        before = project_policy.read_bytes()
+        mtime = project_policy.stat().st_mtime_ns
+        edit = dashboard.begin_percentage_edit("gate")
+        self.assertTrue(dashboard.save_percentage_edit(edit, "15"))
+        self.assertEqual(project_policy.read_bytes(), before)
+        self.assertEqual(project_policy.stat().st_mtime_ns, mtime)
+        self.assertEqual(dashboard.state["save"]["status"], "saved")
+
+    def test_move_at_tier_boundary_is_refused_without_writing(self):
+        project_policy = self.root / ".delegate" / "routing.json"
+        original = {
+            "version": "delegate-routing.v1",
+            "project_order": ["terra-high@codex", "sol-high@codex"],
+        }
+        write_json(project_policy, original)
+        dashboard = self.make_model()
+        before = project_policy.read_bytes()
+        mtime = project_policy.stat().st_mtime_ns
+        self.assertFalse(dashboard.move_lane("terra-high@codex", -1))
+        self.assertEqual(project_policy.read_bytes(), before)
+        self.assertEqual(project_policy.stat().st_mtime_ns, mtime)
+        self.assertEqual(dashboard.state["save"]["status"], "error")
+        self.assertFalse(dashboard.move_lane("sol-high@codex", 1))
+        self.assertEqual(project_policy.read_bytes(), before)
+        self.assertEqual(project_policy.stat().st_mtime_ns, mtime)
+
+    def test_move_lane_refuses_stale_global_order_or_tier_without_writing(self):
+        dashboard = self.make_model()
+        project_policy = self.root / ".delegate" / "routing.json"
+        self.assertFalse(project_policy.exists())
+        self.assertEqual(
+            [row["lane"] for row in dashboard.state["tiers"][1]["rows"]],
+            ["terra-high@codex", "sol-high@codex"],
+        )
+
+        lanes = json.loads((self.config / "lanes.json").read_text())
+        lanes["lanes"]["terra-high@codex"]["order"] = 2
+        lanes["lanes"]["sol-high@codex"]["order"] = 1
+        write_json(self.config / "lanes.json", lanes)
+        self.assertFalse(dashboard.move_lane("sol-high@codex", -1))
+        self.assertFalse(project_policy.exists())
+        self.assertEqual(dashboard.state["save"]["status"], "conflict")
+        self.assertEqual(
+            [row["lane"] for row in dashboard.state["tiers"][1]["rows"]],
+            ["sol-high@codex", "terra-high@codex"],
+        )
+        self.assertTrue(dashboard.move_lane("terra-high@codex", -1))
+        self.assertEqual(
+            json.loads(project_policy.read_text())["project_order"],
+            ["terra-high@codex", "sol-high@codex"],
+        )
+
+        dashboard = self.make_model()
+        before = project_policy.read_bytes()
+        lanes = json.loads((self.config / "lanes.json").read_text())
+        lanes["lanes"]["sol-high@codex"]["tier"] = 3
+        lanes["lanes"]["sol-high@codex"]["order"] = 3
+        write_json(self.config / "lanes.json", lanes)
+        self.assertFalse(dashboard.move_lane("sol-high@codex", -1))
+        self.assertEqual(project_policy.read_bytes(), before)
+        self.assertEqual(dashboard.state["save"]["status"], "conflict")
+
+    def test_project_path_resolving_to_global_file_is_refused_on_both_save_paths(self):
+        config = self.root / ".delegate"
+        config.mkdir(parents=True)
+        write_json(config / "lanes.json", json.loads((self.config / "lanes.json").read_text()))
+        write_json(config / "routing.json", json.loads((self.config / "routing.json").read_text()))
+        dashboard = DashboardModel(
+            cwd=self.nested,
+            config_dir=config,
+            meters_path=self.meters,
+            present={"codex", "claude", "grok"},
+        )
+        self.assertEqual(
+            dashboard.project_policy_path.resolve(),
+            dashboard.global_routing_path.resolve(),
+        )
+        before = (config / "routing.json").read_bytes()
+        self.assertFalse(dashboard.move_lane("sol-high@codex", -1))
+        self.assertEqual((config / "routing.json").read_bytes(), before)
+        self.assertEqual(dashboard.state["save"]["status"], "error")
+        self.assertIn("global", dashboard.state["save"]["detail"])
+        edit = dashboard.begin_percentage_edit("gate")
+        self.assertFalse(dashboard.save_percentage_edit(edit, "25"))
+        self.assertEqual((config / "routing.json").read_bytes(), before)
+        self.assertEqual(dashboard.state["save"]["status"], "error")
+
+    def test_unsafe_target_after_preview_is_refused_on_both_save_paths(self):
+        project_policy = self.root / ".delegate" / "routing.json"
+        write_json(project_policy, {"version": "delegate-routing.v1", "gate": 0.15, "note": "keep"})
+        global_before = (self.config / "routing.json").read_bytes()
+        real_edit = catalog.edit_catalog
+
+        def replace_with_symlink_after_preview(*args, **kwargs):
+            result = real_edit(*args, **kwargs)
+            if not kwargs.get("apply"):
+                if project_policy.exists() and not project_policy.is_symlink():
+                    project_policy.unlink()
+                if not project_policy.is_symlink():
+                    project_policy.symlink_to(self.config / "routing.json")
+            return result
+
+        for action in ("move", "gate"):
+            with self.subTest(action=action):
+                if project_policy.is_symlink() or project_policy.exists():
+                    project_policy.unlink()
+                write_json(project_policy, {"version": "delegate-routing.v1", "gate": 0.15, "note": "keep"})
+                dashboard = self.make_model()
+                with mock.patch.object(catalog, "edit_catalog", side_effect=replace_with_symlink_after_preview):
+                    if action == "move":
+                        saved = dashboard.move_lane("sol-high@codex", -1)
+                    else:
+                        saved = dashboard.save_percentage_edit(
+                            dashboard.begin_percentage_edit("gate"),
+                            "20",
+                        )
+                self.assertFalse(saved)
+                self.assertEqual(dashboard.state["save"]["status"], "error")
+                self.assertTrue(project_policy.is_symlink())
+                self.assertEqual((self.config / "routing.json").read_bytes(), global_before)
+
+    def test_preview_target_mismatch_is_refused_without_writing(self):
+        project_policy = self.root / ".delegate" / "routing.json"
+        write_json(project_policy, {"version": "delegate-routing.v1", "note": "keep"})
+        before = project_policy.read_bytes()
+        dashboard = self.make_model()
+        real_edit = catalog.edit_catalog
+
+        def retarget(*args, **kwargs):
+            result = dict(real_edit(*args, **kwargs))
+            target = dict(result.get("target") or {})
+            target["file"] = str((self.config / "routing.json").resolve())
+            result["target"] = target
+            return result
+
+        with mock.patch.object(catalog, "edit_catalog", side_effect=retarget):
+            self.assertFalse(dashboard.move_lane("sol-high@codex", -1))
+            self.assertFalse(
+                dashboard.save_percentage_edit(dashboard.begin_percentage_edit("margin"), "10")
+            )
+        self.assertEqual(project_policy.read_bytes(), before)
+        self.assertEqual(dashboard.state["save"]["status"], "error")
+
+    def test_catalog_oserror_and_valueerror_are_save_errors(self):
+        project_policy = self.root / ".delegate" / "routing.json"
+        write_json(project_policy, {"version": "delegate-routing.v1", "gate": 0.15})
+        before = project_policy.read_bytes()
+        dashboard = self.make_model()
+        for exc in (OSError("disk full"), ValueError("bad catalog value")):
+            with self.subTest(exc=type(exc).__name__):
+                with mock.patch.object(catalog, "edit_catalog", side_effect=exc):
+                    self.assertFalse(dashboard.move_lane("sol-high@codex", -1))
+                self.assertEqual(dashboard.state["save"]["status"], "error")
+                self.assertEqual(project_policy.read_bytes(), before)
+                with mock.patch.object(catalog, "edit_catalog", side_effect=exc):
+                    self.assertFalse(
+                        dashboard.save_percentage_edit(
+                            dashboard.begin_percentage_edit("gate"),
+                            "20",
+                        )
+                    )
+                self.assertEqual(dashboard.state["save"]["status"], "error")
+                self.assertEqual(project_policy.read_bytes(), before)
+
+        real_edit = catalog.edit_catalog
+
+        def raise_on_apply(*args, **kwargs):
+            if kwargs.get("apply"):
+                raise OSError("apply failed")
+            return real_edit(*args, **kwargs)
+
+        with mock.patch.object(catalog, "edit_catalog", side_effect=raise_on_apply):
+            self.assertFalse(dashboard.move_lane("sol-high@codex", -1))
+        self.assertEqual(dashboard.state["save"]["status"], "error")
+        self.assertEqual(project_policy.read_bytes(), before)
+
+    def test_keyboardinterrupt_is_not_swallowed(self):
+        dashboard = self.make_model()
+        with mock.patch.object(catalog, "edit_catalog", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                dashboard.move_lane("sol-high@codex", -1)
+            with self.assertRaises(KeyboardInterrupt):
+                dashboard.save_percentage_edit(
+                    dashboard.begin_percentage_edit("gate"),
+                    "20",
+                )
+
     def test_json_command_is_noninteractive(self):
         result = subprocess.run(
             [
@@ -713,6 +1083,10 @@ class DashboardModelTest(unittest.TestCase):
         data = json.loads(result.stdout)
         self.assertEqual(data["project"]["root"], str(self.root.resolve()))
         self.assertEqual(len(data["tiers"]), 4)
+        self.assertEqual(
+            set(data["policy"]["meters"]),
+            {"value", "display", "source", "effect"},
+        )
 
 
 if __name__ == "__main__":
