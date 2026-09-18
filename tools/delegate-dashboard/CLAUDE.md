@@ -4,10 +4,9 @@ This directory holds the throwaway project routing dashboard from
 `.scratch/delegate-dashboard-plugin/issues/`. It is separate from the production Rust monitor in
 `../delegate-mon/`.
 
-Compatibility WIP is paused at Orin's fresh-context request (2026-09-17).
-Before editing, read ticket 10 under `.scratch/delegate-dashboard-plugin/issues/`:
-it owns the partial patch, two failing checks, remaining work, worker runs, and
-approved Claude fallback. Resume from that record; do not treat this WIP as accepted.
+The compatibility pass with current main is implemented (2026-09-18) and waits for
+Orin's review; ticket 10 under `.scratch/delegate-dashboard-plugin/issues/` owns the
+decisions, the review adjudication and the live evidence.
 
 - `dashboard.py --cwd DIRECTORY [--config-dir DIRECTORY] [--meters FILE]` opens
   the terminal view. Add `--json` for one noninteractive diagnostic projection.
@@ -31,9 +30,12 @@ approved Claude fallback. Resume from that record; do not treat this WIP as acce
 - Run `python3 test_dashboard.py`. Tests stay at the public model boundary; do
   not add terminal-spacing or color snapshots.
 
-The WIP save adapter uses `catalog.edit_catalog` preview/apply for project edits.
-Keep the editor-opening policy snapshot, fresh-global validation, unrelated keys,
-and project symlink refusal. Ticket 10 records the incomplete Order compatibility.
+Every project save goes through `catalog.edit_catalog` preview/apply and keeps the
+document shape it writes: a move names the complete moved Tier and leaves other Tiers
+on their named or fallback Order. Keep the editor-opening snapshot (project bytes and
+global signatures), fresh-global validation, unrelated keys, target checks before and
+after preview, and project symlink refusal. `policy.meters` carries `value`, `display`,
+`source` and `effect`; the view draws Gate, Margin and Pace as inactive when it is off.
 A conflict reloads and requires a fresh action.
 The final byte check is not a filesystem lock: a writer can race the rename.
 Global policy and Meter observations remain read-only.
@@ -44,4 +46,5 @@ From a managed project pane, run `make -C /path/to/this/checkout delegate-dashbo
 and disposable fixture overrides. Python 3.11+ is required. The opener preserves
 the invoking pane's project and PATH even when Make runs in the plugin checkout.
 For the accepted prototype verdict and prior live evidence, read ticket 09.
-Ticket 10 requires a new live check of the compatibility patch after it passes tests.
+Ticket 10 holds the live check of the compatibility patch. `_work/` beside the tickets
+(git-ignored) holds `make_live_fixture.py` and `verify_no_probes.py`.

@@ -59,6 +59,7 @@ class PercentageEdit:
     text: str
     project_doc: dict[str, Any]
     policy_bytes: bytes | None
+    global_signatures: tuple[tuple[str, str], ...] = ()
 
 
 def _percentage_text(value: int | float) -> str:
@@ -174,6 +175,12 @@ class DashboardModel:
         return (
             _file_signature(self.project_policy_path),
             _file_signature(self.meters_path),
+            _file_signature(self.global_lanes_path),
+            _file_signature(self.global_routing_path),
+        )
+
+    def _global_signatures(self) -> tuple[tuple[str, str], ...]:
+        return (
             _file_signature(self.global_lanes_path),
             _file_signature(self.global_routing_path),
         )
@@ -604,6 +611,12 @@ class DashboardModel:
             self._set_save_state("error", f"Not saved: {error}")
             return False
 
+        if {k: v for k, v in proposal.items() if k != "version"} == {
+            k: v for k, v in (self._project_doc or {}).items() if k != "version"
+        }:
+            self._set_save_state("saved", "Saved project policy.")
+            return True
+
         op, edit_kwargs = self._supported_project_operation(self._project_doc, proposal)
         if op is None or edit_kwargs is None:
             self._set_save_state(
@@ -626,6 +639,7 @@ class DashboardModel:
             text=_percentage_text(self.state["policy"][field]["value"]),
             project_doc=copy.deepcopy(self._project_doc),
             policy_bytes=self._loaded_policy_bytes,
+            global_signatures=self._global_signatures(),
         )
 
     def save_percentage_edit(self, edit: PercentageEdit, text: str) -> bool:
@@ -637,6 +651,16 @@ class DashboardModel:
             fraction = _parse_percentage(text)
         except ValueError as exc:
             self._set_save_state("error", f"Not saved: {edit.field.title()} {exc}.")
+            return False
+
+        # The prefilled value came from the globals the editor opened on; a global
+        # edit since then makes it stale, the same as a project edit does.
+        if edit.global_signatures and edit.global_signatures != self._global_signatures():
+            self.refresh()
+            self._set_save_state(
+                "conflict",
+                "Conflict: global policy changed during entry; reloaded it. Repeat the action to save.",
+            )
             return False
 
         proposal = copy.deepcopy(edit.project_doc)

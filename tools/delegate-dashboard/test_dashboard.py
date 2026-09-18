@@ -336,6 +336,39 @@ class DashboardModelTest(unittest.TestCase):
         self.assertEqual(json.loads(project_policy.read_text())["note"], "external")
         self.assertEqual(dashboard.state["save"]["status"], "saved")
 
+    def test_global_edit_during_percentage_entry_conflicts_then_saves(self):
+        project_policy = self.root / ".delegate" / "routing.json"
+        dashboard = self.make_model()
+        edit = dashboard.begin_percentage_edit("gate")
+        self.assertEqual(edit.text, "10")
+
+        routing_path = self.config / "routing.json"
+        routing = json.loads(routing_path.read_text())
+        routing["gate"] = 0.5
+        write_json(routing_path, routing)
+        self.assertTrue(dashboard.refresh_if_changed())
+        self.assertFalse(dashboard.save_percentage_edit(edit, edit.text))
+        self.assertFalse(project_policy.exists())
+        self.assertEqual(dashboard.state["save"]["status"], "conflict")
+        self.assertEqual(dashboard.state["policy"]["gate"]["display"], "50%")
+
+        edit2 = dashboard.begin_percentage_edit("gate")
+        self.assertTrue(dashboard.save_percentage_edit(edit2, "25"))
+        self.assertEqual(json.loads(project_policy.read_text())["gate"], 0.25)
+
+    def test_identical_project_policy_proposal_is_a_noop_save(self):
+        project_policy = self.root / ".delegate" / "routing.json"
+        document = {"version": "delegate-routing.v1", "gate": 0.15, "note": "keep"}
+        write_json(project_policy, document)
+        before = project_policy.read_bytes()
+        mtime = project_policy.stat().st_mtime_ns
+        dashboard = self.make_model()
+
+        self.assertTrue(dashboard.save_project_policy(dict(document)))
+        self.assertEqual(dashboard.state["save"]["status"], "saved")
+        self.assertEqual(project_policy.read_bytes(), before)
+        self.assertEqual(project_policy.stat().st_mtime_ns, mtime)
+
     def test_percentage_editor_escape_cancels_without_saving(self):
         project_policy = self.root / ".delegate" / "routing.json"
         write_json(project_policy, {"version": "delegate-routing.v1", "gate": 0.15})
@@ -506,6 +539,8 @@ class DashboardModelTest(unittest.TestCase):
             )
         self.assertEqual(project_policy.read_bytes(), before)
         self.assertEqual(dashboard.state["save"]["status"], "error")
+        self.assertIn("scout", dashboard.state["save"]["detail"])
+        self.assertNotIn("dashboard writes are", dashboard.state["save"]["detail"])
         global_lanes = validator.call_args.args[1]
         global_routing = validator.call_args.args[2]
         self.assertEqual(global_lanes["version"], "delegate-lanes.v1")

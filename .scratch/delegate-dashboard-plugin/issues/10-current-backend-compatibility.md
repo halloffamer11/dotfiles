@@ -7,14 +7,14 @@ write restrictions and stale-editor protection. Keep the existing prototype scop
 
 **Blocked by:** None — prototype accepted and Orin approved this pass on 2026-09-17.
 
-**Status:** paused WIP 2026-09-17 — kept at Orin’s fresh-context request; implementation and verification incomplete
+**Status:** implemented 2026-09-18 (`e428385`, `040e136`, `3b3e00d`, `91c2ef1`, review fixes) on `worktree/delegate-monitor-herdr` — all boxes ticked; Orin's review of the updated prototype is open
 
 - [x] Current main is merged into the isolated prototype branch; main and the Rust monitor are preserved.
-- [ ] Metering on/off and its source are visible; off explains inactive Gate/Margin/Pace and cached observations.
-- [ ] Gate, Margin and Project order use revision-checked catalog edits without vendor probes.
-- [ ] Editor snapshots, unrelated keys, no-op bytes, fresh-global validation and project path restrictions are preserved.
-- [ ] Behavioral regression checks and a disposable live Herdr check pass.
-- [ ] Independent review findings are adjudicated and fixed; context and evidence are current.
+- [x] Metering on/off and its source are visible; off explains inactive Gate/Margin/Pace and cached observations.
+- [x] Gate, Margin and Project order use revision-checked catalog edits without vendor probes.
+- [x] Editor snapshots, unrelated keys, no-op bytes, fresh-global validation and project path restrictions are preserved.
+- [x] Behavioral regression checks and a disposable live Herdr check pass.
+- [x] Independent review findings are adjudicated and fixed; context and evidence are current.
 
 ## Scope approved, 2026-09-17
 
@@ -88,3 +88,65 @@ skill and installed help to reopen this existing worktree without changing focus
 Inspect plugin linking before relaunch; do not open the WIP for editing until its
 checks pass. The dashboard was not merged to main; main receives only a CLAUDE.md
 restart-pointer update for this checkpoint.
+
+## Implemented, 2026-09-18
+
+`/private/tmp` was cleared between sessions: the checkout and
+`/private/tmp/delegate-dashboard-compat/` were lost, the branch was intact. The
+checkout now lives at Herdr's default path
+`~/.herdr/worktrees/dotfiles/worktree-delegate-monitor-herdr`, and the plugin link
+points there. The convention is `docs/agents/worktrees.md` on main. The reusable
+Briefs, `make_live_fixture.py` and `verify_no_probes.py` are in the git-ignored
+`.scratch/delegate-dashboard-plugin/_work/`.
+
+**Decision, against the checkpoint note above:** the adapter keeps the document shape
+that `catalog.edit_catalog(scope="project")` writes: the complete moved Tier, the
+already-named lanes of other Tiers, and no injected `version`. The alternative was a
+second writer that disagrees with `catalog.py order --scope project` for the same
+action. The spec's purpose holds and is now tested directly: a move never changes
+the effective Order of another Tier. The two failing tests were rewritten to prove
+more, not less (canonical-plan equality, other-Tier rows, unrelated keys, rank reads
+the new Order). Orin may overrule this at review.
+
+Dispatch, by `/delegate` ranking (Codex under the Gate at 1%, agy Meter unknown):
+- model adapter and tests: `grok46-high@grok`, 815 s, run `20260918T133056Z-…-56586336`, verdict clean.
+- metering display, own sibling worktree `worktree/delegate-monitor-herdr-tui`, merged as
+  `3b3e00d`: `grok46-high@grok`, 427 s, run `20260918T133056Z-…-dd2d31bc`, verdict clean.
+- independent review, different Model family: `flash-high@agy`, 332 s, run
+  `20260918T134545Z-…-28f4374e`, verdict findings.
+
+Review adjudication (six findings; areas 1, 3, 4, 5 clean):
+1. Accepted, fixed: a global Gate/Margin edit during percentage entry now conflicts
+   (`PercentageEdit.global_signatures`).
+2. Accepted, fixed: an identical `save_project_policy` proposal is a no-op save.
+3. Accepted, fixed: the validation-rejection test now asserts the validator's message.
+4. Recorded, no change: a symlink swapped in between `edit_catalog`'s last revision check
+   and its write is followed. That is the canonical backend on main, and the context
+   file already says the byte check is not a filesystem lock.
+5. Rejected: a global change in another Tier does not make a move stale; `edit_catalog`
+   plans from a fresh snapshot, and the moved Tier is compared with a fresh catalog.
+6. Rejected: the Order test also asserts the literal saved list and the file on disk.
+
+Checks, all run by the lead after the workers returned: `test_dashboard.py` 42 passed;
+`test_catalog.py` and `test_rank.py` pass; `verify_no_probes.py` reports no process,
+socket or URL call during refresh, a move and two percentage saves.
+
+Live Herdr check, disposable fixture of ticket 09 (A/B in Tier 1, G at 5%/O in Tier 2),
+plugin split `w2Z:p2` opened with `--no-focus`, closed with `q`:
+- `J`/`K` moved A down and back; the file held `project_order` for Tier 1 only and
+  Tier 2 stayed `g` (global fallback) with its leader unchanged.
+- Margin 10% marked B `stolen by pace: 0.95 >= 0.8 + 0.1`; 20% restored A.
+- Gate 1% made G lead Tier 2; Gate 101% showed an error with bytes unchanged; saving
+  the stored Gate again kept the same hash and mtime.
+- An external note edit during Gate entry gave Conflict and kept the external bytes.
+- `"meters": false` in global routing, then in project routing (and project `true` over
+  global `false`): the header showed `Meters off|on [source]`, Gate and Margin `inactive`,
+  the effect line, `Remaining 5% cached`, and G became the Tier 2 pick with no Gate veto.
+  Margin stayed editable while off.
+- Fixture `lanes.json`, global `routing.json` and `usage.json` hashes were unchanged at the
+  end. The live `~/.cache/delegate/usage.json` changed once at 09:46:46; by timing that is
+  the review worker's start probe, and the no-probe helper covers the dashboard itself.
+- Found and fixed in this check: a narrow pane clipped the Meters source (`91c2ef1`).
+
+Not done: popup placement was not opened live (as in ticket 09). No merge to main; the
+branch's Gate 10% / Margin 20% project policy stays off main.
