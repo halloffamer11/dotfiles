@@ -82,7 +82,6 @@ def main(argv=None):
         used = handler(key, model.state, view)
         if isinstance(used, str) and used in names:
             selected = used
-    view["last_selected"] = selected
 
     editor = FakeEditor(args.editor, args.editor_text) if args.editor else None
     lines = module.render(
