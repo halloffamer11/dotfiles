@@ -76,6 +76,18 @@ def main(argv=None):
     selected = args.select or (names[0] if names else None)
     view = {}
     handler = getattr(module, "handle_key", None)
+    if args.keys:
+        # The host always draws before it reads a key, so a variant may keep the
+        # selection in `view`.  Draw one frame first, or a key sees an empty view.
+        module.render(
+            model.state,
+            width=args.width,
+            height=args.height,
+            selected_lane=selected,
+            editor=None,
+            message="",
+            view=view,
+        )
     for key in args.keys:
         if handler is None:
             break

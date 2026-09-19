@@ -6,7 +6,9 @@ this file, one per layout variant.  This host owns the model, the selected Lane,
 the percentage editors and the keys ``j``/``k`` and arrows, ``J``/``K``, ``g``,
 ``m``, ``r``, ``q`` and ``v``.  Every other key goes to the variant's
 ``handle_key``; a variant that returns a carried Lane name from it also moves
-the selection to that Lane.
+the selection to that Lane.  A variant that also exposes
+``selectable(state, view)`` names the Lanes ``j``/``k`` may stop on, so rows it
+hides are never walked.
 """
 
 from __future__ import annotations
@@ -26,6 +28,9 @@ from model import DashboardError, DashboardModel
 
 LAYOUT_PREFIX = "proto_layout_"
 DEFAULT_LAYOUT = "current"
+
+# The order `v` cycles.  A variant not named here follows, alphabetically.
+LAYOUT_ORDER = ("current", "panel", "strip", "deck")
 
 KEY_SEQUENCES = (
     "\x1b[1;2A",
@@ -146,6 +151,25 @@ def carried_lane_names(state):
     return [row["lane"] for tier in state["tiers"] for row in tier["rows"]]
 
 
+def walkable_lane_names(module, state, view):
+    """The carried Lane names ``j``/``k`` may stop on in this variant.
+
+    A variant that hides rows -- a folded Tier, say -- exposes
+    ``selectable(state, view)`` and names the stops it paints, so one press
+    leaves a fold and no press ever walks a hidden row.  A variant without it
+    keeps today's behaviour: every carried Lane is a stop.
+    """
+    carried = carried_lane_names(state)
+    chooser = getattr(module, "selectable", None)
+    if chooser is None:
+        return carried
+    try:
+        names = [name for name in chooser(state, view) if name in carried]
+    except Exception:  # the same rule as a failed render: never stop the host
+        return carried
+    return names or carried
+
+
 def run_terminal(model: DashboardModel, layout_name: str = DEFAULT_LAYOUT) -> int:
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         sys.stderr.write("dashboard: interactive view needs a terminal; use --json for diagnostics\n")
@@ -155,7 +179,13 @@ def run_terminal(model: DashboardModel, layout_name: str = DEFAULT_LAYOUT) -> in
     if not layouts:
         sys.stderr.write(f"dashboard: no {LAYOUT_PREFIX}*.py layout found beside dashboard.py\n")
         return 1
-    order = sorted(layouts)
+    order = sorted(
+        layouts,
+        key=lambda name: (
+            LAYOUT_ORDER.index(name) if name in LAYOUT_ORDER else len(LAYOUT_ORDER),
+            name,
+        ),
+    )
     message = f"skipped layouts: {', '.join(failures)}" if failures else ""
     if layout_name not in layouts:
         message = f"layout '{layout_name}' not found; showing '{order[0]}'"
@@ -212,7 +242,9 @@ def run_terminal(model: DashboardModel, layout_name: str = DEFAULT_LAYOUT) -> in
                 if key in ("q", "Q", "\x03"):
                     return 0
                 message = ""
-                names = carried_lane_names(model.state)
+                names = walkable_lane_names(
+                    layouts[layout_name], model.state, views[layout_name]
+                )
                 selected_index = names.index(selected) if selected in names else 0
                 if key in ("j", "\x1b[B") and names:
                     selected = names[min(len(names) - 1, selected_index + 1)]
