@@ -36,15 +36,15 @@ decisions, the review adjudication and the live evidence.
   against the Pick's Pace plus the Margin, the rule at `rank.py:177-183`).
   `h`/`j`/`k`/`l` and the arrows move the selection; in the table `j`/`k` walk
   down one Tier column and `h`/`l` cross to the nearest Lane one column over,
-  and in the list `h`/`l` close and open a deck. `H`/`L` propose a Tier move and
-  write only on `y`. `d` writes the terms and every reason code at the foot, `z`
-  folds the deck or the Harness row under the cursor, and `?` lists the keys.
+  and in the list `h`/`l` close and open a deck. `H`/`L` move the Lane one Tier
+  left or right for this project, and save at once the way `J`/`K` do. `d` writes
+  the terms and every reason code at the foot, `z` folds the deck or the Harness
+  row under the cursor, and `?` lists the keys.
   `proto_dump.py --layout NAME --width N --height N` prints one frame with ANSI
   stripped; `--check` fails on an over-wide line. Do not add tests for variants.
 - `model.py` exposes `DashboardModel.state`, `refresh()`, and
   `refresh_if_changed()`, plus project-policy editing through
-  `move_lane()` and `save_project_policy()`, and the one global write,
-  `preview_lane_tier()`/`apply_lane_tier()`. Construction resolves and pins one Git root. Refreshes
+  `move_lane()`, `move_lane_tier()` and `save_project_policy()`. Construction resolves and pins one Git root. Refreshes
   read the effective catalog and call delegate's canonical `tier_leaders()`;
   they use cached observations and never acquire Meter data or run a vendor probe.
 - `j/k` or arrows select; `J/K` or Shift-arrows move within a Tier. `g/m` opens
@@ -70,14 +70,16 @@ after preview, and project symlink refusal. `policy.meters` carries `value`, `di
 `source` and `effect`; the view draws Gate, Margin and Pace as inactive when it is off.
 A conflict reloads and requires a fresh action.
 The final byte check is not a filesystem lock: a writer can race the rename.
-Global routing and Meter observations remain read-only. A Lane's Tier is the one
-exception, because a Tier belongs to the Lane and `catalog.edit_catalog` rejects
-`lanes.<lane>.tier` at project scope: `preview_lane_tier()` previews it with
-`scope='global'` and writes nothing, and only `apply_lane_tier()` writes, refusing a
-catalog whose bytes or revision moved since the preview. The catalog renumbers the
-Order of the destination Tier behind that one field, so the preview's `changed` list,
-not the caller, says which Lanes move. `deck` is the only variant that calls it, and it
-asks for `y` first.
+The global catalog and Meter observations stay read-only: every dashboard write is
+`scope='project'`. `move_lane_tier()` is the Tier write and is written against ticket
+32, whose project Lanes document is `<git-root>/.delegate/lanes.json` and whose edit is
+`set lanes.<lane>.tier N` at project scope, on this same preview/`expect`/apply
+contract. Until that backend is installed the preview raises `is global-only` and the
+method reports `Tier move needs the project Lanes backend (ticket 32)` without writing;
+do not reach for `scope='global'` to get around it. `deck`'s `H`/`L` is its only caller
+and answers the Tier 1 and Tier 4 edges before the catalog is asked at all. When the
+backend lands, check the target against `project_lanes_path`, not the project policy,
+and give that file a watch in `_signatures()` so an outside edit reloads.
 
 For Herdr launch or placement changes, read `launcher.py`, `open.py`, and ticket 08.
 From a managed project pane, run `make -C /path/to/this/checkout delegate-dashboard`.

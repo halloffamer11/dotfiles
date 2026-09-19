@@ -149,7 +149,7 @@ KEYS = (
     ("Tab", "the next view: Tier list, Harness table, Gate/Margin"),
     ("a", "the Gate/Margin view, and back to the one before it"),
     ("h j k l", "move the selection; the arrow keys do the same"),
-    ("H  L", "move the selected Lane one Tier left or right, on y"),
+    ("H  L", "move the selected Lane one Tier left or right, for this project"),
     ("d", "the terms and every reason code, at the foot"),
     ("z", "fold the deck, or the Harness row, under the cursor"),
     ("?", "close this help"),
@@ -1069,13 +1069,13 @@ def help_lines(width):
                 ("  move the Lane inside its Tier's Order, which every Harness in that "
                  "Tier shares.", PAL["mute"], False)])
     out.append([("  H/L", PAL["gold"], False),
-                ("  move it to the Tier left or right. A Tier is the Lane's, not the "
-                 "project's, so", PAL["mute"], False)])
+                ("  move it to the Tier left or right, for this project only. Both "
+                 "save at once,", PAL["mute"], False)])
     out.append([(pad("", 7), PAL["mute"], False),
-                ("that writes the global lane catalog: the pane shows the whole change "
-                 "and only", PAL["mute"], False)])
+                ("and the line above says what changed. Tier 1 has nothing to its left "
+                 "and", PAL["mute"], False)])
     out.append([(pad("", 7), PAL["mute"], False),
-                ("y writes it.", PAL["mute"], False)])
+                ("Tier 4 nothing to its right.", PAL["mute"], False)])
     return out
 
 
@@ -1086,48 +1086,9 @@ HINTS = {
 }
 
 
-def confirm_lines(edit, width):
-    """What an `H`/`L` Tier move would write, before anything is written.
-
-    A Tier is global, so the pane spells the whole write out: the Lane, the two
-    Tiers, how many Orders the catalog renumbers behind it, and every Class Pick
-    that changes.  The footer under this block is the only thing that saves.
-    """
-    measure = min(max(0, int(width)), MEASURE)
-    out: list[list[tuple]] = [
-        [(HAIRLINE * measure, PAL["veto"], False)],
-        [("Tier move", PAL["veto"], True),
-         ("   this writes the global lane catalog, which every project shares",
-          PAL["mute"], False)],
-        [("  " + str(getattr(edit, "summary", "")), PAL["fg"], True)],
-    ]
-    reordered = tuple(getattr(edit, "reordered", ()) or ())
-    if reordered:
-        out.append([
-            ("  Order renumbered", PAL["mute"], False),
-            (f"   {len(reordered)} Lane{'' if len(reordered) == 1 else 's'} "
-             f"in Tier {getattr(edit, 'new_tier', '')}", PAL["mute"], False),
-        ])
-    picks = tuple(getattr(edit, "picks", ()) or ())
-    if not picks:
-        out.append([("  No Class changes its Pick.", PAL["mute"], False)])
-    for name, before, after in picks[:4]:
-        out.append([
-            (f"  Pick  {pad(str(name), 10)}", PAL["mute"], False),
-            (f"{before} {ARROW} {after}", PAL["gold"], False),
-        ])
-    return out
-
-
 def footer_line(state, view, editor, width):
     """The editor lives here, so opening it never moves the deck."""
     tail = f"layout: {NAME} (v next)"
-    confirm = view.get("confirm")
-    if confirm is not None:
-        head = f"Write this to the lane catalog?  y saves  ·  any other key cancels"
-        gap = max(1, width - cells(head) - cells(tail))
-        return [(head, PAL["veto"], True), (" " * gap, PAL["mute"], False),
-                (tail, PAL["mute"], False)]
     if editor is not None:
         field = str(getattr(editor, "field", "") or "gate")
         text = str(getattr(editor, "text", "") or "")
@@ -1207,14 +1168,6 @@ def render(state, *, width, height, selected_lane, editor, message, view):
     view["message"] = message or ""
     view["_selected"] = selected_lane
 
-    # A pending Tier move belongs to the Lane it was proposed for and to the
-    # catalog it was previewed on.  Any host key that moves the selection, and
-    # any reload, drops it, so `y` can only ever confirm what is on the screen.
-    if view.get("confirm") is not None and (
-        view.get("_confirm_lane") != selected_lane
-        or view.get("_confirm_revision") != state.get("revision")
-    ):
-        view["confirm"] = None
     _watch_order(state, view, selected_lane)
 
     columns = grid(width)
@@ -1234,12 +1187,9 @@ def render(state, *, width, height, selected_lane, editor, message, view):
         return chrome + body + [footer]
 
     # The foot takes what it needs and leaves the body at least three lines.
-    # A pending Tier move outranks the descriptions: it is about to write.
     foot: list[str] = []
-    room = max(0, height - len(chrome) - 1 - 3)
-    if view.get("confirm") is not None:
-        foot = [line(part, width) for part in confirm_lines(view["confirm"], width)][:room]
-    elif view.get("descriptions"):
+    if view.get("descriptions"):
+        room = max(0, height - len(chrome) - 1 - 3)
         foot = [line(part, width) for part in foot_lines(width)][:room]
 
     if current_view(view) == "aid":
@@ -1339,12 +1289,17 @@ def _set_view(state, view, name):
     """Show one of the three bodies and keep the selection on a real stop."""
     view["view"] = name if name in VIEWS else VIEWS[0]
     view["offset"] = 0
-    view["confirm"] = None
     return _stop_lane(state, view, view.get("_selected"))
 
 
-def _propose_tier(state, view, model, delta):
-    """`H`/`L`: preview a Tier move. This never writes; `y` in the next key does."""
+def _move_tier(state, view, model, delta):
+    """`H`/`L`: move the selected Lane one Tier, for this project.
+
+    The save is the model's and is immediate, the way `J`/`K` move the Order
+    inside a Tier.  The model puts what it did, or why it could not, into the
+    save state, which the footer draws; the two Tier edges are answered here so
+    the pane never asks the catalog for a move it already knows is off the board.
+    """
     selected = view.get("_selected")
     if model is None:
         view["note"] = "Tier moves need the host's save path; this build did not pass one."
@@ -1353,22 +1308,16 @@ def _propose_tier(state, view, model, delta):
     for item in state.get("tiers") or []:
         if any(row.get("lane") == selected for row in item.get("rows") or ()):
             tier = item.get("tier")
+            break
     if tier is None:
         return True
-    target = tier + delta
-    if target not in RAILS:
+    if tier + delta not in RAILS:
         view["note"] = (
             f"Tier {tier} is the {'first' if delta < 0 else 'last'} Tier; "
             f"{selected} cannot move {'left' if delta < 0 else 'right'}."
         )
         return True
-    edit = model.preview_lane_tier(selected, target)
-    if edit is None:
-        # The model wrote the reason into the save state; the footer shows it.
-        return True
-    view["confirm"] = edit
-    view["_confirm_lane"] = selected
-    view["_confirm_revision"] = state.get("revision")
+    model.move_lane_tier(selected, delta)
     return True
 
 
@@ -1384,20 +1333,6 @@ def handle_key(key, state, view, model=None):
     selected = view.get("_selected")
     key = ARROWS.get(key, key)
     view["note"] = None
-
-    # A pending Tier move eats every key: `y` writes it, anything else drops it.
-    confirm = view.get("confirm")
-    if confirm is not None:
-        view["confirm"] = None
-        if key == "y":
-            if model is None:
-                view["note"] = "Not saved: no save path."
-            else:
-                model.apply_lane_tier(confirm)
-            return True
-        view["note"] = f"Tier move cancelled; {getattr(confirm, 'lane', '')} is unchanged."
-        return True
-
     if key == "?":
         view["help"] = not view.get("help", False)
         return True
@@ -1443,7 +1378,7 @@ def handle_key(key, state, view, model=None):
                 return True
             return found
         if key in ("H", "L"):
-            return _propose_tier(state, view, model, -1 if key == "H" else 1)
+            return _move_tier(state, view, model, -1 if key == "H" else 1)
         return False
     if here == "list" and key in ("h", "l"):
         # In a list of decks, left closes and right opens, the way a tree does.
