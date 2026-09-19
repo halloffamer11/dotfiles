@@ -13,7 +13,8 @@ Every term this skill uses (harness, lane, meter, class, tier, floor, ceiling, r
 
 ## Files
 
-- `~/.config/delegate/lanes.json`: meters and lanes (harness, model, effort, meter, meter weight, timeout, price, tier, basis; optional `enabled`, and `published_as` — the names benchmark sources print for this lane's model, e.g. `"published_as": ["Fable 5.1"]` on a `claude-fable-5-1` lane, needed only where case and separators alone do not bridge the two). Global only.
+- `~/.config/delegate/lanes.json`: meters and lanes (harness, model, effort, meter, meter weight, timeout, price, tier, basis; optional `enabled`, and `published_as` — the names benchmark sources print for this lane's model, e.g. `"published_as": ["Fable 5.1"]` on a `claude-fable-5-1` lane, needed only where case and separators alone do not bridge the two).
+- `<git-root>/.delegate/lanes.json`: a project's lane customization, beside its `routing.json`. One field, `tier`, 1 to 4, on a Lane the global catalog already has: `{"lanes": {"<lane>": {"tier": 2}}}`. Every other Lane field, `enabled` and `order` included, stays global, and it carries no `version`. The effective Tier is the project's where it names one, and the Class Range, the Gate, overflow and the Tier leaders all read the effective Tier. A Lane the project moves has no place in its new Tier, so it sorts after the Lanes that have one until `project_order` places it (ticket 32).
 - `~/.config/delegate/routing.json`: `classes` (floor and ceiling per class), `margin`, `gate`, optional `meters` and `overflow` (booleans, default on). A project overrides any key at `<git-root>/.delegate/routing.json`; `classes` merges per class and per key. Floor and Ceiling stay here, never in the Class guide.
 - `assets/classes.md`: Class judgment (intent, signals, examples, counter-examples, when to raise `--tier` inside the live Range). A project may overlay matching `##` Class sections at `<git-root>/.delegate/classes.md`; the overlay cannot add a Class or declare Floor or Ceiling. `python3 ~/.claude/skills/delegate/scripts/catalog.py check-guide [file] [--overlay]` validates headings against the closed Class set.
 - Both JSON files are strict JSON, validated on read with a plain-language message naming the field and the rule, formatted on write, and accept `note` fields anywhere. `python3 ~/.claude/skills/delegate/scripts/catalog.py show` prints the effective catalog for the current directory; `scripts/catalog.py check <file>` validates one file and warns on stderr, without failing, when one Meter serves every carried Lane of a Tier — that Meter under the Gate takes the whole Tier with it. The starting catalog ships in `assets/samples/`; `/delegate setup` is the wizard that builds or revises it (direct command: `python3 ~/.claude/skills/delegate/scripts/setup.py`). When `$ARGUMENTS` asks for setup (e.g. `/delegate setup`), run `python3 ~/.claude/skills/delegate/scripts/setup.py`.
@@ -22,8 +23,10 @@ Every term this skill uses (harness, lane, meter, class, tier, floor, ceiling, r
 
 Use `scripts/catalog.py set FIELD JSON_VALUE --scope global|project`,
 `range CLASS FLOOR CEILING --scope global|project`, or
-`order LANE POSITION --scope global|project`. Tier uses `lanes.<lane>.tier`
-(global only); routing fields are `routing.gate`, `routing.margin`,
+`order LANE POSITION --scope global|project`. Tier uses `lanes.<lane>.tier`:
+`--scope global` edits the catalog, `--scope project` writes
+`<git-root>/.delegate/lanes.json`, and a project Tier equal to the global one
+removes the entry. Routing fields are `routing.gate`, `routing.margin`,
 `routing.meters` and `routing.overflow`.
 Order is one-based among carried Lanes in the same Tier. All accept `--cwd`
 and `--config-dir`.

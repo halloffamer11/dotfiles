@@ -1361,4 +1361,85 @@ with tempfile.TemporaryDirectory() as td:
         rows26o[0]["reason"],
     )
 
+    # -------------------------------------------------------------
+    # 27. A project may set a Lane's Tier (ticket 32). Every Tier here is the
+    # sample catalog's, local to this test: no expectation reads a live
+    # assignment. sol-high@codex is Tier 3 globally and Tier 2 in the project.
+    m27 = [
+        meter("codex", weekly=0.80, five_h=0.80, pace=0.80, status="ok"),
+        meter("grok", weekly=0.80, pace=0.70, status="ok"),
+        meter("claude-fable", weekly=0.80, five_h=0.80, pace=0.70, status="ok"),
+        meter("agy-gemini", weekly=0.80, five_h=0.80, pace=0.70, status="ok"),
+    ]
+    doc27 = write_meters_doc(meters_path, m27)
+
+    proj27 = os.path.join(td, "repo-tier")
+    os.makedirs(os.path.join(proj27, ".delegate"))
+    open(os.path.join(proj27, ".git"), "w").close()
+    catalog.write_json(os.path.join(proj27, ".delegate", "lanes.json"),
+                       {"lanes": {"sol-high@codex": {"tier": 2}}})
+
+    cat27 = catalog.load_catalog(cwd=proj27, config_dir=cfg_dir)
+    rows27_mech = rank.rank("mechanical", cat27, doc27, ALL_HARNESSES)   # Range 1-2
+    rows27_rev = rank.rank("review", cat27, doc27, ALL_HARNESSES)        # Range 3-3
+    sol27_mech = next(r for r in rows27_mech if r["lane"] == "sol-high@codex")
+    sol27_rev = next(r for r in rows27_rev if r["lane"] == "sol-high@codex")
+    record(
+        "case 27 a project Tier makes the Lane eligible in Range 1-2 and not in Range 3-3",
+        sol27_mech["tier"] == 2 and sol27_mech["eligible"] is True
+        and sol27_rev["tier"] == 2 and sol27_rev["eligible"] is False
+        and sol27_rev["veto"] == "floor",
+        f"{sol27_mech['reason']} | {sol27_rev['reason']}",
+    )
+
+    cat27_global = catalog.load_catalog(cwd=td, config_dir=cfg_dir)
+    rows27_global = rank.rank("review", cat27_global, doc27, ALL_HARNESSES)
+    sol27_global = next(r for r in rows27_global if r["lane"] == "sol-high@codex")
+    record(
+        "case 27b the same catalog with no project file ranks as before",
+        sol27_global["tier"] == 3 and sol27_global["eligible"] is True
+        and [r["lane"] for r in rows27_global] == [
+            r["lane"] for r in rank.rank("review", cat, doc27, ALL_HARNESSES)],
+        repr(sol27_global["reason"]),
+    )
+
+    # A moved Lane has no place in its new Tier, so it sorts after the Lanes
+    # that have one; project_order gives it one.
+    order27 = copy.deepcopy(cat27)
+    order27["lanes"]["terra-high@codex"]["order"] = 1
+    order27["lanes"]["grok46-high@grok"]["order"] = 2
+    rows27_place = rank.rank_range(order27, doc27, ALL_HARNESSES, floor=2, ceiling=2)
+    record(
+        "case 27c a moved Lane with no place sorts after the placed Lanes",
+        [r["lane"] for r in rows27_place if r["eligible"]] == [
+            "terra-high@codex", "grok46-high@grok", "sol-high@codex"],
+        repr([(r["lane"], r["order"]) for r in rows27_place]),
+    )
+
+    catalog.write_json(os.path.join(proj27, ".delegate", "routing.json"),
+                       {"project_order": ["sol-high@codex", "terra-high@codex",
+                                          "grok46-high@grok"]})
+    cat27_ordered = catalog.load_catalog(cwd=proj27, config_dir=cfg_dir)
+    rows27_ordered = rank.rank_range(cat27_ordered, doc27, ALL_HARNESSES, floor=2, ceiling=2)
+    record(
+        "case 27d project_order places a Lane inside its project Tier",
+        cat27_ordered["lanes"]["sol-high@codex"]["order"] == 1
+        and [r["lane"] for r in rows27_ordered if r["eligible"]][0] == "sol-high@codex",
+        repr([(r["lane"], r["order"]) for r in rows27_ordered]),
+    )
+
+    res27 = subprocess.run(
+        [sys.executable, RANK_PY, "mechanical", "--cwd", proj27, "--config-dir", cfg_dir,
+         "--meters", meters_path, "--harnesses", ALL_HARNESSES_ARG],
+        capture_output=True,
+        text=True,
+    )
+    record(
+        "case 27e the rank header says which Lanes run on a project Tier",
+        res27.returncode == 0
+        and any("project tier" in line.lower() and "sol-high@codex" in line
+                and "3 -> 2" in line for line in res27.stdout.splitlines()),
+        res27.stdout[:600] + res27.stderr,
+    )
+
 sys.exit(1 if fails else 0)

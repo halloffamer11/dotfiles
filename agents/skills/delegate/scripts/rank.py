@@ -400,6 +400,15 @@ def print_rank_output(cls, cat, rows, tier=None):
     gate_pct = f"{int(round(gate * 100))}%"
     meters_bit = "" if catalog.meters_enabled(routing) else "  meters=off"
     print(f"# {cls}  floor={floor} ceiling={ceiling}{meters_bit}  margin={margin}  gate={gate_pct}  (routing: global; project override: {override_str})")
+    # A project may set a Lane's Tier (ticket 32). The rows carry only the
+    # effective Tier, so the header says which Lanes run on a project one.
+    project_tiers = cat.get("project_tiers") or {}
+    if project_tiers:
+        moved = ", ".join(
+            f"{name} {change['from']} -> {change['to']}"
+            for name, change in sorted(project_tiers.items())
+        )
+        print(f"# project tier: {moved}  ({cat.get('files', {}).get('project_lanes')})")
     # The Ceiling above stays the Class's own, which is the value `--tier` is
     # bounded by; this second header line says the job went past it and why.
     overflow = rows[0].get("overflow")

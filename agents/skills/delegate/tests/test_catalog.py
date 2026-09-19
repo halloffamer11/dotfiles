@@ -1226,7 +1226,7 @@ ALL_HARNESSES = set(catalog.HARNESSES)
 EMPTY_METERS = {}
 
 
-def make_edit_fixture(td, *, project=None, dotted=False, symlink=False):
+def make_edit_fixture(td, *, project=None, project_lanes=None, dotted=False, symlink=False):
     real_cfg = os.path.join(td, "real-cfg")
     cfg = os.path.join(td, "cfg")
     os.makedirs(real_cfg)
@@ -1255,9 +1255,12 @@ def make_edit_fixture(td, *, project=None, dotted=False, symlink=False):
     repo = os.path.join(td, "repo")
     os.makedirs(repo)
     open(os.path.join(repo, ".git"), "w").close()
+    if project is not None or project_lanes is not None:
+        os.makedirs(os.path.join(repo, ".delegate"), exist_ok=True)
     if project is not None:
-        os.makedirs(os.path.join(repo, ".delegate"))
         catalog.write_json(os.path.join(repo, ".delegate", "routing.json"), project)
+    if project_lanes is not None:
+        catalog.write_json(os.path.join(repo, ".delegate", "lanes.json"), project_lanes)
     return cfg, repo, real_cfg
 
 
@@ -1537,11 +1540,12 @@ with tempfile.TemporaryDirectory() as td:
         msg,
     )
 
-    msg = check_catalog_error(
-        catalog.edit_catalog,
+    # Since ticket 32 a project Lane Tier is legal and goes to its own file,
+    # never to the global lane catalog.
+    preview_pt = catalog.edit_catalog(
         "set",
         field="lanes.terra-high@codex.tier",
-        value=2,
+        value=1,
         scope="project",
         cwd=repo,
         config_dir=cfg,
@@ -1549,9 +1553,12 @@ with tempfile.TemporaryDirectory() as td:
         meters=EMPTY_METERS,
     )
     record(
-        "10.4c project Lane Tier writes are rejected",
-        msg is not None and "global-only" in msg and "terra-high@codex" in msg,
-        msg,
+        "10.4c a project Lane Tier targets the project lanes file",
+        preview_pt["target"]["file"] == os.path.join(repo, ".delegate", "lanes.json")
+        and preview_pt["values"]["original"]["tier"] == 2
+        and preview_pt["values"]["resulting"]["tier"] == 1
+        and preview_pt["written"] is False,
+        repr(preview_pt["values"]),
     )
     preview_m = catalog.edit_catalog(
         "set",
@@ -2201,6 +2208,332 @@ with tempfile.TemporaryDirectory() as td:
         catalog.overflow_enabled(cat_o["routing"]) is False
         and "overflow" not in catalog.load_json(os.path.join(cfg, "routing.json")),
         repr(cat_o["routing"].get("overflow")),
+    )
+
+# ---------------------------------------------------------------------------
+# 14. A project may set a Lane's Tier (ticket 32). Every Tier below is a local
+# fixture Tier from assets/samples, never a live catalog assignment.
+
+record(
+    "14.1 lanes.<lane>.tier is a project set field too",
+    catalog.parse_set_field("lanes.sol-high@codex.tier") == ("lane_tier", "sol-high@codex"),
+    repr(catalog.parse_set_field("lanes.sol-high@codex.tier")),
+)
+
+PROJECT_LANES_SOURCE = "project lanes.json"
+
+msg = check_catalog_error(
+    catalog.validate_project_lanes,
+    {"lanes": {"no-such@codex": {"tier": 2}}},
+    lanes_sample,
+    source=PROJECT_LANES_SOURCE,
+)
+record(
+    "14.2 an unknown Lane names the file, the Lane and the rule",
+    msg is not None and PROJECT_LANES_SOURCE in msg and "no-such@codex" in msg
+    and "not in the global lane catalog" in msg,
+    msg,
+)
+
+msg = check_catalog_error(
+    catalog.validate_project_lanes,
+    {"lanes": {"sol-high@codex": {"enabled": False}}},
+    lanes_sample,
+    source=PROJECT_LANES_SOURCE,
+)
+record(
+    "14.3 a field other than tier names the file, the field and the rule",
+    msg is not None and PROJECT_LANES_SOURCE in msg and "'enabled'" in msg
+    and "tier" in msg and "global" in msg,
+    msg,
+)
+
+msg = check_catalog_error(
+    catalog.validate_project_lanes,
+    {"lanes": {"sol-high@codex": {"tier": 5}}},
+    lanes_sample,
+    source=PROJECT_LANES_SOURCE,
+)
+record(
+    "14.4 a Tier outside 1-4 names the file, the field and the rule",
+    msg is not None and PROJECT_LANES_SOURCE in msg and "sol-high@codex" in msg
+    and "tier must be a whole number from 1 to 4" in msg,
+    msg,
+)
+
+msg = check_catalog_error(
+    catalog.validate_project_lanes,
+    {"tiers": {"sol-high@codex": 2}},
+    lanes_sample,
+    source=PROJECT_LANES_SOURCE,
+)
+record(
+    "14.5 an unknown top-level key is refused by name",
+    msg is not None and "'tiers'" in msg and "unknown top-level key" in msg,
+    msg,
+)
+
+msg = check_catalog_error(
+    catalog.validate_project_lanes,
+    {"version": catalog.LANES_VERSION, "lanes": {"sol-high@codex": {"tier": 2}}},
+    lanes_sample,
+    source=PROJECT_LANES_SOURCE,
+)
+record(
+    "14.5b a version is refused, so check never takes it for a global catalog",
+    msg is not None and "'version'" in msg and "carries no version" in msg,
+    msg,
+)
+
+for good in ({"lanes": {"sol-high@codex": {"tier": 2, "note": "faster here"}}},
+             {"lanes": {}, "note": "nothing customized"},
+             {}):
+    try:
+        catalog.validate_project_lanes(copy.deepcopy(good), lanes_sample,
+                                       source=PROJECT_LANES_SOURCE)
+        ok_good = True
+        detail = ""
+    except catalog.CatalogError as e:
+        ok_good = False
+        detail = str(e)
+    record(f"14.6 a project lanes document validates: {sorted(good)}", ok_good, detail)
+
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, _real = make_edit_fixture(
+        td, project_lanes={"lanes": {"sol-high@codex": {"tier": 2}}})
+    cat_p = catalog.load_catalog(cwd=repo, config_dir=cfg)
+    cat_g = catalog.load_catalog(cwd=td, config_dir=cfg)
+    project_lanes_path = os.path.join(repo, ".delegate", "lanes.json")
+    record(
+        "14.7 the effective Tier is the project's, and the global file is untouched",
+        cat_p["lanes"]["sol-high@codex"]["tier"] == 2
+        and cat_g["lanes"]["sol-high@codex"]["tier"] == 3
+        and catalog.load_json(os.path.join(cfg, "lanes.json"))["lanes"]["sol-high@codex"]["tier"] == 3
+        and cat_p["sources"]["lanes.sol-high@codex.tier"] == project_lanes_path
+        and cat_p["files"]["project_lanes"] == project_lanes_path
+        and cat_g["files"]["project_lanes"] is None,
+        repr(cat_p["sources"].get("lanes.sol-high@codex.tier")),
+    )
+    record(
+        "14.7b a moved Lane loses its global place in its old Tier",
+        cat_p["lanes"]["sol-high@codex"].get("order") is None
+        and cat_g["lanes"]["sol-high@codex"]["order"] == 1,
+        repr(cat_p["lanes"]["sol-high@codex"]),
+    )
+    out = io.StringIO()
+    _stdout, sys.stdout = sys.stdout, out
+    try:
+        catalog.show_catalog(cwd=repo, config_dir=cfg)
+    finally:
+        sys.stdout = _stdout
+    shown = out.getvalue()
+    record(
+        "14.7c show says a project Tier is in effect and for which Lane",
+        "project tier" in shown.lower() and "sol-high@codex" in shown
+        and project_lanes_path in shown,
+        shown[-400:],
+    )
+
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, _real = make_edit_fixture(td)
+    global_lanes_before = file_bytes(os.path.join(cfg, "lanes.json"))
+    routing_before = file_bytes(os.path.join(cfg, "routing.json"))
+    preview = catalog.edit_catalog(
+        "set",
+        field="lanes.sol-high@codex.tier",
+        value=2,
+        scope="project",
+        cwd=repo,
+        config_dir=cfg,
+        present=ALL_HARNESSES,
+        meters=EMPTY_METERS,
+    )
+    project_lanes_path = os.path.join(repo, ".delegate", "lanes.json")
+    record(
+        "14.8 project Tier preview targets the project lanes file and changes nothing yet",
+        preview["target"]["file"] == project_lanes_path
+        and preview["target"]["exists"] is False
+        and preview["values"]["field"] == "lanes.sol-high@codex.tier"
+        and preview["values"]["original"]["tier"] == 3
+        and preview["values"]["resulting"]["tier"] == 2
+        and preview["values"]["resulting"]["global"] == 3
+        and preview["changed"] == ["lanes.sol-high@codex.tier"]
+        and preview["noop"] is False
+        and preview["written"] is False
+        and not os.path.exists(project_lanes_path),
+        repr(preview["values"]),
+    )
+    stale = check_catalog_error(
+        catalog.edit_catalog,
+        "set",
+        field="lanes.sol-high@codex.tier",
+        value=2,
+        scope="project",
+        cwd=repo,
+        config_dir=cfg,
+        apply=True,
+        expect="not-the-revision",
+        present=ALL_HARNESSES,
+        meters=EMPTY_METERS,
+    )
+    record(
+        "14.8b a stale revision refuses the apply",
+        stale is not None and "intervening edit" in stale
+        and not os.path.exists(project_lanes_path),
+        stale,
+    )
+    applied = catalog.edit_catalog(
+        "set",
+        field="lanes.sol-high@codex.tier",
+        value=2,
+        scope="project",
+        cwd=repo,
+        config_dir=cfg,
+        apply=True,
+        expect=preview["revision"],
+        present=ALL_HARNESSES,
+        meters=EMPTY_METERS,
+    )
+    written = catalog.load_json(project_lanes_path)
+    record(
+        "14.8c the apply writes only the project lanes file",
+        applied["written"] is True
+        and written["lanes"]["sol-high@codex"] == {"tier": 2}
+        and file_bytes(os.path.join(cfg, "lanes.json")) == global_lanes_before
+        and file_bytes(os.path.join(cfg, "routing.json")) == routing_before
+        and not os.path.exists(os.path.join(repo, ".delegate", "routing.json")),
+        repr(written),
+    )
+    # The project file goes stale for the next preview, which is the revision
+    # the dashboard passes back.
+    back = catalog.edit_catalog(
+        "set",
+        field="lanes.sol-high@codex.tier",
+        value=3,
+        scope="project",
+        cwd=repo,
+        config_dir=cfg,
+        present=ALL_HARNESSES,
+        meters=EMPTY_METERS,
+    )
+    record(
+        "14.8d the project lanes file is part of the revision",
+        back["revision"] != preview["revision"],
+        f"{back['revision']} vs {preview['revision']}",
+    )
+    catalog.edit_catalog(
+        "set",
+        field="lanes.sol-high@codex.tier",
+        value=3,
+        scope="project",
+        cwd=repo,
+        config_dir=cfg,
+        apply=True,
+        expect=back["revision"],
+        present=ALL_HARNESSES,
+        meters=EMPTY_METERS,
+    )
+    emptied = catalog.load_json(project_lanes_path)
+    record(
+        "14.8e setting the project Tier back to the global Tier removes the entry",
+        emptied.get("lanes") == {}
+        and catalog.load_catalog(cwd=repo, config_dir=cfg)["lanes"]["sol-high@codex"]["tier"] == 3,
+        repr(emptied),
+    )
+
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, _real = make_edit_fixture(td)
+    noop = catalog.edit_catalog(
+        "set",
+        field="lanes.sol-high@codex.tier",
+        value=3,
+        scope="project",
+        cwd=repo,
+        config_dir=cfg,
+        present=ALL_HARNESSES,
+        meters=EMPTY_METERS,
+    )
+    record(
+        "14.9 a project Tier equal to the global one with no project file is a no-op",
+        noop["noop"] is True and noop["changed"] == []
+        and not os.path.exists(os.path.join(repo, ".delegate", "lanes.json")),
+        repr(noop["values"]),
+    )
+    msg = check_catalog_error(
+        catalog.edit_catalog,
+        "set",
+        field="lanes.no-such@codex.tier",
+        value=2,
+        scope="project",
+        cwd=repo,
+        config_dir=cfg,
+        present=ALL_HARNESSES,
+        meters=EMPTY_METERS,
+    )
+    record(
+        "14.9b a project Tier on an unknown Lane is refused",
+        msg is not None and "no-such@codex" in msg
+        and "not in the global lane catalog" in msg,
+        msg,
+    )
+
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, _real = make_edit_fixture(
+        td, project_lanes={"lanes": {"sol-high@codex": {"tier": 2}}})
+    preview = catalog.edit_catalog(
+        "order",
+        lane="sol-high@codex",
+        position=1,
+        scope="project",
+        cwd=repo,
+        config_dir=cfg,
+        present=ALL_HARNESSES,
+        meters=EMPTY_METERS,
+    )
+    record(
+        "14.11 project Order works inside the Lane's project Tier",
+        preview["values"]["tier"] == 2
+        and preview["values"]["sequence"]["resulting"][0] == "sol-high@codex"
+        and set(preview["values"]["sequence"]["original"]) == {
+            "terra-high@codex", "grok46-high@grok", "sol-high@codex"}
+        and preview["target"]["file"] == os.path.join(repo, ".delegate", "routing.json"),
+        repr(preview["values"]),
+    )
+    catalog.edit_catalog(
+        "order",
+        lane="sol-high@codex",
+        position=1,
+        scope="project",
+        cwd=repo,
+        config_dir=cfg,
+        apply=True,
+        expect=preview["revision"],
+        present=ALL_HARNESSES,
+        meters=EMPTY_METERS,
+    )
+    cat_ord = catalog.load_catalog(cwd=repo, config_dir=cfg)
+    record(
+        "14.11b the placed Lane leads its project Tier",
+        cat_ord["lanes"]["sol-high@codex"]["order"] == 1
+        and cat_ord["lanes"]["sol-high@codex"]["tier"] == 2
+        and cat_ord["sources"]["lanes.sol-high@codex.order"]
+        == os.path.join(repo, ".delegate", "routing.json"),
+        repr({k: v.get("order") for k, v in cat_ord["lanes"].items() if v["tier"] == 2}),
+    )
+
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, _real = make_edit_fixture(td)
+    res = subprocess.run(
+        [sys.executable, CATALOG_PY, "set", "lanes.sol-high@codex.tier", "2",
+         "--scope", "project", "--cwd", repo, "--config-dir", cfg],
+        capture_output=True, text=True,
+    )
+    record(
+        "14.10 the CLI previews a project Tier and names the project lanes file",
+        res.returncode == 0
+        and os.path.join(repo, ".delegate", "lanes.json") in res.stdout
+        and not os.path.exists(os.path.join(repo, ".delegate", "lanes.json")),
+        res.stdout + res.stderr,
     )
 
 sys.exit(1 if fails else 0)
