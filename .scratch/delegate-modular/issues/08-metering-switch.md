@@ -12,7 +12,7 @@ Add routing.meters as an explicit boolean, default true when absent, with projec
 
 ## Acceptance
 
-**Status:** landed
+**Status:** landed 2026-09-16 (`561aca4`); acceptance checks passed.
 
 - [x] Validators accept booleans and reject other types; legacy documents default on.
 - [x] Off performs no automatic probe and gives deterministic Tier/Order/name selection; on restores the existing policy.

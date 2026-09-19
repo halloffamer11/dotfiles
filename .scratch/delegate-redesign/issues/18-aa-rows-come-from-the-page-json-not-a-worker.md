@@ -44,7 +44,7 @@ release page payload holds 25 models, the model page holds them all.
 
 **Blocked by:** None — can start immediately.
 
-**Status:** landed 2026-09-11 on `bench-aa-effort-slugs`.
+**Status:** landed 2026-09-11 (`ba1a84d`) on `main`.
 
 - [x] `effort.py` (or a sibling it calls) fetches one model page, parses the flight payload, and emits rows in the accepted row schema: one row per variant per component score, with `cost_usd` = cost total per task, tokens, observed date, `provenance` naming the payload field
 - [x] The row's `model` is the release name and `effort` is the word in the variant name, so `catalog.resolve_published_model` resolves every one of the 31 variants to a lane model, and the pre-screen's unmatched line names none of them

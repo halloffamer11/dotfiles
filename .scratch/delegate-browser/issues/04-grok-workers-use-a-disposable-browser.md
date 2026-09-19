@@ -10,7 +10,7 @@ Facts and setup rules: `../research/2026-09-10-browser-routes.md`.
 
 **Blocked by:** 01 — Browser probes, proven on agy with a disposable browser.
 
-**Status:** open, ready-for-agent; root cause found and the fix proven 2026-09-12. Raised by Orin 2026-09-10.
+**Status:** ready-for-agent; root cause found and the fix proven 2026-09-12. Raised by Orin 2026-09-10.
 
 - [x] Setup on the Mac: a `playwright` server in `~/.grok/config.toml` at user scope, with `--isolated --headless --output-dir ~/.cache/playwright-mcp`. Added by Orin 2026-09-12 on the Mac and on omarchy. `grok mcp doctor` reports it healthy with 24 tools, and `grok inspect` lists it as `config`.
 - [x] Root cause, from grok's own debug log (`RUST_LOG=debug GROK_LOG_FILE=…`): under `--sandbox read-only` both servers spawn and then fail with "handshake failed: connection closed: initialize response", alongside "Error killing MCP child process group: Operation not permitted (os error 1)". Under the default `workspace` sandbox the same session has `browser_navigate` and `browser_snapshot`. The output directory is not the cause: a temp output dir, which the read-only profile permits, fails the same way.

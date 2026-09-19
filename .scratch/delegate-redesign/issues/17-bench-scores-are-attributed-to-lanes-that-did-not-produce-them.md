@@ -160,5 +160,5 @@ Tests: 12 new assertions — 10 in `tests/test_bench.py` driving `collect()` fro
 a CSV fixture over two lanes on one model at different efforts, 2 in
 `tests/test_catalog.py` over the suffix table. Suite 367, 0 failures.
 
-**Status:** landed 2026-09-10 on `bench-aa-effort-slugs`. Found the same day
+**Status:** landed 2026-09-10 (`c5e819c`) on `main`. Found the same day
 from the wizard's own tier screen.

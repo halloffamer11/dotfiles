@@ -28,6 +28,7 @@ from bench import (
     group_lanes,
     is_dominated_reason,
     lane_order,
+    model_families,
     model_group,
     propose_enabled,
     recorded_reason,
@@ -39,6 +40,7 @@ from catalog import (
     HARNESSES,
     TIER_LINE_VALUES,
     apply_tier_lines_to_doc,
+    meter_dependency_lines,
     meters_enabled,
     parse_tier_lines,
     tier_lines_summary,
@@ -312,6 +314,22 @@ class Wizard:
         ]
         active.sort(key=self._bench_order)
         return group_lanes(active, self.lanes_doc)
+
+    def _meter_coverage(self):
+        """The lanes as this session holds them, for the one-Meter warning.
+
+        Carry and Tier come from the wizard, not from the catalog on disk, so
+        the review page warns about the Tiers Orin is about to write rather
+        than the ones he started from (ticket 29).
+        """
+        return {
+            name: {
+                "enabled": self._enabled[name],
+                "tier": self._final_tier(name),
+                "meter": lane.get("meter"),
+            }
+            for name, lane in self.lanes_doc["lanes"].items()
+        }
 
     def _final_tier(self, name):
         """The tier written for a lane. A lane not carried is never asked about,
@@ -1005,8 +1023,8 @@ class Wizard:
             f"gate: {value}",
             f"A lane is skipped outright once its meter drops below {value * 100:g}% "
             "remaining, however capable it is.",
-            "For shared spend, Remaining is the lower Window fraction. "
-            "agy's combined Remaining is unknown.",
+            "For shared spend, Remaining is the lower Window fraction. On agy no "
+            "vendor joins the two Windows, so the lower one is an assumption.",
         ]
 
     def _step_marker(self):
@@ -1157,6 +1175,9 @@ class Wizard:
                       else "Metering is off. Ranking uses Tier, Order and Lane name."]
             if off:
                 legend.append(self._drift_line("Not carried, keeps its catalog tier", off))
+            # Coverage, not a verdict on the Tier: which lanes a Tier carries
+            # stays Orin's decision (ticket 29).
+            legend.extend(meter_dependency_lines(self._meter_coverage()))
             return self._frame(
                 "review", "Order each tier",
                 columns=columns, rows=rows,

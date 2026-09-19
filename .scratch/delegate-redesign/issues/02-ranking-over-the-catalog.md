@@ -15,7 +15,7 @@ A meter whose probe returns unknown sorts last and never blocks. The cheapest al
 
 **Blocked by:** 01 Lane catalog and validators.
 
-**Status:** landed 2026-09-09, committed on `bench-aa-effort-slugs`. All boxes ticked.
+**Status:** landed 2026-09-09 (`7c76843`) on `main`. All boxes ticked.
 
 - [x] `rank.py impl` on the sample catalog prints terra first, with sol and grok listed and each lane carrying a reason (ceiling, gate, stolen by pace, or eligible) — **amended 2026-09-10: grok first, not terra; see the decisions below**
 - [x] A lane below the class tier is listed as vetoed by ceiling, never picked

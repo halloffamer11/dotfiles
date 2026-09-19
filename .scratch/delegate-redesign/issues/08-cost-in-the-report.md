@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 Lane catalog and validators; 03 One run through an ADS relay.
 
-**Status:** landed 2026-09-09, committed on `bench-aa-effort-slugs`. All boxes ticked.
+**Status:** landed 2026-09-09 (`7c76843`) on `main`. All boxes ticked.
 
 - [x] A Grok run with reported usage shows an input, output, and total dollar figure that matches the catalog price by hand
 - [x] A Codex run shows unmeasured, not zero

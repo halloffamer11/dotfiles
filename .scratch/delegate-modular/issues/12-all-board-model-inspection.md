@@ -12,7 +12,7 @@ Add read-only model inspection beside collect and share evidence records with HT
 
 ## Acceptance
 
-**Status:** landed
+**Status:** landed 2026-09-16 (`9c15e0c`); acceptance checks passed.
 
 - [x] Fixtures cover exact effort, absent data, conflicting identities and benchmark version separation.
 - [x] Cost labels distinguish source task sets and whole-run Terminal-Bench costs; no cross-source cost comparison or combined score.

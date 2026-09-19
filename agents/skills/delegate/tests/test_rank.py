@@ -369,7 +369,8 @@ with tempfile.TemporaryDirectory() as td:
 
     # -------------------------------------------------------------
     # 9. mechanical (1-2): tier 1 holds flash-high@agy and luna-low@codex.
-    # agy combined Remaining/Pace are unknown, so flash sorts last and cannot steal.
+    # An agy Meter carries a Remaining and a Pace, so it sorts on them like
+    # any other Meter (ticket 31).
     m9a = [
         meter("codex", weekly=1.00, five_h=1.00, pace=1.00, status="ok"),
         meter("agy-gemini", weekly=1.00, five_h=1.00, pace=1.00, status="ok"),
@@ -379,13 +380,14 @@ with tempfile.TemporaryDirectory() as td:
     doc9a = write_meters_doc(meters_path, m9a)
     rows9a = rank.rank("mechanical", cat, doc9a, ALL_HARNESSES)
     flash9a = next(r for r in rows9a if r["lane"] == "flash-high@agy")
+    # Neither lane has an order and both paces are 1.00, so the name breaks the tie.
     mech9a_ok = (
-        rows9a[0]["lane"] == "luna-low@codex" and rows9a[0]["pick"] is True
-        and flash9a["eligible"] is True and flash9a["pace"] is None
-        and flash9a["reason"] == "unknown meter, sorted last"
+        rows9a[0]["lane"] == "flash-high@agy" and rows9a[0]["pick"] is True
+        and flash9a["eligible"] is True and flash9a["pace"] == 1.00
+        and rows9a[0]["reason"] == "pick"
     )
 
-    # Part B: invented agy pace 3.27 cannot steal the pick
+    # Part B: a higher agy pace now takes the pick inside the tier
     m9b = [
         meter("codex", weekly=0.55, five_h=0.55, pace=0.75, status="ok"),
         meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
@@ -394,12 +396,13 @@ with tempfile.TemporaryDirectory() as td:
     ]
     doc9b = write_meters_doc(meters_path, m9b)
     rows9b = rank.rank("mechanical", cat, doc9b, ALL_HARNESSES)
+    flash9b = next(r for r in rows9b if r["lane"] == "flash-high@agy")
     mech9b_ok = (
-        rows9b[0]["lane"] == "luna-low@codex" and rows9b[0]["pick"] is True
-        and rows9b[0]["reason"] == "pick"
+        rows9b[0]["lane"] == "flash-high@agy" and rows9b[0]["pick"] is True
+        and flash9b["r"] == 0.61 and flash9b["pace"] == 3.27
     )
 
-    # Part C: luna still leads on its own known pace
+    # Part C: luna leads when its own pace is the higher one
     m9c = [
         meter("codex", weekly=0.90, five_h=0.90, pace=3.60, status="ok"),
         meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
@@ -413,7 +416,9 @@ with tempfile.TemporaryDirectory() as td:
         rows9c[0]["pick"] is True and
         rows9c[0]["reason"] == "pick"
     )
-    record("case 9 rank() mechanical agy unknown-last, no invented-pace steal", mech9a_ok and mech9b_ok and mech9c_ok)
+    record("case 9 rank() mechanical agy sorts on its own Remaining and Pace",
+           mech9a_ok and mech9b_ok and mech9c_ok,
+           repr([(r["lane"], r["pace"], r["reason"]) for r in rows9a[:3]]))
 
     res9 = subprocess.run(
         [sys.executable, RANK_PY, "mechanical", "--config-dir", cfg_dir, "--meters", meters_path, "--harnesses", ALL_HARNESSES_ARG],
@@ -478,9 +483,10 @@ with tempfile.TemporaryDirectory() as td:
     data12 = json.loads(res12.stdout)
     required_row_keys = {
         "lane", "harness", "model", "effort", "tier", "order", "meter",
-        "pace", "r", "remaining_weekly", "meter_status", "eligible", "pick", "reason"
+        "pace", "r", "remaining_weekly", "meter_status", "eligible", "veto",
+        "pick", "overflow", "reason"
     }
-    top_keys_ok = all(k in data12 for k in ("class", "floor", "ceiling", "margin", "gate", "pick", "rows"))
+    top_keys_ok = all(k in data12 for k in ("class", "floor", "ceiling", "margin", "gate", "overflow", "pick", "rows"))
     pick_matches = (data12["pick"] == data12["rows"][0]["lane"] and data12["rows"][0]["pick"] is True)
     all_keys_ok = all(set(r.keys()) == required_row_keys for r in data12["rows"])
     record("case 12 CLI --json output schema", res12.returncode == 0 and top_keys_ok and pick_matches and all_keys_ok)
@@ -738,7 +744,9 @@ with tempfile.TemporaryDirectory() as td:
         ]
     }
     previews20 = rank.tier_leaders(tier_cat, tier_meters, ALL_HARNESSES)
-    expected_leaders20 = ["luna-low@codex", "grok46-high@grok", "sol-high@codex", "fable-xhigh@claude"]
+    # Tier 1 is led by flash-high@agy: first in Order, on a Meter that now
+    # reports a Remaining and a Pace of its own (ticket 31).
+    expected_leaders20 = ["flash-high@agy", "grok46-high@grok", "sol-high@codex", "fable-xhigh@claude"]
     shape20_ok = (
         [preview["tier"] for preview in previews20] == [1, 2, 3, 4]
         and [preview["leader"] for preview in previews20] == expected_leaders20
@@ -929,7 +937,8 @@ with tempfile.TemporaryDirectory() as td:
            and "vetoed:gate" in terra_project["reason"]
            and "gate 50%" in terra_project["reason"])
 
-    # 23. agy remains eligible unknown-last; picked when measured alternatives are unavailable.
+    # 23. agy is picked when the measured alternatives are gated, and it carries
+    # its own figures onto the row.
     m23 = [
         meter("codex", weekly=0.05, five_h=0.05, pace=0.75, status="unavailable"),
         meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
@@ -939,11 +948,39 @@ with tempfile.TemporaryDirectory() as td:
     doc23 = write_meters_doc(meters_path, m23)
     rows23 = rank.rank("mechanical", cat, doc23, ALL_HARNESSES)
     flash23 = next(r for r in rows23 if r["lane"] == "flash-high@agy")
-    record("case 23 agy is picked when measured alternatives are gated; windows stay on the row",
+    record("case 23 agy is picked when measured alternatives are gated; its figures are on the row",
            rows23[0]["lane"] == "flash-high@agy" and rows23[0]["pick"] is True
-           and flash23["r"] is None and flash23["pace"] is None
+           and flash23["r"] == 0.61 and flash23["pace"] == 3.27
            and flash23["remaining_weekly"] == 0.61
-           and flash23["eligible"] is True)
+           and flash23["meter_status"] == "ok"
+           and flash23["eligible"] is True,
+           repr(flash23))
+
+    # 23b. The Gate applies to an agy Meter, and a Margin steal can go to one
+    # (ticket 31). These fixture tiers and orders are local to this test.
+    agy_cat = copy.deepcopy(cat)
+    agy_cat["lanes"]["grok46-high@grok"].update({"tier": 2, "order": 1})
+    agy_cat["lanes"]["flash-high@agy"].update({"tier": 2, "order": 2})
+    m23_gate = [
+        meter("agy-gemini", weekly=0.40, five_h=0.02, pace=1.90, status="ok"),
+        meter("grok", weekly=0.80, pace=0.90, status="ok"),
+    ]
+    rows23_gate = rank.rank("impl", agy_cat, write_meters_doc(meters_path, m23_gate), ALL_HARNESSES)
+    flash23_gate = next(r for r in rows23_gate if r["lane"] == "flash-high@agy")
+    record("case 23b an agy Lane under the Gate is vetoed gate",
+           flash23_gate["veto"] == "gate" and flash23_gate["eligible"] is False
+           and flash23_gate["reason"] == "vetoed:gate, flash-high@agy: agy-gemini meter 2% left < gate 10%",
+           flash23_gate["reason"])
+
+    m23_steal = [
+        meter("agy-gemini", weekly=0.90, five_h=0.90, pace=1.30, status="ok"),
+        meter("grok", weekly=0.80, pace=0.90, status="ok"),
+    ]
+    rows23_steal = rank.rank("impl", agy_cat, write_meters_doc(meters_path, m23_steal), ALL_HARNESSES)
+    record("case 23b an agy Lane with the Pace for it wins a Margin steal",
+           rows23_steal[0]["lane"] == "flash-high@agy" and rows23_steal[0]["pick"] is True
+           and rows23_steal[0]["reason"] == "stolen by pace: 1.3 >= 0.9 + 0.2",
+           repr([(r["lane"], r["reason"]) for r in rows23_steal[:2]]))
 
     # 24. Cache path and cached-only tiers: no vendor probe.
     record("load_cached_usage uses usage.get_cache_path",
@@ -1050,6 +1087,359 @@ with tempfile.TemporaryDirectory() as td:
         catalog.meters_enabled(cat_proj["routing"]) is False
         and terra_proj["eligible"] is True,
         terra_proj["reason"],
+    )
+
+    # -------------------------------------------------------------
+    # 26. Overflow past the Ceiling (ticket 29). A Range whose carried Lanes
+    # are every one of them under the Gate admits the next Tier instead of
+    # stopping the Class. These fixture tiers are deliberately local: no
+    # expectation here depends on the live catalog's assignments. agy sits in
+    # Tier 4 throughout, so the Ceiling keeps it out of every Range below it and
+    # overflow never reaches it.
+    over_cat = copy.deepcopy(cat)
+    over_layout = {
+        "luna-low@codex": 1,       # codex
+        "terra-high@codex": 2,     # codex
+        "grok46-high@grok": 2,     # grok
+        "sol-high@codex": 3,       # codex
+        "fable-xhigh@claude": 3,   # claude-fable
+        "flash-high@agy": 4,       # agy-gemini, healthy
+    }
+    for lane_name, lane_tier in over_layout.items():
+        over_cat["lanes"][lane_name]["tier"] = lane_tier
+        over_cat["lanes"][lane_name].pop("order", None)
+
+    # codex and grok under the Gate of 10%; claude healthy in Tier 3
+    m26 = [
+        meter("codex", weekly=0.02, five_h=0.02, pace=0.05, status="unavailable"),
+        meter("grok", weekly=0.02, pace=0.05, status="unavailable"),
+        meter("claude-fable", weekly=0.90, five_h=0.90, pace=1.10, status="ok"),
+        meter("claude-general", weekly=0.90, five_h=0.90, pace=1.10, status="ok"),
+        meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
+    ]
+    doc26 = write_meters_doc(meters_path, m26)
+
+    rows26 = rank.rank("mechanical", over_cat, doc26, ALL_HARNESSES)
+    record(
+        "case 26a a Gate-only outage admits the Tier above the Ceiling and ranks it",
+        rows26[0]["lane"] == "fable-xhigh@claude" and rows26[0]["pick"] is True
+        and rows26[0].get("overflow") == {
+            "from": 2, "to": 3, "why": "all in-Range Lanes under Gate"},
+        repr(rows26[0]),
+    )
+
+    # A Lane whose CLI is absent counts like a Lane switched off: it neither
+    # causes the outage nor blocks the answer to one. grok is healthy but its
+    # CLI is gone, codex is under the Gate, and the Range still overflows.
+    m26b = [
+        meter("codex", weekly=0.02, five_h=0.02, pace=0.05, status="unavailable"),
+        meter("grok", weekly=0.80, pace=0.90, status="ok"),
+        meter("claude-fable", weekly=0.90, five_h=0.90, pace=1.10, status="ok"),
+        meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
+    ]
+    doc26b = write_meters_doc(meters_path, m26b)
+    rows26b = rank.rank("mechanical", over_cat, doc26b, {"claude", "codex", "agy"})
+    grok26b = next(r for r in rows26b if r["lane"] == "grok46-high@grok")
+    record(
+        "case 26b a Gate and cli-absent mix still overflows; the absent CLI does not block it",
+        rows26b[0]["lane"] == "fable-xhigh@claude" and rows26b[0]["pick"] is True
+        and rows26b[0].get("overflow") == {
+            "from": 2, "to": 3, "why": "all in-Range Lanes under Gate"}
+        and grok26b["reason"] == "vetoed:cli, grok46-high@grok: grok not on PATH",
+        repr(rows26b[0]),
+    )
+
+    off_cat26 = copy.deepcopy(over_cat)
+    off_cat26["routing"]["overflow"] = False
+    rows26c = rank.rank("mechanical", off_cat26, doc26, ALL_HARNESSES)
+    record(
+        "case 26c routing.overflow false keeps today's stop",
+        catalog.overflow_enabled(off_cat26["routing"]) is False
+        and rows26c[0]["pick"] is False
+        and all(r.get("overflow") is None for r in rows26c),
+        rows26c[0]["reason"],
+    )
+
+    empty_cat26 = copy.deepcopy(over_cat)
+    for lane_name in ("luna-low@codex", "terra-high@codex", "grok46-high@grok"):
+        empty_cat26["lanes"][lane_name]["enabled"] = False
+    rows26d = rank.rank("mechanical", empty_cat26, doc26, ALL_HARNESSES)
+    record(
+        "case 26d a Range with no carried Lane stops; overflow needs a Gate outage",
+        rows26d[0]["pick"] is False and all(r.get("overflow") is None for r in rows26d),
+        rows26d[0]["reason"],
+    )
+
+    # Tier 4 is named-only. The Range 2-3 is wholly under the Gate and the one
+    # Tier 4 Lane would be eligible, and overflow still refuses to admit it.
+    m26e = [
+        meter("codex", weekly=0.02, five_h=0.02, pace=0.05, status="unavailable"),
+        meter("grok", weekly=0.02, pace=0.05, status="unavailable"),
+        meter("claude-fable", weekly=0.02, five_h=0.02, pace=0.05, status="unavailable"),
+        meter("claude-general", weekly=0.02, five_h=0.02, pace=0.05, status="unavailable"),
+        meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
+    ]
+    doc26e = write_meters_doc(meters_path, m26e)
+    rows26e = rank.rank("impl", over_cat, doc26e, ALL_HARNESSES)
+    flash26e = next(r for r in rows26e if r["lane"] == "flash-high@agy")
+    record(
+        "case 26e Tier 4 is never admitted by overflow",
+        rows26e[0]["pick"] is False
+        and all(r.get("overflow") is None for r in rows26e)
+        and flash26e["reason"].startswith("vetoed:ceiling"),
+        flash26e["reason"],
+    )
+
+    # One Tier at a time, and as many steps as it takes below Tier 4.
+    step_cat26 = copy.deepcopy(over_cat)
+    step_cat26["routing"]["classes"]["mechanical"] = {"floor": 1, "ceiling": 1}
+    rows26f = rank.rank("mechanical", step_cat26, doc26, ALL_HARNESSES)
+    record(
+        "case 26f overflow steps again when the admitted Tier is also all under the Gate",
+        rows26f[0]["lane"] == "fable-xhigh@claude"
+        and rows26f[0].get("overflow") == {
+            "from": 1, "to": 3, "why": "all in-Range Lanes under Gate"},
+        repr(rows26f[0].get("overflow")),
+    )
+
+    # With metering off there are no Gate vetoes, so overflow cannot fire.
+    meters_off26 = copy.deepcopy(over_cat)
+    meters_off26["routing"]["meters"] = False
+    rows26g = rank.rank("mechanical", meters_off26, doc26, ALL_HARNESSES)
+    record(
+        "case 26g with routing.meters off the Gate never vetoes, so overflow never fires",
+        rows26g[0]["lane"] == "luna-low@codex" and rows26g[0]["tier"] == 1
+        and all(r.get("overflow") is None for r in rows26g),
+        rows26g[0]["reason"],
+    )
+
+    cfg26_dir = os.path.join(td, "cfg26")
+    os.makedirs(cfg26_dir)
+    lanes26 = catalog.load_json(os.path.join(SAMPLES_DIR, "lanes.json"))
+    for lane_name, lane_tier in over_layout.items():
+        lanes26["lanes"][lane_name]["tier"] = lane_tier
+    catalog.write_json(os.path.join(cfg26_dir, "lanes.json"), lanes26)
+    shutil.copy(os.path.join(SAMPLES_DIR, "routing.json"), cfg26_dir)
+    meters26_path = os.path.join(td, "meters26.json")
+    write_meters_doc(meters26_path, m26)
+
+    res26 = subprocess.run(
+        [sys.executable, RANK_PY, "mechanical", "--config-dir", cfg26_dir,
+         "--meters", meters26_path, "--harnesses", ALL_HARNESSES_ARG],
+        capture_output=True,
+        text=True,
+    )
+    lines26 = res26.stdout.strip().splitlines()
+    record(
+        "case 26h the rank header says overflow fired, from which Ceiling and why",
+        res26.returncode == 0
+        and lines26[0].startswith("# mechanical")
+        and "floor=1 ceiling=2" in lines26[0]
+        and lines26[1] == "# overflow: ceiling 2 -> 3, all in-Range Lanes under Gate"
+        and "1. fable-xhigh@claude" in lines26[2],
+        res26.stdout + res26.stderr,
+    )
+
+    res26j = subprocess.run(
+        [sys.executable, RANK_PY, "mechanical", "--config-dir", cfg26_dir,
+         "--meters", meters26_path, "--harnesses", ALL_HARNESSES_ARG, "--json"],
+        capture_output=True,
+        text=True,
+    )
+    data26 = json.loads(res26j.stdout) if res26j.returncode == 0 else {}
+    record(
+        "case 26i --json carries the same overflow record beside the policy Ceiling",
+        res26j.returncode == 0
+        and data26.get("pick") == "fable-xhigh@claude"
+        and data26.get("ceiling") == 2
+        and data26.get("overflow") == {
+            "from": 2, "to": 3, "why": "all in-Range Lanes under Gate"},
+        res26j.stdout[:400] + res26j.stderr,
+    )
+
+    # Nothing under the Gate, so nothing for overflow to answer: the whole
+    # Range is simply not runnable on this machine.
+    m26healthy = [
+        meter("codex", weekly=0.80, five_h=0.80, pace=0.80, status="ok"),
+        meter("grok", weekly=0.80, pace=0.90, status="ok"),
+        meter("claude-fable", weekly=0.90, five_h=0.90, pace=1.10, status="ok"),
+        meter("claude-general", weekly=0.90, five_h=0.90, pace=1.10, status="ok"),
+        meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
+    ]
+    meters26h_path = os.path.join(td, "meters26h.json")
+    write_meters_doc(meters26h_path, m26healthy)
+    res26k = subprocess.run(
+        [sys.executable, RANK_PY, "mechanical", "--config-dir", cfg26_dir,
+         "--meters", meters26h_path, "--harnesses", "claude", "--json"],
+        capture_output=True,
+        text=True,
+    )
+    data26k = json.loads(res26k.stdout) if res26k.stdout.strip() else {}
+    record(
+        "case 26j --json says overflow is null when it did not fire",
+        res26k.returncode == 1 and data26k.get("pick") is None
+        and data26k.get("overflow") is None,
+        res26k.stdout[:400] + res26k.stderr,
+    )
+
+    # A Lane switched off is not in the Range either, so a healthy Meter behind
+    # a disabled Lane neither saves the Range nor blocks the overflow.
+    disabled26 = copy.deepcopy(over_cat)
+    disabled26["lanes"]["grok46-high@grok"]["enabled"] = False
+    rows26k = rank.rank("mechanical", disabled26, doc26b, ALL_HARNESSES)
+    grok26k = next(r for r in rows26k if r["lane"] == "grok46-high@grok")
+    record(
+        "case 26k a disabled Lane on a healthy Meter does not block the overflow",
+        rows26k[0]["lane"] == "fable-xhigh@claude"
+        and rows26k[0].get("overflow") == {
+            "from": 2, "to": 3, "why": "all in-Range Lanes under Gate"}
+        and grok26k["veto"] == "disabled",
+        repr(rows26k[0].get("overflow")),
+    )
+
+    # Every carried in-Range Lane cli-absent and none of them gated: there is
+    # no Gate outage to answer, so the Class stops.
+    doc26healthy = write_meters_doc(meters_path, m26healthy)
+    rows26l = rank.rank("mechanical", over_cat, doc26healthy, {"claude"})
+    record(
+        "case 26l all in-Range Lanes cli-absent and none gated stops, and never overflows",
+        rows26l[0]["pick"] is False
+        and all(r.get("overflow") is None for r in rows26l)
+        and all(r["veto"] == "cli" for r in rows26l
+                if r["tier"] in (1, 2) and r["veto"] != "disabled"),
+        rows26l[0]["reason"],
+    )
+
+    # Overflow reaches up, never down: a healthy Lane below the Floor stays
+    # vetoed:floor while the Tier above the Ceiling takes the job.
+    floor26 = copy.deepcopy(over_cat)
+    floor26["lanes"]["flash-high@agy"]["tier"] = 1   # healthy Meter, so eligible
+    floor26["routing"]["classes"]["impl"] = {"floor": 2, "ceiling": 2}
+    rows26m = rank.rank("impl", floor26, doc26, ALL_HARNESSES)
+    flash26m = next(r for r in rows26m if r["lane"] == "flash-high@agy")
+    record(
+        "case 26m overflow never reaches below the Floor for a healthy Lane",
+        rows26m[0]["lane"] == "fable-xhigh@claude"
+        and rows26m[0].get("overflow") == {
+            "from": 2, "to": 3, "why": "all in-Range Lanes under Gate"}
+        and flash26m["veto"] == "floor" and flash26m["pick"] is False,
+        flash26m["reason"],
+    )
+
+    # The admitted Tier is ranked by the ordinary rule, Margin steal included.
+    steal26 = copy.deepcopy(over_cat)
+    steal26["lanes"]["grok46-high@grok"]["tier"] = 3
+    steal26["lanes"]["grok46-high@grok"]["order"] = 1
+    steal26["lanes"]["fable-xhigh@claude"]["order"] = 2
+    m26steal = [
+        meter("codex", weekly=0.02, five_h=0.02, pace=0.05, status="unavailable"),
+        meter("grok", weekly=0.80, pace=0.90, status="ok"),
+        meter("claude-fable", weekly=0.90, five_h=0.90, pace=1.30, status="ok"),
+        meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
+    ]
+    doc26steal = write_meters_doc(meters_path, m26steal)
+    rows26n = rank.rank("mechanical", steal26, doc26steal, ALL_HARNESSES)
+    record(
+        "case 26n a Margin steal happens inside the admitted Tier",
+        rows26n[0]["lane"] == "fable-xhigh@claude"
+        and rows26n[0]["reason"].startswith("stolen by pace")
+        and rows26n[0].get("overflow") == {
+            "from": 2, "to": 3, "why": "all in-Range Lanes under Gate"}
+        and rows26n[1]["lane"] == "grok46-high@grok",
+        rows26n[0]["reason"],
+    )
+
+    # Metering off removes the Gate, so a stop there is never an overflow.
+    off_meters26 = copy.deepcopy(over_cat)
+    off_meters26["routing"]["meters"] = False
+    rows26o = rank.rank("mechanical", off_meters26, doc26, {"claude"})
+    record(
+        "case 26o with meters off a stop stays a stop and never overflows",
+        rows26o[0]["pick"] is False
+        and all(r.get("overflow") is None for r in rows26o)
+        and all(r["veto"] != "gate" for r in rows26o),
+        rows26o[0]["reason"],
+    )
+
+    # -------------------------------------------------------------
+    # 27. A project may set a Lane's Tier (ticket 32). Every Tier here is the
+    # sample catalog's, local to this test: no expectation reads a live
+    # assignment. sol-high@codex is Tier 3 globally and Tier 2 in the project.
+    m27 = [
+        meter("codex", weekly=0.80, five_h=0.80, pace=0.80, status="ok"),
+        meter("grok", weekly=0.80, pace=0.70, status="ok"),
+        meter("claude-fable", weekly=0.80, five_h=0.80, pace=0.70, status="ok"),
+        meter("agy-gemini", weekly=0.80, five_h=0.80, pace=0.70, status="ok"),
+    ]
+    doc27 = write_meters_doc(meters_path, m27)
+
+    proj27 = os.path.join(td, "repo-tier")
+    os.makedirs(os.path.join(proj27, ".delegate"))
+    open(os.path.join(proj27, ".git"), "w").close()
+    catalog.write_json(os.path.join(proj27, ".delegate", "lanes.json"),
+                       {"lanes": {"sol-high@codex": {"tier": 2}}})
+
+    cat27 = catalog.load_catalog(cwd=proj27, config_dir=cfg_dir)
+    rows27_mech = rank.rank("mechanical", cat27, doc27, ALL_HARNESSES)   # Range 1-2
+    rows27_rev = rank.rank("review", cat27, doc27, ALL_HARNESSES)        # Range 3-3
+    sol27_mech = next(r for r in rows27_mech if r["lane"] == "sol-high@codex")
+    sol27_rev = next(r for r in rows27_rev if r["lane"] == "sol-high@codex")
+    record(
+        "case 27 a project Tier makes the Lane eligible in Range 1-2 and not in Range 3-3",
+        sol27_mech["tier"] == 2 and sol27_mech["eligible"] is True
+        and sol27_rev["tier"] == 2 and sol27_rev["eligible"] is False
+        and sol27_rev["veto"] == "floor",
+        f"{sol27_mech['reason']} | {sol27_rev['reason']}",
+    )
+
+    cat27_global = catalog.load_catalog(cwd=td, config_dir=cfg_dir)
+    rows27_global = rank.rank("review", cat27_global, doc27, ALL_HARNESSES)
+    sol27_global = next(r for r in rows27_global if r["lane"] == "sol-high@codex")
+    record(
+        "case 27b the same catalog with no project file ranks as before",
+        sol27_global["tier"] == 3 and sol27_global["eligible"] is True
+        and [r["lane"] for r in rows27_global] == [
+            r["lane"] for r in rank.rank("review", cat, doc27, ALL_HARNESSES)],
+        repr(sol27_global["reason"]),
+    )
+
+    # A moved Lane has no place in its new Tier, so it sorts after the Lanes
+    # that have one; project_order gives it one.
+    order27 = copy.deepcopy(cat27)
+    order27["lanes"]["terra-high@codex"]["order"] = 1
+    order27["lanes"]["grok46-high@grok"]["order"] = 2
+    rows27_place = rank.rank_range(order27, doc27, ALL_HARNESSES, floor=2, ceiling=2)
+    record(
+        "case 27c a moved Lane with no place sorts after the placed Lanes",
+        [r["lane"] for r in rows27_place if r["eligible"]] == [
+            "terra-high@codex", "grok46-high@grok", "sol-high@codex"],
+        repr([(r["lane"], r["order"]) for r in rows27_place]),
+    )
+
+    catalog.write_json(os.path.join(proj27, ".delegate", "routing.json"),
+                       {"project_order": ["sol-high@codex", "terra-high@codex",
+                                          "grok46-high@grok"]})
+    cat27_ordered = catalog.load_catalog(cwd=proj27, config_dir=cfg_dir)
+    rows27_ordered = rank.rank_range(cat27_ordered, doc27, ALL_HARNESSES, floor=2, ceiling=2)
+    record(
+        "case 27d project_order places a Lane inside its project Tier",
+        cat27_ordered["lanes"]["sol-high@codex"]["order"] == 1
+        and [r["lane"] for r in rows27_ordered if r["eligible"]][0] == "sol-high@codex",
+        repr([(r["lane"], r["order"]) for r in rows27_ordered]),
+    )
+
+    res27 = subprocess.run(
+        [sys.executable, RANK_PY, "mechanical", "--cwd", proj27, "--config-dir", cfg_dir,
+         "--meters", meters_path, "--harnesses", ALL_HARNESSES_ARG],
+        capture_output=True,
+        text=True,
+    )
+    record(
+        "case 27e the rank header says which Lanes run on a project Tier",
+        res27.returncode == 0
+        and any("project tier" in line.lower() and "sol-high@codex" in line
+                and "3 -> 2" in line for line in res27.stdout.splitlines()),
+        res27.stdout[:600] + res27.stderr,
     )
 
 sys.exit(1 if fails else 0)

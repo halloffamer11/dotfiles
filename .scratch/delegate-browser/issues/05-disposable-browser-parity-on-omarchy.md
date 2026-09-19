@@ -8,7 +8,7 @@ Facts and setup rules: `../research/2026-09-10-browser-routes.md`.
 
 **Blocked by:** 02, 03 and 04.
 
-**Status:** open, ready-for-agent, raised by Orin 2026-09-10
+**Status:** ready-for-agent, raised by Orin 2026-09-10
 
 - [ ] omarchy runs the same delegate code as the Mac: its dotfiles checkout carries 01–04, and the relay check passes there.
 - [ ] Setup, in conversation with Orin: a browser that Playwright can drive (its own Chromium or a system one, the choice recorded here), a `playwright` server in all four harness configs following the setup rules, and the agy tool grants.

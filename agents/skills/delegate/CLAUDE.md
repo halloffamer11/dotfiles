@@ -3,9 +3,16 @@
 External worker routing lives in this directory. Read `SKILL.md` first, then use these files as the implementation authority:
 
 Project routing changes go through `catalog.load_catalog()`: a flat `project_order`
-projects carried lanes within their global Tiers and preserves Order provenance.
+projects carried lanes within their effective Tiers and preserves Order provenance.
 Validate complete save proposals with `catalog.validate_project_routing()` against
-the original global documents, not projected lane records. For exact-Tier previews,
+the original global documents, not projected lane records. A project may also set a
+Lane's Tier in `<git-root>/.delegate/lanes.json`, that field and nothing else
+(`catalog.validate_project_lanes()`, ticket 32). `_effective_lanes()` applies it
+before the Order projection, so every Tier reader sees the effective Tier and a moved
+Lane loses its global place in the Tier it left; `catalog.project_tier_changes()`
+names the Lanes in effect for `show` and the rank header, and `edit_catalog(op="set",
+field="lanes.<lane>.tier", scope="project")` writes that one file, with the same
+preview, `--expect` revision and apply sequence as `project_order`. For exact-Tier previews,
 use `rank.tier_leaders()`; it and the Class-facing `rank()` share `rank_range()`.
 `usage.load_cached()` / `rank.load_cached_usage()` read observations without a vendor
 probe or meter event. `usage.acquire()` is the refresh path. `usage.observations()`
@@ -13,13 +20,18 @@ owns cache validity (`rank.meter_observations()` re-exports it): valid envelope 
 legacy map formats keep their behavior; any malformed observation makes the whole
 document unknown. Envelope observations require a finite timestamp; raw Window/reset fields are
 validated before display. `usage.eligible(observation, gate)` is the Gate predicate
-(unknown Remaining never vetoes; Remaining equal to Gate is eligible). agy window
-values stay visible; combined Remaining and Pace are unknown. This intentionally
+(unknown Remaining never vetoes; Remaining equal to Gate is eligible). Every Meter
+derives its combined figures through one arithmetic, `usage.combined()`: Remaining is
+the lower Window fraction and Pace comes from the weekly Window. agy runs through it
+like the Claude Meters, and its note says the combined figure is the lower Window, an
+assumption, not a vendor bound (ticket 31, reversing modular ticket 13). A cache
+written under that older rule holds the Windows beside a null Remaining and Pace, so a
+read derives them (`usage._filled`) rather than probing again. This intentionally
 replaces partial use of invalid documents. The throwaway Herdr dashboard that drove these changes lives on branch
 `worktree/delegate-monitor-herdr` under `tools/delegate-dashboard/`, not on `main`.
 
-- `scripts/catalog.py`: the two configuration files (`~/.config/delegate/lanes.json`, `routing.json`, project override `.delegate/routing.json`), validators, `show`/`check`/`fmt` and revision-checked `set`/`range`/`order`. `edit_catalog()` previews cached Picks and resolved source paths, validates complete proposals, preserves stow symlinks, and rechecks source revisions before writing one document. It also owns the mapping from a benchmark source's printed model name to a lane model (`resolve_published_model`, the lane field `published_as`; a row's `effort` picks the member of an agy slug family); `bench.py` and the setup pre-screen both read it from here. `HARNESS_EFFORTS` is the effort each harness offers, with the command or page that proved each list; `check` and `delegate.py --effort` refuse anything outside it (ticket 19). `assets/samples/`: the starting catalog from the spec.
-- `scripts/rank.py`: the selection rule over the catalog and the live meters (class floor and ceiling, gate; sort by tier, then the lane's `order` inside its tier, then pace, then lane name; pace margin). A catalog with no `order` ranks as before ticket 28. Optional `routing.meters` defaults on; off bypasses Gate/Margin and Pace, leaving Tier/Order/name selection. Automatic acquisition callers honor the effective project override; explicit limits refresh still works.
+- `scripts/catalog.py`: the two configuration files (`~/.config/delegate/lanes.json`, `routing.json`, project overrides `.delegate/routing.json` and `.delegate/lanes.json`), validators, `show`/`check`/`fmt` and revision-checked `set`/`range`/`order`. `edit_catalog()` previews cached Picks and resolved source paths, validates complete proposals, preserves stow symlinks, and rechecks source revisions before writing one document. It also owns the mapping from a benchmark source's printed model name to a lane model (`resolve_published_model`, the lane field `published_as`; a row's `effort` picks the member of an agy slug family); `bench.py` and the setup pre-screen both read it from here. `HARNESS_EFFORTS` is the effort each harness offers, with the command or page that proved each list; `check` and `delegate.py --effort` refuse anything outside it (ticket 19). `single_meter_tiers`/`meter_dependency_lines` name each Tier whose carried Lanes all drain one Meter; `check` prints them to stderr as warnings and the wizard's review page as legend lines, neither failing nor judging the Tier (ticket 29). `assets/samples/`: the starting catalog from the spec.
+- `scripts/rank.py`: the selection rule over the catalog and the live meters (class floor and ceiling, gate; sort by tier, then the lane's `order` inside its tier, then pace, then lane name; pace margin). A catalog with no `order` ranks as before ticket 28. Optional `routing.meters` defaults on; off bypasses Gate/Margin and Pace, leaving Tier/Order/name selection. Optional `routing.overflow` defaults on: when at least one carried Lane in a Class Range is under the Gate and every veto there is `gate` or `cli`, `rank()` admits the Tier above the Ceiling and ranks it by the same rule, one Tier at a time and never Tier 4 (`gate_only_stop`, `OVERFLOW_TOP_TIER`; ticket 29). A cli-absent Lane counts like a disabled one — the catalog is shared across machines and this one cannot run that Lane — so it neither causes the outage nor blocks the answer to one; the veto precedence in `rank_range` records a Lane failing both Gate and CLI as `gate`, and either reading decides the same. The Pick carries the `overflow` record, the header prints it as a second line, and every other veto kind, plus a Range with no gated Lane in it, keeps the stop. Automatic acquisition callers honor the effective project override; explicit limits refresh still works.
 - `scripts/delegate.py`: one run through a pinned ADS relay (`dispatch`), and rank-then-dispatch (`run`); native lanes (harness = `ORCHESTRATOR`) print a spawn line instead of starting a relay. Run directories under `~/.cache/delegate/runs/`, never reused.
 - `scripts/ads.sh`: installs and checks the relay layer, **halloffamer11/delegate-skills** (our fork of amElnagdy) at commit `1ff8bd6129b78124bd0e6e99fb6e4144b2ca4fe5` (branch `integration/read-only-fixes`), in `~/.local/share/delegate/ads`. `ads.sh install` is reproducible from that constant. The fork exists to carry the grok and agy read-only fixes (ticket 14; upstream PRs #119 and #120).
 - `scripts/usage.py`: cached subscription-meter probes. `scripts/events.py`: the monitor ledger encoder (schema unchanged).
@@ -36,7 +48,7 @@ down one Tier; Tier 1 requires Carry to switch off.
 
 - `scripts/discover.py`: what each present harness offers — models, their lane or `none`, their efforts, and `--efforts <model>` for ready-to-paste lane stanzas per effort. Efforts come from `codex debug models`, `claude --help`, the agy slug suffix (one model per slug family) and the grok row of `catalog.HARNESS_EFFORTS`; a Haiku model gets none. It is the only thing that may say an effort exists.
 - `scripts/effort.py`: `pack`/`extract`/`check` over a benchmark page, and `aa`, which reads Artificial Analysis rows straight out of the dataset every `/models/<slug>` page embeds, with no worker. `check` is the trust boundary: it rejects any number that is not on the page, and no worker or parser may originate a number or an identifier.
-- The carry page's domination rule is `bench.dominating_effort`: another effort of the same model, for no more money, beats the lane on more than half of the benchmarks one source scored both on. Rows flagged `composite` (the AA Intelligence Index) are shown, never counted. `setup_tui` re-exports the policy helpers.
+- The carry page's domination rule is `bench.dominating_effort`: another effort of the same model, for no more money, beats the lane on more than half of the benchmarks one source scored both on. Rows flagged `composite` (the AA Intelligence Index) are shown, never counted. "The same model" is a family key, not the model string (ticket 30): `bench.model_families(lanes_doc)` keys every harness but agy on the model itself, and an agy lane on its slug with the trailing effort removed, because agy names each effort as its own model. The harness decides, never the spelling. That family rule has one implementation, `catalog.agy_family`, which discovery groups a harness listing with (`discover.group_agy_models`). `dominating_effort`, `dominating_row` and `_first_domination` take the map; without one every model is its own family. `setup_tui` re-exports the policy helpers.
 - `scripts/browser_probes.py`: browser capability probe runner across harnesses (`--only`, `--probe`, `--dry-run`).
 - `assets/preamble.md`: brief preamble prepended to worker prompts.
 - `assets/probes/`: capability probe briefs for disposable browser (`disposable.md`) and agent profile (`agent-profile.md`).
