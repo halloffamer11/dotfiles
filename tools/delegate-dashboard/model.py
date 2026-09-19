@@ -167,6 +167,9 @@ class DashboardModel:
         self.project_policy_path = self.project_root / ".delegate" / "routing.json"
         # Ticket 32's project Lanes document; `move_lane_tier` is its only writer.
         self.project_lanes_path = self.project_root / ".delegate" / "lanes.json"
+        clash = self._clashing_project_target()
+        if clash is not None:
+            raise DashboardError(clash)
         self.present = (
             frozenset(present)
             if present is not None
@@ -181,9 +184,34 @@ class DashboardModel:
         self._global_routing_doc: dict[str, Any] = {}
         self.refresh()
 
+    def _global_target_of(self, path: Path) -> str | None:
+        """Name the global document `path` resolves to, if it resolves to one."""
+        return {
+            self.global_lanes_path.resolve(strict=False): "the global lane catalog",
+            self.global_routing_path.resolve(strict=False): "the global routing policy",
+        }.get(path.resolve(strict=False))
+
+    def _clashing_project_target(self) -> str | None:
+        """Refuse a project whose Lanes document is a global document.
+
+        Ticket 32 gave the project a second document, ``.delegate/lanes.json``,
+        and ``load_catalog`` reads it as a lane customization.  A link, or a
+        ``--config-dir`` pinned at the project's own ``.delegate``, makes that
+        file the global catalog, which the catalog then rejects for carrying a
+        version.  There is no view to open and no save to refuse, so this one is
+        answered at construction, in the dashboard's own words.  A project
+        routing path that resolves to a global file still opens and is refused
+        at each save, which is where that rule has always lived.
+        """
+        hit = self._global_target_of(self.project_lanes_path)
+        if hit is not None:
+            return f"{self.project_lanes_path}: the project Lanes path resolves to {hit}"
+        return None
+
     def _signatures(self) -> tuple[tuple[str, str], ...]:
         return (
             _file_signature(self.project_policy_path),
+            _file_signature(self.project_lanes_path),
             _file_signature(self.meters_path),
             _file_signature(self.global_lanes_path),
             _file_signature(self.global_routing_path),
@@ -298,6 +326,8 @@ class DashboardModel:
         meters, meter_status, meter_detail, meter_signature = self._load_meters()
         previews = rank.tier_leaders(effective, meters, self.present)
         sources = effective["sources"]
+        # Ticket 32: the Lanes whose Tier this project moved, and where from.
+        project_tiers = dict(effective.get("project_tiers") or {})
         tiers = []
         for preview in previews:
             carried = [
@@ -319,6 +349,7 @@ class DashboardModel:
                     "reason": row["reason"],
                     "order": row["order"],
                     "order_source": sources.get(f"lanes.{row['lane']}.order"),
+                    "tier_source": "project" if row["lane"] in project_tiers else "global",
                 }
                 for row in carried
             ]
@@ -340,6 +371,7 @@ class DashboardModel:
                 "name": self.project_root.name,
                 "root": str(self.project_root),
                 "policy": str(self.project_policy_path),
+                "lanes": str(self.project_lanes_path),
             },
             "policy": {
                 "gate": {
@@ -367,6 +399,7 @@ class DashboardModel:
                 "probed_at": meters.get("probed_at") if "lanes" in meters else None,
             },
             "tiers": tiers,
+            "project_tiers": project_tiers,
             "revision": self._revision,
             "error": None,
             "save": {"status": "idle", "detail": None},
@@ -732,6 +765,29 @@ class DashboardModel:
             position=destination + 1,
         )
 
+    def _unsafe_lanes_target(self) -> str | None:
+        """The Tier write's own version of ``_unsafe_policy_target``.
+
+        The project Lanes document is a second file in the same directory, so it
+        gets the same three refusals: the file is a link, the directory is a
+        link, or the path resolves onto a global document.
+        """
+        if self.project_lanes_path.is_symlink():
+            return "project lanes path is a symlink; refusing to replace it"
+        if self.project_lanes_path.parent.resolve() != self.project_lanes_path.parent:
+            return "project policy directory is a symlink; refusing to write outside the pinned path"
+        hit = self._global_target_of(self.project_lanes_path)
+        if hit is not None:
+            return f"project lanes path resolves to {hit}"
+        return None
+
+    def _tier_of(self, lane_name: str) -> int | None:
+        """The Tier a carried Lane currently sits in, project override included."""
+        for tier in self.state.get("tiers", []):
+            if any(row["lane"] == lane_name for row in tier["rows"]):
+                return tier["tier"]
+        return None
+
     def _target_is_project_lanes(self, target: Any) -> bool:
         """True when a catalog target resolves to the project's Lanes document."""
         if not isinstance(target, dict):
@@ -747,22 +803,19 @@ class DashboardModel:
     def move_lane_tier(self, lane_name: str, direction: int) -> bool:
         """Move one carried Lane one Tier down or up, for this project only.
 
-        Written against ticket 32: a project may set a Lane's Tier in
+        Ticket 32: a project sets a Lane's Tier in
         ``<git-root>/.delegate/lanes.json`` and ``catalog.edit_catalog`` takes it
         as ``set lanes.<lane>.tier`` at ``scope='project'``, on the same
-        preview/``expect``/apply contract ``move_lane`` uses for Order.  Until
-        that backend is installed the preview raises and nothing is written; the
-        caller shows :data:`PROJECT_TIER_MISSING` and the catalog is untouched.
+        preview/``expect``/apply contract ``move_lane`` uses for Order.  Setting
+        a Lane back to its global Tier removes the entry; the catalog does that,
+        not this method.  An installation without that backend raises at the
+        preview and the caller shows :data:`PROJECT_TIER_MISSING`.
         """
         if type(direction) is not int or direction not in (-1, 1):
             self._set_save_state("error", "Not saved: a Tier move is one Tier left or right.")
             return False
 
-        current = None
-        for tier in self.state.get("tiers", []):
-            if any(row["lane"] == lane_name for row in tier["rows"]):
-                current = tier["tier"]
-                break
+        current = self._tier_of(lane_name)
         if current is None:
             self._set_save_state("error", f"Not saved: lane '{lane_name}' is not carried.")
             return False
@@ -777,15 +830,9 @@ class DashboardModel:
             )
             return False
 
-        unsafe = self._unsafe_policy_target()
+        unsafe = self._unsafe_lanes_target()
         if unsafe is not None:
             self._set_save_state("error", f"Not saved: {unsafe}")
-            return False
-        if self.project_lanes_path.is_symlink():
-            self._set_save_state(
-                "error",
-                "Not saved: project lanes path is a symlink; refusing to replace it",
-            )
             return False
 
         kwargs = self._catalog_edit_kwargs()

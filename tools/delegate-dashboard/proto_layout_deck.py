@@ -74,6 +74,7 @@ _NERD_GLYPHS = {
     "carried": "",
     "order_p": "",
     "order_g": "",
+    "project": "",
     "folded": "",
     "open": "",
 }
@@ -85,6 +86,7 @@ _PLAIN_GLYPHS = {
     "carried": "·",
     "order_p": "p",
     "order_g": "g",
+    "project": "P",
     "folded": "▸",
     "open": "▾",
 }
@@ -139,6 +141,11 @@ TERMS = (
                "when it sorts after the Pick."),
     ("Meter", "One subscription quota. Each Lane uses exactly one, and many Lanes "
               "can share one."),
+    ("Project Tier", "A Tier this project set for itself, in its own "
+                     ".delegate/lanes.json. Every other project still sees the "
+                     "Lane in the Tier the machine gives it. The mark in the T "
+                     "column, and beside the Lane in the Harness table, says which "
+                     "rows those are."),
 )
 
 # The three bodies, in the order Tab walks them.
@@ -166,6 +173,7 @@ PLAN = (
     ("rail", 1, "<"),
     ("icon", 1, "<"),
     ("ord", 3, ">"),
+    ("tsrc", 1, "<"),
     ("model", 14, "<"),
     ("sep1", 1, "<"),
     ("effort", 3, "<"),
@@ -173,12 +181,13 @@ PLAN = (
     ("harness", 7, "<"),
     ("meter", 14, "<"),
     ("rem", 4, ">"),
-    ("bar", 26, "<"),
+    ("bar", 24, "<"),
     ("pace", 6, ">"),
     ("code", 7, "<"),
 )
 LABELS = {
     "ord": "Ord",
+    "tsrc": "T",
     "model": "Model",
     "sep1": RULE,
     "sep2": RULE,
@@ -190,7 +199,8 @@ LABELS = {
     "pace": "Pace",
     "code": "Reason",
 }
-# Dropped in this order as the pane narrows; rail, icon and model never go.
+# Dropped in this order as the pane narrows; rail, icon, the project Tier mark
+# and model never go: the mark says the Tier is not the one the machine sets.
 DROPS = (
     ("code",),
     ("pace",),
@@ -202,7 +212,7 @@ DROPS = (
     ("ord",),
 )
 # Given back in this order, the bar first, when a drop leaves the deck short.
-GROWS = (("bar", 26), ("model", 8), ("meter", 6))
+GROWS = (("bar", 24), ("model", 8), ("meter", 6))
 
 VENDORS = frozenset({"gpt", "claude", "gemini", "grok", "openai", "anthropic", "google", "xai"})
 _EFFORT_WORDS = frozenset(EFFORT) | {"latest", "preview"}
@@ -422,6 +432,18 @@ def order_mark(row: dict[str, Any], state: dict[str, Any]) -> str:
         return " "
     project = (state.get("project") or {}).get("policy")
     return glyph("order_p") if source == project else glyph("order_g")
+
+
+def project_tier(row: dict[str, Any]) -> bool:
+    """True when this project, not the machine, put the Lane in this Tier."""
+    return row.get("tier_source") == "project"
+
+
+def tier_mark(row: dict[str, Any]) -> tuple[str, str]:
+    """The quiet mark, and its colour, for a Tier this project set."""
+    if not project_tier(row):
+        return " ", PAL["mute"]
+    return glyph("project"), PAL["watch"]
 
 
 def leader_label(state: dict[str, Any], lane: Any) -> str:
@@ -656,6 +678,7 @@ def lane_segments(row, group, state, columns, *, selected):
         "rail": (RAIL, RAILS.get(group.get("tier"), PAL["mute"]), False),
         "icon": (icon, icon_color, is_pick),
         "ord": (f"{EMDASH if order is None else order}{order_mark(row, state)}", PAL["mute"], False),
+        "tsrc": tier_mark(row) + (False,),
         "model": (display_model(row), name_color, selected or is_pick),
         "sep1": (RULE, PAL["mute"], False),
         "effort": (effort_letter(row), name_color, False),
@@ -726,10 +749,15 @@ def table_entry(row, size, *, selected):
     icon, icon_color = status_icon(row)
     band = PAL["selbg"] if selected else None
     text = f"{display_model(row)} {effort_letter(row)}"
+    # The cell keeps its width: the project Tier mark takes a cell of its own
+    # between the icon and the name, so a Lane this project moved reads at a
+    # glance and the names still start on the same column in every cell.
+    mark, mark_color = tier_mark(row)
     return [
         (icon, PAL["gold"] if selected else icon_color, code == "PICK", band),
+        (mark, mark_color, False, band),
         (" ", PAL["mute"], False, band),
-        (pad(text, max(0, size - 2)), PAL["gold"] if selected else color,
+        (pad(text, max(0, size - 3)), PAL["gold"] if selected else color,
          selected or code == "PICK", band),
     ]
 
@@ -992,7 +1020,7 @@ def foot_lines(width):
         [(HAIRLINE * min(max(0, int(width)), MEASURE), PAL["mute"], False)]
     ]
     for term, text in TERMS:
-        for label, body in wrapped(term, text, term_width=11, measure=measure):
+        for label, body in wrapped(term, text, term_width=14, measure=measure):
             out.append([(label, PAL["fg"], bool(label.strip())), (body, PAL["mute"], False)])
     out.append([])
     for code, role, text in CODES:
@@ -1076,6 +1104,13 @@ def help_lines(width):
                  "and", PAL["mute"], False)])
     out.append([(pad("", 7), PAL["mute"], False),
                 ("Tier 4 nothing to its right.", PAL["mute"], False)])
+    out.append([])
+    out.append([(f"  {glyph('project')}  ", PAL["watch"], False),
+                ("in the T column, or beside a Lane in the table, marks a Tier this "
+                 "project set", PAL["mute"], False)])
+    out.append([(pad("", 5), PAL["mute"], False),
+                ("for itself. Every other project sees the machine's Tier.",
+                 PAL["mute"], False)])
     return out
 
 

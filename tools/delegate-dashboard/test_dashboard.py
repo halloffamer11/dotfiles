@@ -14,7 +14,7 @@ HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
-from model import DashboardModel, INTERVENING_EDIT_MARK, METERS_OFF_EFFECT
+from model import DashboardError, DashboardModel, INTERVENING_EDIT_MARK, METERS_OFF_EFFECT
 from dashboard import PercentageEditor, pop_key
 
 import catalog
@@ -145,7 +145,7 @@ class DashboardModelTest(unittest.TestCase):
         row = state["tiers"][1]["rows"][0]
         self.assertEqual(
             set(row),
-            {"lane", "model", "effort", "harness", "meter", "remaining", "pace", "eligible", "reason", "order", "order_source"},
+            {"lane", "model", "effort", "harness", "meter", "remaining", "pace", "eligible", "reason", "order", "order_source", "tier_source"},
         )
         self.assertEqual(state["usage"]["label"], "Global subscription usage")
 
@@ -417,7 +417,8 @@ class DashboardModelTest(unittest.TestCase):
             "routing": str((self.config / "routing.json").resolve()),
             "project": str(project_policy.resolve()),
         }
-        _dest, _lanes, _routing, planned, values = catalog._plan_order(
+        # Ticket 32 gave every planner a project-lanes slot before `values`.
+        _dest, _lanes, _routing, planned, _project_lanes, values = catalog._plan_order(
             lane,
             position,
             "project",
@@ -972,30 +973,75 @@ class DashboardModelTest(unittest.TestCase):
         self.assertEqual(project_policy.read_bytes(), before)
         self.assertEqual(dashboard.state["save"]["status"], "conflict")
 
-    def test_project_path_resolving_to_global_file_is_refused_on_both_save_paths(self):
+    def test_project_path_resolving_to_a_global_file_is_refused(self):
+        """A project document that is a global document opens no pane at all.
+
+        Before ticket 32 the project had one document and the pane opened, then
+        refused each save. It has two now, and pinning the config at the
+        project's own `.delegate` makes both of them global files, so the pane
+        cannot even read a catalog. Refusing at construction is the same rule
+        held one step earlier, and it covers `lanes.json` as well.
+        """
         config = self.root / ".delegate"
         config.mkdir(parents=True)
         write_json(config / "lanes.json", json.loads((self.config / "lanes.json").read_text()))
         write_json(config / "routing.json", json.loads((self.config / "routing.json").read_text()))
-        dashboard = DashboardModel(
-            cwd=self.nested,
-            config_dir=config,
-            meters_path=self.meters,
-            present={"codex", "claude", "grok"},
+        before = {
+            name: (config / name).read_bytes() for name in ("lanes.json", "routing.json")
+        }
+        with self.assertRaises(DashboardError) as caught:
+            DashboardModel(
+                cwd=self.nested,
+                config_dir=config,
+                meters_path=self.meters,
+                present={"codex", "claude", "grok"},
+            )
+        self.assertIn("resolves to", str(caught.exception))
+        for name, raw in before.items():
+            self.assertEqual((config / name).read_bytes(), raw)
+
+    def test_project_lanes_resolving_to_the_global_catalog_is_refused(self):
+        """The same refusal reached through a link on `.delegate/lanes.json`."""
+        project_delegate = self.root / ".delegate"
+        project_delegate.mkdir(parents=True)
+        (project_delegate / "lanes.json").symlink_to(self.config / "lanes.json")
+        before = (self.config / "lanes.json").read_bytes()
+        with self.assertRaises(DashboardError) as caught:
+            self.make_model()
+        self.assertIn("project Lanes", str(caught.exception))
+        self.assertIn("global lane catalog", str(caught.exception))
+        self.assertEqual((self.config / "lanes.json").read_bytes(), before)
+
+    def test_a_project_tier_is_carried_into_the_state(self):
+        """Ticket 32: a project Tier moves the Lane and the row says whose it is."""
+        dashboard = self.make_model()
+        self.assertEqual(dashboard._tier_of("sol-high@codex"), 2)
+        self.assertEqual(dashboard.state["project_tiers"], {})
+
+        write_json(
+            self.root / ".delegate" / "lanes.json",
+            {"lanes": {"sol-high@codex": {"tier": 1}}},
         )
+        self.assertTrue(dashboard.refresh_if_changed())
+        self.assertEqual(dashboard._tier_of("sol-high@codex"), 1)
         self.assertEqual(
-            dashboard.project_policy_path.resolve(),
-            dashboard.global_routing_path.resolve(),
+            dashboard.state["project_tiers"]["sol-high@codex"], {"from": 2, "to": 1}
         )
-        before = (config / "routing.json").read_bytes()
-        self.assertFalse(dashboard.move_lane("sol-high@codex", -1))
-        self.assertEqual((config / "routing.json").read_bytes(), before)
-        self.assertEqual(dashboard.state["save"]["status"], "error")
-        self.assertIn("global", dashboard.state["save"]["detail"])
-        edit = dashboard.begin_percentage_edit("gate")
-        self.assertFalse(dashboard.save_percentage_edit(edit, "25"))
-        self.assertEqual((config / "routing.json").read_bytes(), before)
-        self.assertEqual(dashboard.state["save"]["status"], "error")
+        moved = [
+            row
+            for tier in dashboard.state["tiers"]
+            for row in tier["rows"]
+            if row["lane"] == "sol-high@codex"
+        ]
+        self.assertEqual(len(moved), 1)
+        self.assertEqual(moved[0]["tier_source"], "project")
+        others = [
+            row["tier_source"]
+            for tier in dashboard.state["tiers"]
+            for row in tier["rows"]
+            if row["lane"] != "sol-high@codex"
+        ]
+        self.assertEqual(set(others), {"global"})
 
     def test_unsafe_target_after_preview_is_refused_on_both_save_paths(self):
         project_policy = self.root / ".delegate" / "routing.json"
