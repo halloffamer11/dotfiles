@@ -13,8 +13,13 @@ owns cache validity (`rank.meter_observations()` re-exports it): valid envelope 
 legacy map formats keep their behavior; any malformed observation makes the whole
 document unknown. Envelope observations require a finite timestamp; raw Window/reset fields are
 validated before display. `usage.eligible(observation, gate)` is the Gate predicate
-(unknown Remaining never vetoes; Remaining equal to Gate is eligible). agy window
-values stay visible; combined Remaining and Pace are unknown. This intentionally
+(unknown Remaining never vetoes; Remaining equal to Gate is eligible). Every Meter
+derives its combined figures through one arithmetic, `usage.combined()`: Remaining is
+the lower Window fraction and Pace comes from the weekly Window. agy runs through it
+like the Claude Meters, and its note says the combined figure is the lower Window, an
+assumption, not a vendor bound (ticket 31, reversing modular ticket 13). A cache
+written under that older rule holds the Windows beside a null Remaining and Pace, so a
+read derives them (`usage._filled`) rather than probing again. This intentionally
 replaces partial use of invalid documents. The throwaway Herdr dashboard that drove these changes lives on branch
 `worktree/delegate-monitor-herdr` under `tools/delegate-dashboard/`, not on `main`.
 

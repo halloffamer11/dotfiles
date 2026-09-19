@@ -3,8 +3,9 @@
 
 Emits one JSON document of *lanes* (harness × meter). Per lane:
   r      = min(remaining_5h, remaining_weekly): the gate (availability).
-           agy keeps the raw windows and leaves r/pace unknown; no vendor
-           publishes a joint bound.
+           Every meter with two windows is read this way, agy included; no
+           vendor publishes a joint bound, so agy carries a note saying the
+           combined figure is the lower window, an assumption (ticket 31).
   pace   = remaining_weekly / fraction of the weekly cycle still to run.
            1.0 = spending evenly; >1 = ahead (under-used, will expire unspent);
            <1 = behind (over-spent). Cycle length is assumed 7 days.
@@ -39,7 +40,11 @@ TTL_MIN_DEFAULT = 10
 WEEK = 7 * 86400      # assumed weekly-cycle length for pace
 CYCLE_FLOOR = 0.02    # ~3.4h: pace denominator floor near a reset
 ROLLOVER_MIN = 30     # binding window resets within this → ask user whether to wait
-AGY_COMBINED_NOTE = "agy combined remaining and pace unknown until a vendor joint bound exists"
+AGY_COMBINED_NOTE = ("agy combined remaining is the lower window, an assumption, "
+                     "not a vendor bound")
+# The note the reversed rule wrote (modular ticket 13). A cache from that time
+# still carries it beside null figures; a read replaces both together.
+SUPERSEDED_AGY_NOTE = "agy combined remaining and pace unknown until a vendor joint bound exists"
 
 def get_cache_path():
     return os.environ.get("DELEGATE_CACHE") or os.environ.get("CONSULT_CACHE") or os.path.expanduser("~/.cache/delegate/usage.json")
@@ -57,52 +62,64 @@ def _valid_meter_number(value, *, fraction=False):
     return math.isfinite(number) and (0 <= number <= 1 if fraction else number >= 0)
 
 
-def _is_agy_observation(name, observation):
-    if isinstance(observation, dict) and observation.get("harness") == "agy":
-        return True
-    return isinstance(name, str) and (name == "agy" or name.startswith("agy-"))
+def combined(five_h, weekly, reset_5h=None, reset_wk=None):
+    """The figures every Meter derives from its raw Window values.
+
+    Remaining is the lower of the Window fractions, and Pace divides the weekly
+    fraction by the share of the week still to run. One arithmetic for every
+    harness: agy has a 5-hour and a weekly Window like the Claude Meters, so it
+    is read the same way (ticket 31).
+    """
+    known = [x for x in (five_h, weekly) if x is not None]
+    r = min(known) if known else None
+    binding = None
+    if r is not None:
+        binding = "weekly" if (weekly is not None and (five_h is None or weekly <= five_h)) else "5h"
+    reset = reset_wk if binding == "weekly" else reset_5h
+    cycle_left = pace = None
+    if weekly is not None and reset_wk:
+        cycle_left = min(1.0, max(CYCLE_FLOOR, (reset_wk - time.time()) / WEEK))
+        pace = round(weekly / cycle_left, 3)
+    return {"r": r, "binding": binding, "reset_binding": reset,
+            "cycle_left": cycle_left, "pace": pace,
+            "score": pace if pace is not None else r,
+            # Observation quality is independent of a project's effective Gate.
+            "status": "unknown" if r is None else "ok"}
 
 
-def _agy_unknown_combined(observation):
-    """Keep agy window values; drop invented combined Remaining and Pace."""
+def _filled(observation):
+    """Derive the combined figures a cache is missing. Never overwrites one.
+
+    A cache written while agy figures were forced unknown holds the Windows
+    beside a null Remaining and Pace. Reading it derives them by the same
+    arithmetic a probe uses, so the figures need no fresh probe. An observation
+    that already carries a Remaining or a Pace is returned untouched, and one
+    with no Window at all stays unknown.
+    """
+    if not isinstance(observation, dict):
+        return observation
+    if observation.get("r") is not None or observation.get("pace") is not None:
+        return observation
+    if observation.get("remaining_5h") is None and observation.get("remaining_weekly") is None:
+        return observation
     out = dict(observation)
-    out["r"] = None
-    out["pace"] = None
-    out["score"] = None
-    out["binding"] = None
-    out["reset_binding"] = None
-    out["cycle_left"] = None
-    out["status"] = "unknown"
-    out["rollover_soon"] = False
+    out.update(combined(out.get("remaining_5h"), out.get("remaining_weekly"),
+                        out.get("reset_5h"), out.get("reset_weekly")))
     note = out.get("note")
-    if not note:
-        out["note"] = AGY_COMBINED_NOTE
-    elif AGY_COMBINED_NOTE not in str(note):
-        out["note"] = f"{note}; {AGY_COMBINED_NOTE}"
+    if note and SUPERSEDED_AGY_NOTE in str(note):
+        out["note"] = str(note).replace(SUPERSEDED_AGY_NOTE, AGY_COMBINED_NOTE)
     return out
 
 
-def _normalize_agy_document(document):
-    """Return a copy whose agy combined Remaining/Pace are unknown. Does not write."""
+def _fill_document(document):
+    """Return a copy whose observations carry their combined figures. Does not write."""
     if not isinstance(document, dict):
         return document
     out = dict(document)
     if "lanes" in out and isinstance(out["lanes"], list):
-        out["lanes"] = [
-            _agy_unknown_combined(entry)
-            if isinstance(entry, dict) and _is_agy_observation(entry.get("lane"), entry)
-            else entry
-            for entry in out["lanes"]
-        ]
+        out["lanes"] = [_filled(entry) for entry in out["lanes"]]
         return out
-    return {
-        name: (
-            _agy_unknown_combined(obs)
-            if isinstance(obs, dict) and _is_agy_observation(name, obs)
-            else obs
-        )
-        for name, obs in out.items()
-    }
+    return {name: _filled(obs) for name, obs in out.items()}
 
 
 def observations(document):
@@ -110,9 +127,8 @@ def observations(document):
 
     Accept the usage-cache envelope and the legacy bare Meter map. Invalid
     observations make the whole document unknown, consistently for every caller.
-    No values are repaired and this boundary never probes a vendor. agy
-    combined Remaining and Pace are unknown even when a cache still holds a
-    derived number.
+    No Window value is repaired and this boundary never probes a vendor; a
+    combined figure a cache never wrote is derived from the Windows (`_filled`).
     """
     if not isinstance(document, dict):
         return None
@@ -148,14 +164,7 @@ def observations(document):
                 return None
         if "status" in observation and not isinstance(observation["status"], str):
             return None
-    out = {}
-    for name, observation in parsed.items():
-        out[name] = (
-            _agy_unknown_combined(observation)
-            if _is_agy_observation(name, observation)
-            else observation
-        )
-    return out
+    return {name: _filled(observation) for name, observation in parsed.items()}
 
 
 def eligible(observation, gate):
@@ -174,8 +183,9 @@ def eligible(observation, gate):
 def load_cached(cache_path=None):
     """Read the usage cache without probing or emitting a meter event.
 
-    Missing or unreadable files become {}. agy combined Remaining/Pace in the
-    returned copy are unknown; the file on disk is not rewritten.
+    Missing or unreadable files become {}. A combined Remaining or Pace the
+    cache lacks is derived in the returned copy; the file on disk is not
+    rewritten.
     """
     path = cache_path or get_cache_path()
     try:
@@ -183,7 +193,7 @@ def load_cached(cache_path=None):
             doc = json.load(f)
         if not isinstance(doc, dict) or observations(doc) is None:
             return {}
-        return _normalize_agy_document(doc)
+        return _fill_document(doc)
     except (OSError, ValueError):
         return {}
 
@@ -197,37 +207,13 @@ def run(cmd, timeout=60, stdin_data=None):
 
 def lane(harness, meter, five_h=None, weekly=None, reset_5h=None, reset_wk=None, note=None, remaining_weekly_model=None):
     """five_h/weekly are REMAINING fractions (0..1) or None; resets are epoch seconds or None."""
-    if harness == "agy":
-        combined_note = AGY_COMBINED_NOTE if not note else f"{note}; {AGY_COMBINED_NOTE}"
-        return {"lane": f"{harness}-{meter}" if meter else harness, "harness": harness, "meter": meter,
-                "remaining_5h": five_h, "remaining_weekly": weekly,
-                "remaining_weekly_model": remaining_weekly_model,
-                "r": None, "binding": None,
-                "reset_5h": reset_5h, "reset_weekly": reset_wk, "reset_binding": None,
-                "cycle_left": None, "pace": None, "score": None,
-                "status": "unknown", "rollover_soon": False, "note": combined_note}
-    known = [x for x in (five_h, weekly) if x is not None]
-    r = min(known) if known else None
-    binding = None
-    if r is not None:
-        binding = "weekly" if (weekly is not None and (five_h is None or weekly <= five_h)) else "5h"
-    reset = reset_wk if binding == "weekly" else reset_5h
-    # Observation quality is independent of a project's effective Gate.
-    status = "unknown" if r is None else "ok"
-    rollover = False
-    now = time.time()
-    cycle_left = pace = None
-    if weekly is not None and reset_wk:
-        cycle_left = min(1.0, max(CYCLE_FLOOR, (reset_wk - now) / WEEK))
-        pace = round(weekly / cycle_left, 3)
-    score = pace if pace is not None else r
-    return {"lane": f"{harness}-{meter}" if meter else harness, "harness": harness, "meter": meter,
-            "remaining_5h": five_h, "remaining_weekly": weekly,
-            "remaining_weekly_model": remaining_weekly_model,
-            "r": r, "binding": binding,
-            "reset_5h": reset_5h, "reset_weekly": reset_wk, "reset_binding": reset,
-            "cycle_left": cycle_left, "pace": pace, "score": score,
-            "status": status, "rollover_soon": rollover, "note": note}
+    row = {"lane": f"{harness}-{meter}" if meter else harness, "harness": harness, "meter": meter,
+           "remaining_5h": five_h, "remaining_weekly": weekly,
+           "remaining_weekly_model": remaining_weekly_model,
+           "reset_5h": reset_5h, "reset_weekly": reset_wk,
+           "rollover_soon": False, "note": note}
+    row.update(combined(five_h, weekly, reset_5h, reset_wk))
+    return row
 
 # ---------------------------------------------------------------- codex
 def probe_codex():
@@ -285,7 +271,9 @@ def probe_agy():
         for b in g.get("buckets", []):
             if b.get("window") == "5h": f5, r5 = b.get("remaining_fraction"), iso(b.get("reset_time", ""))
             elif b.get("window") == "weekly": fw, rw = b.get("remaining_fraction"), iso(b.get("reset_time", ""))
-        out.append(lane("agy", meter, f5, fw, r5, rw))
+        # No vendor bound joins the two windows, so the note says what the
+        # combined figure is: the lower window, an assumption (ticket 31).
+        out.append(lane("agy", meter, f5, fw, r5, rw, note=AGY_COMBINED_NOTE))
     return out or [lane("agy", None, note="no groups")]
 
 # ---------------------------------------------------------------- claude
@@ -411,10 +399,10 @@ def probe(refresh=False, max_age_min=None, cache_path=None):
         d = {"probed_at": now, "probed_at_iso": datetime.fromtimestamp(now, timezone.utc).isoformat(),
              "rollover_min": ROLLOVER_MIN, "lanes": lanes}
         write_cache(d, cache_path=cache_path)
-        d = _normalize_agy_document(d)
+        d = _fill_document(d)
         d["from_cache"] = False
     else:
-        d = _normalize_agy_document(d)
+        d = _fill_document(d)
         d["from_cache"] = True
     return d
 
@@ -435,11 +423,11 @@ def acquire(refresh=False, max_age_min=None, timeout=180):
         if result.returncode == 0:
             doc = json.loads(result.stdout)
             if isinstance(doc, dict) and observations(doc) is not None:
-                return _normalize_agy_document(doc)
+                return _fill_document(doc)
     except (OSError, ValueError, subprocess.TimeoutExpired):
         pass
     cached = load_cache(TTL_MIN_DEFAULT if max_age_min is None else max_age_min)
-    return _normalize_agy_document(cached) if cached is not None else {}
+    return _fill_document(cached) if cached is not None else {}
 
 
 def main():

@@ -114,7 +114,7 @@ with tempfile.TemporaryDirectory() as tmp:
     rc, out, _ = run(["limits", "--max-age-min", "600", "--eligible"] + cfg, env)
     check("--eligible drops a meter under the gate", "| codex" not in out.split(
         "**Plan consumption this cycle:**")[0], out)
-    check("--eligible keeps agy whose combined remaining is unknown", "| agy-gemini" in out.split(
+    check("--eligible keeps an agy meter above the gate", "| agy-gemini" in out.split(
         "**Plan consumption this cycle:**")[0], out)
     check("limits footer uses routing.gate not a hard-coded 10%",
           "A meter under 10% remaining is skipped by rank.py." in out, out)
@@ -347,6 +347,30 @@ with tempfile.TemporaryDirectory() as tmp:
     rc, out_badcat, err_badcat = run(["statusline", "--config-dir", missing], sl_env)
     check("statusline with missing catalog exits 1", rc == 1, err_badcat)
     check("statusline missing catalog prints report: on stderr", "report:" in err_badcat, err_badcat)
+
+    # A cache written while agy combined figures were forced unknown: the
+    # Windows are on disk and Remaining and Pace are null. Both surfaces read
+    # the figures off the Windows, with no fresh probe (ticket 31).
+    old_cache = os.path.join(tmp, "old_rule_usage.json")
+    with open(old_cache, "w") as f:
+        json.dump({"probed_at": sl_now, "lanes": [
+            {"lane": "agy-gemini", "harness": "agy", "meter": "gemini", "remaining_5h": 0.86,
+             "remaining_weekly": 0.62, "r": None, "binding": None,
+             "reset_5h": sl_now + 3600, "reset_weekly": sl_now + 2 * 86400,
+             "reset_binding": None, "cycle_left": None, "pace": None, "score": None,
+             "status": "unknown",
+             "note": "agy combined remaining and pace unknown until a vendor joint bound exists"},
+        ]}, f)
+    old_env = {"DELEGATE_CACHE": old_cache, "DELEGATE_LEDGER": sl_ledger}
+    rc, out_old, err_old = run(["limits", "--max-age-min", "600"] + cfg, old_env)
+    check("limits prints agy figures from a cache written under the old rule",
+          rc == 0 and "| agy-gemini" in out_old and "62%" in out_old and "86%" in out_old,
+          err_old + out_old)
+    rc, out_old_sl, err_old_sl = run(["statusline", "--no-color", "--no-running"] + cfg, old_env)
+    agy_row = next((l for l in out_old_sl.splitlines() if " agy" in l), "")
+    check("statusline gives the agy row its figures and a Tier badge",
+          rc == 0 and "62%" in agy_row and "86%" in agy_row and not agy_row.startswith("·"),
+          err_old_sl + out_old_sl)
 
     # Gate equality, ignored status, project override, malformed cache, CONSULT_CACHE.
     eq_cache = os.path.join(tmp, "eq_usage.json")

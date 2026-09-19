@@ -1023,8 +1023,8 @@ class Wizard:
             f"gate: {value}",
             f"A lane is skipped outright once its meter drops below {value * 100:g}% "
             "remaining, however capable it is.",
-            "For shared spend, Remaining is the lower Window fraction. "
-            "agy's combined Remaining is unknown.",
+            "For shared spend, Remaining is the lower Window fraction. On agy no "
+            "vendor joins the two Windows, so the lower one is an assumption.",
         ]
 
     def _step_marker(self):

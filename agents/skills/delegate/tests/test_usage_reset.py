@@ -174,20 +174,50 @@ def main():
     assert_true(eligible({"r": 0.50, "status": "unavailable"}, 0.10) is True,
                 "cached status must not veto when r is at or above gate")
 
-    # 7. Fresh agy lane keeps windows and emits unknown combined Remaining/Pace.
+    # 7. An agy lane runs through the same arithmetic as every other Meter:
+    #    Remaining is the lower Window, Pace comes from the weekly Window.
     l_agy = lane("agy", "gemini", 0.80, 0.90, 1788406804, 1788616225)
+    l_codex = lane("codex", None, 0.80, 0.90, 1788406804, 1788616225)
     assert_true(l_agy["remaining_5h"] == 0.80 and l_agy["remaining_weekly"] == 0.90,
                 "agy windows should remain visible")
-    assert_true(l_agy["r"] is None and l_agy["pace"] is None and l_agy["status"] == "unknown",
-                f"agy combined bound should be unknown, got r={l_agy['r']} pace={l_agy['pace']}")
-    assert_true(usage.AGY_COMBINED_NOTE in (l_agy.get("note") or ""),
-                f"agy note missing combined-bound explanation: {l_agy.get('note')}")
+    assert_true(l_agy["r"] == 0.80 and l_agy["binding"] == "5h" and l_agy["status"] == "ok",
+                f"agy Remaining should be the lower window, got r={l_agy['r']}")
+    assert_true(l_agy["pace"] is not None and l_agy["pace"] == l_codex["pace"],
+                f"agy Pace should match the other Meters, got {l_agy['pace']}")
+    derived = ("r", "binding", "reset_binding", "cycle_left", "pace", "score", "status")
+    assert_true(all(l_agy[k] == l_codex[k] for k in derived),
+                f"agy and codex should derive the same figures: {l_agy} vs {l_codex}")
+    assert_true("assumption" in usage.AGY_COMBINED_NOTE and "not a vendor bound" in usage.AGY_COMBINED_NOTE,
+                f"the agy note must call the combined figure an assumption: {usage.AGY_COMBINED_NOTE}")
 
-    l_codex = lane("codex", None, 0.80, 0.90, 1788406804, 1788616225)
-    assert_true(l_codex["r"] == 0.80 and l_codex["pace"] is not None,
-                "non-agy meters still combine windows")
+    # One Window missing: the documented fallback of the other Meters applies.
+    for meter_name, five_h, weekly in (("gemini", None, 0.90), ("gemini", 0.80, None)):
+        one_agy = lane("agy", meter_name, five_h, weekly, 1788406804, 1788616225)
+        one_codex = lane("codex", None, five_h, weekly, 1788406804, 1788616225)
+        assert_true(all(one_agy[k] == one_codex[k] for k in derived),
+                    f"a one-window agy lane must fall back as codex does: {one_agy}")
+    assert_true(lane("agy", "gemini", 0.80, None, 1788406804, None)["pace"] is None,
+                "no weekly Window means no Pace, on agy as anywhere else")
 
-    # 8. Cached agy observations with derived r/pace cannot drive selection.
+    # A fresh agy probe carries the windows, the figures and the assumption note.
+    from unittest.mock import patch
+    class _R:
+        returncode = 0
+        stdout = json.dumps({"command": {"data": {"groups": [
+            {"name": "Gemini", "buckets": [
+                {"window": "5h", "remaining_fraction": 0.80, "reset_time": "2026-09-19T03:00:00Z"},
+                {"window": "weekly", "remaining_fraction": 0.90, "reset_time": "2026-09-24T03:00:00Z"}]}]}}})
+    with patch.object(usage, "which", return_value=True), \
+         patch.object(usage, "run", return_value=_R()):
+        probed_agy = usage.probe_agy()
+    assert_true(len(probed_agy) == 1 and probed_agy[0]["r"] == 0.80
+                and probed_agy[0]["pace"] is not None,
+                f"a fresh agy probe must give Remaining and Pace: {probed_agy}")
+    assert_true(usage.AGY_COMBINED_NOTE in (probed_agy[0].get("note") or ""),
+                f"a fresh agy probe must carry the assumption note: {probed_agy[0].get('note')}")
+
+    # 8. A cached observation written under the old rule — Windows present,
+    #    combined Remaining and Pace null — gives the figures with no probe.
     with tempfile.TemporaryDirectory() as tmpdir:
         cache_path = os.path.join(tmpdir, "old-agy.json")
         old = {
@@ -198,10 +228,16 @@ def main():
                 "meter": "gemini",
                 "remaining_5h": 0.80,
                 "remaining_weekly": 0.90,
-                "r": 0.80,
-                "pace": 2.5,
-                "status": "ok",
-                "note": None,
+                "r": None,
+                "binding": None,
+                "reset_5h": 1788406804,
+                "reset_weekly": time.time() + 3.5 * 86400,
+                "reset_binding": None,
+                "cycle_left": None,
+                "pace": None,
+                "score": None,
+                "status": "unknown",
+                "note": "agy combined remaining and pace unknown until a vendor joint bound exists",
             }, {
                 "lane": "codex",
                 "harness": "codex",
@@ -217,19 +253,23 @@ def main():
         loaded = load_cached(cache_path=cache_path)
         agy_row = next(L for L in loaded["lanes"] if L["lane"] == "agy-gemini")
         codex_row = next(L for L in loaded["lanes"] if L["lane"] == "codex")
-        assert_true(agy_row["r"] is None and agy_row["pace"] is None,
-                    f"cached agy r/pace should be unknown, got {agy_row}")
+        assert_true(agy_row["r"] == 0.80 and agy_row["binding"] == "5h",
+                    f"a cached agy Remaining should be the lower window, got {agy_row}")
+        assert_true(agy_row["pace"] is not None and agy_row["status"] == "ok",
+                    f"a cached agy Pace should be derived, got {agy_row}")
         assert_true(agy_row["remaining_5h"] == 0.80 and agy_row["remaining_weekly"] == 0.90,
                     "cached agy windows should remain")
+        assert_true("unknown until a vendor joint bound" not in (agy_row.get("note") or ""),
+                    f"the superseded note must not sit beside a figure: {agy_row.get('note')}")
         assert_true(codex_row["r"] == 0.50 and codex_row["pace"] == 1.1,
-                    "cached non-agy observations stay combined")
+                    "a probed figure is never recomputed")
         obs = observations(old)
-        assert_true(obs["agy-gemini"]["r"] is None and obs["agy-gemini"]["pace"] is None,
-                    "observations() must strip cached agy combined bounds")
+        assert_true(obs["agy-gemini"]["r"] == 0.80 and obs["agy-gemini"]["pace"] is not None,
+                    "observations() must give the cached agy Meter its figures")
         assert_true(obs["codex"]["r"] == 0.50, "observations() must leave codex r")
         with open(cache_path) as f:
             on_disk = json.load(f)
-        assert_true(on_disk["lanes"][0]["r"] == 0.80,
+        assert_true(on_disk["lanes"][0]["r"] is None,
                     "cache file must not be rewritten on load_cached")
 
     # Repeated acquisitions in one Python process use the current clock.

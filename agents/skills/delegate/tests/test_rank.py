@@ -369,7 +369,8 @@ with tempfile.TemporaryDirectory() as td:
 
     # -------------------------------------------------------------
     # 9. mechanical (1-2): tier 1 holds flash-high@agy and luna-low@codex.
-    # agy combined Remaining/Pace are unknown, so flash sorts last and cannot steal.
+    # An agy Meter carries a Remaining and a Pace, so it sorts on them like
+    # any other Meter (ticket 31).
     m9a = [
         meter("codex", weekly=1.00, five_h=1.00, pace=1.00, status="ok"),
         meter("agy-gemini", weekly=1.00, five_h=1.00, pace=1.00, status="ok"),
@@ -379,13 +380,14 @@ with tempfile.TemporaryDirectory() as td:
     doc9a = write_meters_doc(meters_path, m9a)
     rows9a = rank.rank("mechanical", cat, doc9a, ALL_HARNESSES)
     flash9a = next(r for r in rows9a if r["lane"] == "flash-high@agy")
+    # Neither lane has an order and both paces are 1.00, so the name breaks the tie.
     mech9a_ok = (
-        rows9a[0]["lane"] == "luna-low@codex" and rows9a[0]["pick"] is True
-        and flash9a["eligible"] is True and flash9a["pace"] is None
-        and flash9a["reason"] == "unknown meter, sorted last"
+        rows9a[0]["lane"] == "flash-high@agy" and rows9a[0]["pick"] is True
+        and flash9a["eligible"] is True and flash9a["pace"] == 1.00
+        and rows9a[0]["reason"] == "pick"
     )
 
-    # Part B: invented agy pace 3.27 cannot steal the pick
+    # Part B: a higher agy pace now takes the pick inside the tier
     m9b = [
         meter("codex", weekly=0.55, five_h=0.55, pace=0.75, status="ok"),
         meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
@@ -394,12 +396,13 @@ with tempfile.TemporaryDirectory() as td:
     ]
     doc9b = write_meters_doc(meters_path, m9b)
     rows9b = rank.rank("mechanical", cat, doc9b, ALL_HARNESSES)
+    flash9b = next(r for r in rows9b if r["lane"] == "flash-high@agy")
     mech9b_ok = (
-        rows9b[0]["lane"] == "luna-low@codex" and rows9b[0]["pick"] is True
-        and rows9b[0]["reason"] == "pick"
+        rows9b[0]["lane"] == "flash-high@agy" and rows9b[0]["pick"] is True
+        and flash9b["r"] == 0.61 and flash9b["pace"] == 3.27
     )
 
-    # Part C: luna still leads on its own known pace
+    # Part C: luna leads when its own pace is the higher one
     m9c = [
         meter("codex", weekly=0.90, five_h=0.90, pace=3.60, status="ok"),
         meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
@@ -413,7 +416,9 @@ with tempfile.TemporaryDirectory() as td:
         rows9c[0]["pick"] is True and
         rows9c[0]["reason"] == "pick"
     )
-    record("case 9 rank() mechanical agy unknown-last, no invented-pace steal", mech9a_ok and mech9b_ok and mech9c_ok)
+    record("case 9 rank() mechanical agy sorts on its own Remaining and Pace",
+           mech9a_ok and mech9b_ok and mech9c_ok,
+           repr([(r["lane"], r["pace"], r["reason"]) for r in rows9a[:3]]))
 
     res9 = subprocess.run(
         [sys.executable, RANK_PY, "mechanical", "--config-dir", cfg_dir, "--meters", meters_path, "--harnesses", ALL_HARNESSES_ARG],
@@ -739,7 +744,9 @@ with tempfile.TemporaryDirectory() as td:
         ]
     }
     previews20 = rank.tier_leaders(tier_cat, tier_meters, ALL_HARNESSES)
-    expected_leaders20 = ["luna-low@codex", "grok46-high@grok", "sol-high@codex", "fable-xhigh@claude"]
+    # Tier 1 is led by flash-high@agy: first in Order, on a Meter that now
+    # reports a Remaining and a Pace of its own (ticket 31).
+    expected_leaders20 = ["flash-high@agy", "grok46-high@grok", "sol-high@codex", "fable-xhigh@claude"]
     shape20_ok = (
         [preview["tier"] for preview in previews20] == [1, 2, 3, 4]
         and [preview["leader"] for preview in previews20] == expected_leaders20
@@ -930,7 +937,8 @@ with tempfile.TemporaryDirectory() as td:
            and "vetoed:gate" in terra_project["reason"]
            and "gate 50%" in terra_project["reason"])
 
-    # 23. agy remains eligible unknown-last; picked when measured alternatives are unavailable.
+    # 23. agy is picked when the measured alternatives are gated, and it carries
+    # its own figures onto the row.
     m23 = [
         meter("codex", weekly=0.05, five_h=0.05, pace=0.75, status="unavailable"),
         meter("agy-gemini", weekly=0.61, five_h=0.61, pace=3.27, status="ok"),
@@ -940,11 +948,39 @@ with tempfile.TemporaryDirectory() as td:
     doc23 = write_meters_doc(meters_path, m23)
     rows23 = rank.rank("mechanical", cat, doc23, ALL_HARNESSES)
     flash23 = next(r for r in rows23 if r["lane"] == "flash-high@agy")
-    record("case 23 agy is picked when measured alternatives are gated; windows stay on the row",
+    record("case 23 agy is picked when measured alternatives are gated; its figures are on the row",
            rows23[0]["lane"] == "flash-high@agy" and rows23[0]["pick"] is True
-           and flash23["r"] is None and flash23["pace"] is None
+           and flash23["r"] == 0.61 and flash23["pace"] == 3.27
            and flash23["remaining_weekly"] == 0.61
-           and flash23["eligible"] is True)
+           and flash23["meter_status"] == "ok"
+           and flash23["eligible"] is True,
+           repr(flash23))
+
+    # 23b. The Gate applies to an agy Meter, and a Margin steal can go to one
+    # (ticket 31). These fixture tiers and orders are local to this test.
+    agy_cat = copy.deepcopy(cat)
+    agy_cat["lanes"]["grok46-high@grok"].update({"tier": 2, "order": 1})
+    agy_cat["lanes"]["flash-high@agy"].update({"tier": 2, "order": 2})
+    m23_gate = [
+        meter("agy-gemini", weekly=0.40, five_h=0.02, pace=1.90, status="ok"),
+        meter("grok", weekly=0.80, pace=0.90, status="ok"),
+    ]
+    rows23_gate = rank.rank("impl", agy_cat, write_meters_doc(meters_path, m23_gate), ALL_HARNESSES)
+    flash23_gate = next(r for r in rows23_gate if r["lane"] == "flash-high@agy")
+    record("case 23b an agy Lane under the Gate is vetoed gate",
+           flash23_gate["veto"] == "gate" and flash23_gate["eligible"] is False
+           and flash23_gate["reason"] == "vetoed:gate, flash-high@agy: agy-gemini meter 2% left < gate 10%",
+           flash23_gate["reason"])
+
+    m23_steal = [
+        meter("agy-gemini", weekly=0.90, five_h=0.90, pace=1.30, status="ok"),
+        meter("grok", weekly=0.80, pace=0.90, status="ok"),
+    ]
+    rows23_steal = rank.rank("impl", agy_cat, write_meters_doc(meters_path, m23_steal), ALL_HARNESSES)
+    record("case 23b an agy Lane with the Pace for it wins a Margin steal",
+           rows23_steal[0]["lane"] == "flash-high@agy" and rows23_steal[0]["pick"] is True
+           and rows23_steal[0]["reason"] == "stolen by pace: 1.3 >= 0.9 + 0.2",
+           repr([(r["lane"], r["reason"]) for r in rows23_steal[:2]]))
 
     # 24. Cache path and cached-only tiers: no vendor probe.
     record("load_cached_usage uses usage.get_cache_path",
@@ -1058,8 +1094,8 @@ with tempfile.TemporaryDirectory() as td:
     # are every one of them under the Gate admits the next Tier instead of
     # stopping the Class. These fixture tiers are deliberately local: no
     # expectation here depends on the live catalog's assignments. agy sits in
-    # Tier 4 throughout, because agy Remaining is unknown by decision (modular
-    # ticket 13) and an unknown Meter is eligible, never Gate-vetoed.
+    # Tier 4 throughout, so the Ceiling keeps it out of every Range below it and
+    # overflow never reaches it.
     over_cat = copy.deepcopy(cat)
     over_layout = {
         "luna-low@codex": 1,       # codex
@@ -1067,7 +1103,7 @@ with tempfile.TemporaryDirectory() as td:
         "grok46-high@grok": 2,     # grok
         "sol-high@codex": 3,       # codex
         "fable-xhigh@claude": 3,   # claude-fable
-        "flash-high@agy": 4,       # agy-gemini, Remaining unknown
+        "flash-high@agy": 4,       # agy-gemini, healthy
     }
     for lane_name, lane_tier in over_layout.items():
         over_cat["lanes"][lane_name]["tier"] = lane_tier
@@ -1277,7 +1313,7 @@ with tempfile.TemporaryDirectory() as td:
     # Overflow reaches up, never down: a healthy Lane below the Floor stays
     # vetoed:floor while the Tier above the Ceiling takes the job.
     floor26 = copy.deepcopy(over_cat)
-    floor26["lanes"]["flash-high@agy"]["tier"] = 1   # unknown Meter, so eligible
+    floor26["lanes"]["flash-high@agy"]["tier"] = 1   # healthy Meter, so eligible
     floor26["routing"]["classes"]["impl"] = {"floor": 2, "ceiling": 2}
     rows26m = rank.rank("impl", floor26, doc26, ALL_HARNESSES)
     flash26m = next(r for r in rows26m if r["lane"] == "flash-high@agy")
