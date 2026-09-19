@@ -8,13 +8,16 @@ the percentage editors and the keys ``j``/``k`` and arrows, ``J``/``K``, ``g``,
 ``handle_key``; a variant that returns a carried Lane name from it also moves
 the selection to that Lane.  A variant that also exposes
 ``selectable(state, view)`` names the Lanes ``j``/``k`` may stop on, so rows it
-hides are never walked.
+hides are never walked.  A ``handle_key`` that accepts a ``model`` keyword is
+handed this host's :class:`DashboardModel`, which is how a variant reaches a
+save path of its own; one that does not is called exactly as before.
 """
 
 from __future__ import annotations
 
 import argparse
 import importlib
+import inspect
 import json
 import os
 import select
@@ -32,6 +35,9 @@ DEFAULT_LAYOUT = "current"
 # The order `v` cycles.  A variant not named here follows, alphabetically.
 LAYOUT_ORDER = ("current", "panel", "strip", "deck")
 
+# Left, right and Shift+Tab join the list so the parser reads them as one key.
+# Until they did, each one reached a variant as the three keys ESC, '[' and a
+# letter, which is why a Left arrow used to jump a Tier in `panel` and `strip`.
 KEY_SEQUENCES = (
     "\x1b[1;2A",
     "\x1b[1;2B",
@@ -39,6 +45,9 @@ KEY_SEQUENCES = (
     "\x1b[6~",
     "\x1b[A",
     "\x1b[B",
+    "\x1b[C",
+    "\x1b[D",
+    "\x1b[Z",
 )
 
 
@@ -170,6 +179,26 @@ def walkable_lane_names(module, state, view):
     return names or carried
 
 
+def call_handle_key(handler, key, state, view, model):
+    """Call a variant's ``handle_key``, handing it the model if it asks for one.
+
+    A variant that writes -- the Tier move in ``deck`` -- needs the model's save
+    path.  A variant whose handler takes only ``(key, state, view)`` is called
+    with exactly those three, so nothing else changes.
+    """
+    try:
+        params = inspect.signature(handler).parameters
+        wants_model = "model" in params or any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in params.values()
+        )
+    except (TypeError, ValueError):
+        wants_model = False
+    if wants_model:
+        return handler(key, state, view, model=model)
+    return handler(key, state, view)
+
+
 def run_terminal(model: DashboardModel, layout_name: str = DEFAULT_LAYOUT) -> int:
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         sys.stderr.write("dashboard: interactive view needs a terminal; use --json for diagnostics\n")
@@ -268,7 +297,9 @@ def run_terminal(model: DashboardModel, layout_name: str = DEFAULT_LAYOUT) -> in
                     handler = getattr(layouts[layout_name], "handle_key", None)
                     if handler is not None:
                         try:
-                            used = handler(key, model.state, views[layout_name])
+                            used = call_handle_key(
+                                handler, key, model.state, views[layout_name], model
+                            )
                         except Exception as exc:
                             used = None
                             message = (

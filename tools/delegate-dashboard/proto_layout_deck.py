@@ -100,12 +100,14 @@ MARK = "┃"  # the Gate on a Remaining bar, the steal threshold on a Pace bar
 HAIRLINE = "─"
 EMDASH = "—"
 TIMES = "×"
+ARROW = "→"
 
 # Forced one cell: the marks the grid's alignment depends on.
 _ONE_CELL = frozenset(
     list(_NERD_GLYPHS.values())
     + list(_PLAIN_GLYPHS.values())
-    + [RAIL, RULE, LEADER, BAR_FULL, BAR_EMPTY, BAR_UNKNOWN, MARK, HAIRLINE, EMDASH, TIMES]
+    + [RAIL, RULE, LEADER, BAR_FULL, BAR_EMPTY, BAR_UNKNOWN, MARK, HAIRLINE,
+       EMDASH, TIMES, ARROW]
     + list(BAR_PART)
 )
 
@@ -139,13 +141,23 @@ TERMS = (
               "can share one."),
 )
 
+# The three bodies, in the order Tab walks them.
+VIEWS = ("list", "table", "aid")
+VIEW_NAMES = {"list": "Tier list", "table": "Harness table", "aid": "Gate/Margin"}
+
 KEYS = (
-    ("d", "descriptions and reason codes, at the foot"),
-    ("h", "the Tier list or the Harness table"),
-    ("a", "how the Gate and the Margin act, per Meter"),
+    ("Tab", "the next view: Tier list, Harness table, Gate/Margin"),
+    ("a", "the Gate/Margin view, and back to the one before it"),
+    ("h j k l", "move the selection; the arrow keys do the same"),
+    ("H  L", "move the selected Lane one Tier left or right, on y"),
+    ("d", "the terms and every reason code, at the foot"),
     ("z", "fold the deck, or the Harness row, under the cursor"),
     ("?", "close this help"),
 )
+
+# Up and down never reach a variant: the host owns j, k and those two arrows,
+# and walks `selectable`, which is already the spatial order of each view.
+ARROWS = {"\x1b[C": "l", "\x1b[D": "h"}
 
 # name, width, alignment.  One space between every column; the widths and the
 # gaps add up to MEASURE.  The bar takes the largest share, because Remaining
@@ -488,6 +500,55 @@ def _harness_key(harness: Any) -> str:
     return f"H/{harness}"
 
 
+def current_view(view: dict[str, Any]) -> str:
+    """Which of the three bodies is showing."""
+    name = view.get("view")
+    return name if name in VIEWS else VIEWS[0]
+
+
+def table_step(state: dict[str, Any], view: dict[str, Any], lane: Any, delta: int) -> Any:
+    """`h` and `l` in the table: the nearest Lane one Tier column over.
+
+    The same Harness row wins when it has a Lane in that column; otherwise the
+    nearest row does, counting rows and preferring the one above on a tie.  A
+    column with no Lane to stop on is stepped over, not stopped in, and inside
+    the chosen cell the cursor keeps the line it was on as far as the cell goes.
+    """
+    harnesses, tiers, cell = table(state)
+    allowed = set(selectable(state, view))
+    here = None
+    for tier_index, number in enumerate(tiers):
+        for row_index, name in enumerate(harnesses):
+            shown = [
+                row["lane"] for row in (cell.get((name, number)) or ())
+                if row["lane"] in allowed
+            ]
+            if lane in shown:
+                here = (row_index, tier_index, shown.index(lane))
+    if here is None:
+        return None
+    row_index, tier_index, depth = here
+    step = tier_index + delta
+    while 0 <= step < len(tiers):
+        column: dict[int, list[str]] = {}
+        for other, name in enumerate(harnesses):
+            shown = [
+                row["lane"] for row in (cell.get((name, tiers[step])) or ())
+                if row["lane"] in allowed
+            ]
+            if shown:
+                column[other] = shown
+        if column:
+            if row_index in column:
+                found = column[row_index]
+            else:
+                nearest = min(column, key=lambda other: (abs(other - row_index), other))
+                found = column[nearest]
+            return found[min(depth, len(found) - 1)]
+        step += delta
+    return None
+
+
 def selectable(state: dict[str, Any], view: dict[str, Any]) -> list[str]:
     """The Lane names j/k may walk, in the order the current view reads.
 
@@ -498,7 +559,7 @@ def selectable(state: dict[str, Any], view: dict[str, Any]) -> list[str]:
         view = {}
     folded = set(view.get("folded") or ())
     names: list[str] = []
-    if view.get("harness_view"):
+    if current_view(view) == "table":
         seen: set[str] = set()
         for row in table_order(state):
             key = _harness_key(row.get("harness"))
@@ -524,7 +585,7 @@ def _fold_key_of(state: dict[str, Any], view: dict[str, Any], lane: Any) -> str 
     for tier in state.get("tiers") or []:
         for row in tier.get("rows") or []:
             if row.get("lane") == lane:
-                if view.get("harness_view"):
+                if current_view(view) == "table":
                     return _harness_key(row.get("harness"))
                 return f"T{tier.get('tier')}"
     return None
@@ -535,7 +596,7 @@ def _stop_lane(state: dict[str, Any], view: dict[str, Any], lane: Any) -> Any:
     key = _fold_key_of(state, view, lane)
     if key is None or key not in set(view.get("folded") or ()):
         return lane
-    if view.get("harness_view"):
+    if current_view(view) == "table":
         for row in table_order(state):
             if _harness_key(row.get("harness")) == key:
                 return row["lane"]
@@ -988,40 +1049,92 @@ def help_lines(width):
     out = [[("deck", PAL["fg"], True),
             ("   a Lane is a model at an effort on a harness", PAL["mute"], False)]]
     for key, meaning in KEYS:
-        out.append([(f"  {pad(key, 7)}", PAL["gold"], False), (meaning, PAL["mute"], False)])
+        out.append([(f"  {pad(key, 9)}", PAL["gold"], False), (meaning, PAL["mute"], False)])
     out.append([])
-    out.append([("  host   ", PAL["mute"], False),
+    out.append([("  host     ", PAL["mute"], False),
                 ("j/k select  J/K move the Lane inside its Tier  g/m edit the Gate or "
                  "the Margin", PAL["mute"], False)])
-    out.append([(pad("", 9), PAL["mute"], False),
+    out.append([(pad("", 11), PAL["mute"], False),
                 ("r reload  v next layout  q close", PAL["mute"], False)])
     out.append([])
-    out.append([("  In the Tier list j/k walk the Lanes down the page.  In the Harness "
-                 "table they", PAL["mute"], False)])
-    out.append([("  walk down one Tier column at a time, so a Tier keeps the sequence it "
-                 "has in the", PAL["mute"], False)])
-    out.append([("  list and J/K still move inside the column under the cursor.",
-                 PAL["mute"], False)])
+    out.append([("  In the Tier list j/k walk the Lanes down the page and h/l close and "
+                 "open a deck.", PAL["mute"], False)])
+    out.append([("  In the Harness table j/k walk down one Tier column, so a Tier keeps "
+                 "the sequence", PAL["mute"], False)])
+    out.append([("  it has in the list, and h/l cross to the nearest Lane one column over, "
+                 "keeping the", PAL["mute"], False)])
+    out.append([("  same Harness row when that row has one.", PAL["mute"], False)])
     out.append([])
-    out.append([("  d", PAL["gold"], False),
-                ("  writes out Remaining, Pace, Gate, Margin, Meter and every reason "
-                 "code at the foot.", PAL["mute"], False)])
+    out.append([("  J/K", PAL["gold"], False),
+                ("  move the Lane inside its Tier's Order, which every Harness in that "
+                 "Tier shares.", PAL["mute"], False)])
+    out.append([("  H/L", PAL["gold"], False),
+                ("  move it to the Tier left or right. A Tier is the Lane's, not the "
+                 "project's, so", PAL["mute"], False)])
+    out.append([(pad("", 7), PAL["mute"], False),
+                ("that writes the global lane catalog: the pane shows the whole change "
+                 "and only", PAL["mute"], False)])
+    out.append([(pad("", 7), PAL["mute"], False),
+                ("y writes it.", PAL["mute"], False)])
     return out
 
 
-HINTS_LIST = ("j/k select", "h Harness table", "a Gate/Margin", "d terms", "J/K move", "z fold")
-HINTS_TABLE = ("j/k down the column", "h Tier list", "a Gate/Margin", "d terms",
-               "J/K move", "z fold")
+HINTS = {
+    "list": ("j/k select", "h/l fold", "Tab Harness table", "d terms", "J/K move", "z fold"),
+    "table": ("hjkl move", "HL Tier", "Tab Gate/Margin", "d terms", "J/K Order", "z fold"),
+    "aid": ("Tab Tier list", "a back", "d terms"),
+}
+
+
+def confirm_lines(edit, width):
+    """What an `H`/`L` Tier move would write, before anything is written.
+
+    A Tier is global, so the pane spells the whole write out: the Lane, the two
+    Tiers, how many Orders the catalog renumbers behind it, and every Class Pick
+    that changes.  The footer under this block is the only thing that saves.
+    """
+    measure = min(max(0, int(width)), MEASURE)
+    out: list[list[tuple]] = [
+        [(HAIRLINE * measure, PAL["veto"], False)],
+        [("Tier move", PAL["veto"], True),
+         ("   this writes the global lane catalog, which every project shares",
+          PAL["mute"], False)],
+        [("  " + str(getattr(edit, "summary", "")), PAL["fg"], True)],
+    ]
+    reordered = tuple(getattr(edit, "reordered", ()) or ())
+    if reordered:
+        out.append([
+            ("  Order renumbered", PAL["mute"], False),
+            (f"   {len(reordered)} Lane{'' if len(reordered) == 1 else 's'} "
+             f"in Tier {getattr(edit, 'new_tier', '')}", PAL["mute"], False),
+        ])
+    picks = tuple(getattr(edit, "picks", ()) or ())
+    if not picks:
+        out.append([("  No Class changes its Pick.", PAL["mute"], False)])
+    for name, before, after in picks[:4]:
+        out.append([
+            (f"  Pick  {pad(str(name), 10)}", PAL["mute"], False),
+            (f"{before} {ARROW} {after}", PAL["gold"], False),
+        ])
+    return out
 
 
 def footer_line(state, view, editor, width):
     """The editor lives here, so opening it never moves the deck."""
     tail = f"layout: {NAME} (v next)"
+    confirm = view.get("confirm")
+    if confirm is not None:
+        head = f"Write this to the lane catalog?  y saves  ·  any other key cancels"
+        gap = max(1, width - cells(head) - cells(tail))
+        return [(head, PAL["veto"], True), (" " * gap, PAL["mute"], False),
+                (tail, PAL["mute"], False)]
     if editor is not None:
         field = str(getattr(editor, "field", "") or "gate")
         text = str(getattr(editor, "text", "") or "")
         head = f"{field.title()}  [ {text}_ ]%   ↵ save   esc cancel"
         color, bold = PAL["fg"], True
+    elif view.get("note") or view.get("order_note"):
+        head, color, bold = str(view.get("note") or view["order_note"]), PAL["watch"], False
     elif view.get("message"):
         head, color, bold = str(view["message"]), PAL["watch"], False
     elif state.get("error"):
@@ -1032,7 +1145,7 @@ def footer_line(state, view, editor, width):
         saved = state["save"]["status"] == "saved"
         head, color, bold = str(state["save"]["detail"]), PAL["ok"] if saved else PAL["veto"], not saved
     else:
-        hints = list(HINTS_TABLE if view.get("harness_view") else HINTS_LIST)
+        hints = list(HINTS[current_view(view)])
         head = "  ".join(hints + ["? help"])
         while hints and cells(head) > width - cells(tail) - 3:
             hints.pop()
@@ -1045,6 +1158,44 @@ def footer_line(state, view, editor, width):
 # --- the frame --------------------------------------------------------------
 
 
+def _cell_position(state, view, lane):
+    """(Tier, Order, the line the Lane sits on inside its cell), or None."""
+    harnesses, tiers, cell = table(state)
+    for number in tiers:
+        for name in harnesses:
+            rows = cell.get((name, number)) or ()
+            for depth, row in enumerate(rows):
+                if row.get("lane") == lane:
+                    return number, row.get("order"), depth
+    return None
+
+
+def _watch_order(state, view, lane):
+    """Say so when `J`/`K` really moved the Order but the table did not stir.
+
+    Order belongs to the Tier, not to the Harness row, so the Lane that swapped
+    places can be another Harness's.  The Tier list shows that move; the table's
+    cell cannot, and silence there reads as a key that did nothing.
+    """
+    view["order_note"] = None
+    if current_view(view) != "table" or lane is None:
+        view["_order_seen"] = None
+        return
+    now = _cell_position(state, view, lane)
+    before = view.get("_order_seen")
+    view["_order_seen"] = (lane, now)
+    if not before or before[0] != lane or before[1] is None or now is None:
+        return
+    tier, order, depth = now
+    was_tier, was_order, was_depth = before[1]
+    if tier == was_tier and order != was_order and depth == was_depth:
+        view["order_note"] = (
+            f"Order {was_order} {ARROW} {order} in Tier {tier}. The Tier's Order is shared "
+            f"by every Harness, so the Lane that swapped is another Harness's and this "
+            f"cell does not move."
+        )
+
+
 def render(state, *, width, height, selected_lane, editor, message, view):
     """Return exactly `height` painted strings, each at most `width` cells."""
     if not isinstance(view, dict):
@@ -1055,6 +1206,16 @@ def render(state, *, width, height, selected_lane, editor, message, view):
         return []
     view["message"] = message or ""
     view["_selected"] = selected_lane
+
+    # A pending Tier move belongs to the Lane it was proposed for and to the
+    # catalog it was previewed on.  Any host key that moves the selection, and
+    # any reload, drops it, so `y` can only ever confirm what is on the screen.
+    if view.get("confirm") is not None and (
+        view.get("_confirm_lane") != selected_lane
+        or view.get("_confirm_revision") != state.get("revision")
+    ):
+        view["confirm"] = None
+    _watch_order(state, view, selected_lane)
 
     columns = grid(width)
     deck = min(width, deck_width(columns))
@@ -1073,12 +1234,15 @@ def render(state, *, width, height, selected_lane, editor, message, view):
         return chrome + body + [footer]
 
     # The foot takes what it needs and leaves the body at least three lines.
+    # A pending Tier move outranks the descriptions: it is about to write.
     foot: list[str] = []
-    if view.get("descriptions"):
-        room = max(0, height - len(chrome) - 1 - 3)
+    room = max(0, height - len(chrome) - 1 - 3)
+    if view.get("confirm") is not None:
+        foot = [line(part, width) for part in confirm_lines(view["confirm"], width)][:room]
+    elif view.get("descriptions"):
         foot = [line(part, width) for part in foot_lines(width)][:room]
 
-    if view.get("aid"):
+    if current_view(view) == "aid":
         body_height = height - len(chrome) - len(foot) - 1
         if body_height < 1:
             painted = [line(identity, width), footer]
@@ -1088,7 +1252,7 @@ def render(state, *, width, height, selected_lane, editor, message, view):
         body.extend([""] * max(0, body_height - len(body)))
         return chrome + body + foot + [footer]
 
-    if view.get("harness_view"):
+    if current_view(view) == "table":
         body_height = height - len(chrome) - len(foot) - 1
         if body_height < 1:
             painted = [line(identity, width), footer]
@@ -1171,15 +1335,69 @@ def render(state, *, width, height, selected_lane, editor, message, view):
     return painted[:height]
 
 
-def handle_key(key, state, view):
-    """Descriptions, the Harness view, folding and help.
+def _set_view(state, view, name):
+    """Show one of the three bodies and keep the selection on a real stop."""
+    view["view"] = name if name in VIEWS else VIEWS[0]
+    view["offset"] = 0
+    view["confirm"] = None
+    return _stop_lane(state, view, view.get("_selected"))
+
+
+def _propose_tier(state, view, model, delta):
+    """`H`/`L`: preview a Tier move. This never writes; `y` in the next key does."""
+    selected = view.get("_selected")
+    if model is None:
+        view["note"] = "Tier moves need the host's save path; this build did not pass one."
+        return True
+    tier = None
+    for item in state.get("tiers") or []:
+        if any(row.get("lane") == selected for row in item.get("rows") or ()):
+            tier = item.get("tier")
+    if tier is None:
+        return True
+    target = tier + delta
+    if target not in RAILS:
+        view["note"] = (
+            f"Tier {tier} is the {'first' if delta < 0 else 'last'} Tier; "
+            f"{selected} cannot move {'left' if delta < 0 else 'right'}."
+        )
+        return True
+    edit = model.preview_lane_tier(selected, target)
+    if edit is None:
+        # The model wrote the reason into the save state; the footer shows it.
+        return True
+    view["confirm"] = edit
+    view["_confirm_lane"] = selected
+    view["_confirm_revision"] = state.get("revision")
+    return True
+
+
+def handle_key(key, state, view, model=None):
+    """The views, the selection, folding, help, and the one Tier write.
 
     A Lane name returned here asks the host to select that Lane; it is truthy,
-    so a host that only tests the result still reads it as "key used".
+    so a host that only tests the result still reads it as "key used".  ``model``
+    arrives only from a host that offers it, and only ``H``/``L`` use it.
     """
     if not isinstance(view, dict):
         return False
     selected = view.get("_selected")
+    key = ARROWS.get(key, key)
+    view["note"] = None
+
+    # A pending Tier move eats every key: `y` writes it, anything else drops it.
+    confirm = view.get("confirm")
+    if confirm is not None:
+        view["confirm"] = None
+        if key == "y":
+            if model is None:
+                view["note"] = "Not saved: no save path."
+            else:
+                model.apply_lane_tier(confirm)
+            return True
+        view["note"] = f"Tier move cancelled; {getattr(confirm, 'lane', '')} is unchanged."
+        return True
+
     if key == "?":
         view["help"] = not view.get("help", False)
         return True
@@ -1191,14 +1409,18 @@ def handle_key(key, state, view):
     if key == "d":
         view["descriptions"] = not view.get("descriptions", False)
         return True
+    if key == "\t":
+        here = current_view(view)
+        return _set_view(state, view, VIEWS[(VIEWS.index(here) + 1) % len(VIEWS)]) or True
+    if key == "\x1b[Z":
+        here = current_view(view)
+        return _set_view(state, view, VIEWS[(VIEWS.index(here) - 1) % len(VIEWS)]) or True
     if key == "a":
-        view["aid"] = not view.get("aid", False)
-        return True
-    if key == "h":
-        view["harness_view"] = not view.get("harness_view", False)
-        view["aid"] = False
-        view["offset"] = 0
-        return _stop_lane(state, view, selected) or True
+        here = current_view(view)
+        if here == "aid":
+            return _set_view(state, view, view.get("_before_aid") or VIEWS[0]) or True
+        view["_before_aid"] = here
+        return _set_view(state, view, "aid") or True
     if key == "z":
         key_name = _fold_key_of(state, view, selected)
         if key_name is None:
@@ -1208,5 +1430,31 @@ def handle_key(key, state, view):
         view["folded"] = folded
         # Folding puts the selection on the deck's, or the Harness row's, own
         # line; its first Lane is the one name that stands for the fold.
+        return _stop_lane(state, view, selected) or True
+
+    here = current_view(view)
+    if here == "table":
+        if key in ("h", "l"):
+            found = table_step(state, view, selected, -1 if key == "h" else 1)
+            if found is None:
+                view["note"] = (
+                    f"No Lane to the {'left' if key == 'h' else 'right'} of this column."
+                )
+                return True
+            return found
+        if key in ("H", "L"):
+            return _propose_tier(state, view, model, -1 if key == "H" else 1)
+        return False
+    if here == "list" and key in ("h", "l"):
+        # In a list of decks, left closes and right opens, the way a tree does.
+        key_name = _fold_key_of(state, view, selected)
+        if key_name is None:
+            return True
+        folded = set(view.get("folded") or ())
+        if key == "h":
+            folded.add(key_name)
+        else:
+            folded.discard(key_name)
+        view["folded"] = folded
         return _stop_lane(state, view, selected) or True
     return False

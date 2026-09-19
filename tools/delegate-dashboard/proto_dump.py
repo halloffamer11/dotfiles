@@ -15,7 +15,12 @@ import re
 import sys
 import unicodedata
 
-from dashboard import DEFAULT_LAYOUT, carried_lane_names, discover_layouts
+from dashboard import (
+    DEFAULT_LAYOUT,
+    call_handle_key,
+    carried_lane_names,
+    discover_layouts,
+)
 from model import DashboardError, DashboardModel
 
 
@@ -55,6 +60,7 @@ def main(argv=None):
     parser.add_argument("--editor-text", default="25")
     parser.add_argument("--keys", default="", help="keys to feed handle_key before drawing")
     parser.add_argument("--message", default="")
+    parser.add_argument("--config-dir", help="directory holding lanes.json and routing.json")
     parser.add_argument("--check", action="store_true", help="report over-wide lines and exit non-zero")
     args = parser.parse_args(argv)
 
@@ -67,7 +73,7 @@ def main(argv=None):
     module = layouts[args.layout]
 
     try:
-        model = DashboardModel(cwd=args.cwd)
+        model = DashboardModel(cwd=args.cwd, config_dir=args.config_dir)
     except DashboardError as exc:
         sys.stderr.write(f"proto_dump: {exc}\n")
         return 1
@@ -76,9 +82,11 @@ def main(argv=None):
     selected = args.select or (names[0] if names else None)
     view = {}
     handler = getattr(module, "handle_key", None)
-    if args.keys:
-        # The host always draws before it reads a key, so a variant may keep the
-        # selection in `view`.  Draw one frame first, or a key sees an empty view.
+    for key in args.keys:
+        if handler is None:
+            break
+        # The host draws before every key it reads, so a variant may keep the
+        # selection in `view`.  Draw here too, or a key sees a stale view.
         module.render(
             model.state,
             width=args.width,
@@ -88,10 +96,8 @@ def main(argv=None):
             message="",
             view=view,
         )
-    for key in args.keys:
-        if handler is None:
-            break
-        used = handler(key, model.state, view)
+        used = call_handle_key(handler, key, model.state, view, model)
+        names = carried_lane_names(model.state)
         if isinstance(used, str) and used in names:
             selected = used
 

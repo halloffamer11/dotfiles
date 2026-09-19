@@ -5,8 +5,10 @@ The model resolves one Git project during construction, reads only cached Meter
 observations, and never runs a vendor probe or acquires Meter data.  Eligibility
 and leader decisions go to ``rank.tier_leaders``.  Gate, Margin, and Project-order
 saves go through ``catalog.edit_catalog`` with ``scope='project'``, cached meters,
-and the construction-time harness set.  Direct catalog writes are not a dashboard
-save path.
+and the construction-time harness set.  A Lane's Tier belongs to the Lane and not
+to the project, so ``preview_lane_tier``/``apply_lane_tier`` is the one write with
+``scope='global'``; it is a two-step path and never writes on the first call.
+Direct catalog writes are not a dashboard save path.
 """
 
 from __future__ import annotations
@@ -45,6 +47,7 @@ INTERVENING_EDIT_MARK = (
     "intervening edit: source documents or resolved paths changed; preview again"
 )
 METERS_OFF_EFFECT = "Gate, Margin and Pace inactive; Remaining is cached"
+ARROW = "→"
 
 
 class DashboardError(Exception):
@@ -60,6 +63,27 @@ class PercentageEdit:
     project_doc: dict[str, Any]
     policy_bytes: bytes | None
     global_signatures: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
+class TierEdit:
+    """One previewed Lane Tier change, and the catalog it was previewed on.
+
+    A Tier belongs to the Lane, not to the project, so this is the one write the
+    dashboard makes with ``scope='global'``.  It is never applied on the key
+    that proposes it: ``preview_lane_tier`` returns this, and nothing is written
+    until the same object comes back to ``apply_lane_tier``.
+    """
+
+    lane: str
+    old_tier: int
+    new_tier: int
+    revision: str
+    lanes_bytes: bytes | None
+    lanes_signature: tuple[str, str]
+    summary: str
+    reordered: tuple[str, ...] = ()
+    picks: tuple[tuple[str, str, str], ...] = ()
 
 
 def _percentage_text(value: int | float) -> str:
@@ -721,6 +745,159 @@ class DashboardModel:
             lane=lane_name,
             position=destination + 1,
         )
+
+    # --- the one global write: a Lane's Tier -------------------------------
+
+    def _global_lanes_edit_kwargs(self) -> dict[str, Any]:
+        """Like ``_catalog_edit_kwargs`` but for the global-only Tier field."""
+        return {
+            "scope": "global",
+            "cwd": str(self.project_root),
+            "config_dir": str(self.config_dir) if self.config_dir is not None else None,
+            "present": self.present,
+            "meters": self._cached_meters_doc(),
+        }
+
+    def _target_is_global_lanes(self, target: Any) -> bool:
+        """True when a catalog target file resolves to the pinned lane catalog."""
+        if not isinstance(target, dict):
+            return False
+        file_name = target.get("file")
+        if not isinstance(file_name, str) or not file_name:
+            return False
+        return (
+            Path(file_name).expanduser().resolve(strict=False)
+            == self.global_lanes_path.resolve(strict=False)
+        )
+
+    def _tier_of(self, lane_name: str) -> int | None:
+        for tier in self.state.get("tiers", []):
+            if any(row["lane"] == lane_name for row in tier["rows"]):
+                return tier["tier"]
+        return None
+
+    def preview_lane_tier(self, lane_name: str, new_tier: int) -> TierEdit | None:
+        """Preview one Lane's Tier change. Nothing is written by this call.
+
+        A Tier is the Lane's, not the project's, so this is the dashboard's only
+        ``scope='global'`` write and it goes through the same
+        ``catalog.edit_catalog`` preview the project saves use.  The returned
+        edit carries the revision and the catalog bytes it was previewed on, and
+        ``apply_lane_tier`` refuses a stale one.
+        """
+        if type(new_tier) is not int or new_tier not in TIER_COLORS:
+            self._set_save_state("error", "Not saved: a Tier is 1, 2, 3 or 4.")
+            return None
+        old_tier = self._tier_of(lane_name)
+        if old_tier is None:
+            self._set_save_state("error", f"Not saved: lane '{lane_name}' is not carried.")
+            return None
+        if old_tier == new_tier:
+            self._set_save_state("error", f"Not saved: '{lane_name}' is already in Tier {new_tier}.")
+            return None
+
+        try:
+            lanes_bytes = self._read_optional_bytes(self.global_lanes_path)
+        except OSError as exc:
+            self._set_save_state("error", f"Not saved: cannot read the lane catalog: {exc}")
+            return None
+
+        kwargs = self._global_lanes_edit_kwargs()
+        try:
+            preview = catalog.edit_catalog(
+                "set",
+                apply=False,
+                field=f"lanes.{lane_name}.tier",
+                value=new_tier,
+                **kwargs,
+            )
+        except (catalog.CatalogError, OSError, ValueError) as exc:
+            self._fail_catalog_call(exc)
+            return None
+
+        if not self._target_is_global_lanes(preview.get("target")):
+            self._set_save_state(
+                "error",
+                "Not saved: catalog preview targeted a file other than the lane catalog.",
+            )
+            return None
+        if preview.get("noop"):
+            self._set_save_state("error", f"Not saved: '{lane_name}' is already in Tier {new_tier}.")
+            return None
+
+        changed = [item for item in (preview.get("changed") or []) if isinstance(item, str)]
+        reordered = tuple(
+            item.split(".")[1] for item in changed if item.endswith(".order")
+        )
+        before = (preview.get("picks") or {}).get("before") or {}
+        after = (preview.get("picks") or {}).get("after") or {}
+        picks = tuple(
+            (name, str(before.get(name)), str(after.get(name)))
+            for name in sorted(set(before) | set(after))
+            if before.get(name) != after.get(name)
+        )
+        summary = f"{lane_name}  Tier {old_tier} {ARROW} Tier {new_tier}"
+        return TierEdit(
+            lane=lane_name,
+            old_tier=old_tier,
+            new_tier=new_tier,
+            revision=preview["revision"],
+            lanes_bytes=lanes_bytes,
+            lanes_signature=_file_signature(self.global_lanes_path),
+            summary=summary,
+            reordered=reordered,
+            picks=picks,
+        )
+
+    def apply_lane_tier(self, edit: TierEdit) -> bool:
+        """Apply a previewed Tier change, refusing a stale or moved target."""
+        if not isinstance(edit, TierEdit):
+            self._set_save_state("error", "Not saved: invalid Tier edit.")
+            return False
+        try:
+            current_bytes = self._read_optional_bytes(self.global_lanes_path)
+        except OSError as exc:
+            self._set_save_state("error", f"Not saved: cannot recheck the lane catalog: {exc}")
+            return False
+        if current_bytes != edit.lanes_bytes:
+            self.refresh()
+            self._set_save_state(
+                "conflict",
+                "Conflict: the lane catalog changed since the preview; reloaded it. "
+                "Repeat the action to save.",
+            )
+            return False
+
+        kwargs = self._global_lanes_edit_kwargs()
+        try:
+            result = catalog.edit_catalog(
+                "set",
+                apply=True,
+                expect=edit.revision,
+                field=f"lanes.{edit.lane}.tier",
+                value=edit.new_tier,
+                **kwargs,
+            )
+        except (catalog.CatalogError, OSError, ValueError) as exc:
+            return self._fail_catalog_call(exc)
+
+        if not self._target_is_global_lanes(result.get("target")):
+            self.refresh()
+            self._set_save_state(
+                "error",
+                "Saved, but the catalog reported a file other than the lane catalog.",
+            )
+            return False
+
+        self.refresh()
+        if self.state.get("error"):
+            self._set_save_state("error", "Saved, but the resulting catalog could not be reloaded.")
+            return False
+        self._set_save_state(
+            "saved",
+            f"Saved {edit.lane} into Tier {edit.new_tier} in the lane catalog.",
+        )
+        return True
 
     def _fresh_carried_lane_names(self, tier_number: int) -> list[str]:
         """Carried lane names for one Tier from a freshly loaded effective catalog."""
