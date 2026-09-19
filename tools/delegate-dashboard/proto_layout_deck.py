@@ -96,6 +96,8 @@ BAR_FULL = "█"
 BAR_PART = " ▏▎▍▌▋▊▉"
 BAR_EMPTY = "·"
 BAR_UNKNOWN = "╌"
+MARK = "┃"  # the Gate on a Remaining bar, the steal threshold on a Pace bar
+HAIRLINE = "─"
 EMDASH = "—"
 TIMES = "×"
 
@@ -103,38 +105,45 @@ TIMES = "×"
 _ONE_CELL = frozenset(
     list(_NERD_GLYPHS.values())
     + list(_PLAIN_GLYPHS.values())
-    + [RAIL, RULE, LEADER, BAR_FULL, BAR_EMPTY, BAR_UNKNOWN, EMDASH, TIMES]
+    + [RAIL, RULE, LEADER, BAR_FULL, BAR_EMPTY, BAR_UNKNOWN, MARK, HAIRLINE, EMDASH, TIMES]
     + list(BAR_PART)
 )
 
 EFFORT = {"low": "L", "medium": "M", "high": "H", "xhigh": "XH", "max": "Max", "ultra": "U"}
 
-# The closed reason set.  Every `reason` rank.py writes maps into one of these.
+# The closed reason set.  Every `reason` rank.py writes maps into one of these,
+# and each one is written out at the foot of the pane in its own colour.
 CODES = (
-    ("PICK", "ranking selects this Lane for the next job"),
-    ("STEAL", "takes the job from the Pick on Pace"),
-    ("ELIG", "eligible; ranking sorts it after the Pick"),
-    ("NOMTR", "no Meter reading, so it sorts last"),
-    ("GATE", "Remaining is under the Gate"),
-    ("CLI", "the harness is not on PATH"),
-    ("FLOOR", "below the Class floor"),
-    ("CEIL", "above the Class ceiling"),
-    ("VETO", "held back for another reason"),
+    ("PICK", "gold", "Ranking selects this Lane for the next job."),
+    ("STEAL", "steal", "Its Pace took the job from the Lane that sorted ahead of it."),
+    ("ELIG", "fg", "Eligible. It sorts after the Pick and takes the job if the Pick cannot."),
+    ("NOMTR", "mute", "Its Meter has no reading, so ranking sorts it last."),
+    ("GATE", "veto", "Its Meter's Remaining is under the Gate, so it takes no job."),
+    ("CLI", "veto", "Its harness is not on PATH, so nothing can run it here."),
+    ("FLOOR", "mute", "Its Tier is below the floor of the Class asking for a Lane."),
+    ("CEIL", "mute", "Its Tier is above the ceiling of the Class asking for a Lane."),
+    ("VETO", "veto", "Held back for another reason the pane has no code for."),
 )
 
-# 4b: the five values that earn a description.
+# The five values that earn a description, in the words of CONTEXT.md.
 TERMS = (
-    ("Remaining", "the fraction of a Meter still unspent"),
-    ("Pace", "affordable rate ÷ an even weekly spend"),
-    ("Gate", "lowest Remaining that still takes a job"),
-    ("Margin", "extra Pace needed to take the Pick's job"),
-    ("Meter", "one subscription quota; Lanes share it"),
+    ("Remaining", "The fraction of a Meter still unspent, using the lower Window "
+                  "fraction when both Windows constrain the same spend."),
+    ("Pace", "The rate a Meter can afford from now to its weekly reset, divided by "
+             "an even spend across the whole week. 1.00× is on track, and above 1 "
+             "means quota will expire unspent."),
+    ("Gate", "The lowest Remaining a Meter may have and still take a job."),
+    ("Margin", "How much higher a Lane's Pace must be to take a job from the Pick "
+               "when it sorts after the Pick."),
+    ("Meter", "One subscription quota. Each Lane uses exactly one, and many Lanes "
+              "can share one."),
 )
 
 KEYS = (
-    ("d", "descriptions on or off"),
-    ("h", "Tier view or Harness view"),
-    ("z", "fold the deck under the cursor"),
+    ("d", "descriptions and reason codes, at the foot"),
+    ("h", "the Tier list or the Harness table"),
+    ("a", "how the Gate and the Margin act, per Meter"),
+    ("z", "fold the deck, or the Harness row, under the cursor"),
     ("?", "close this help"),
 )
 
@@ -241,22 +250,31 @@ def _sgr(hex_color: str, *, back: bool = False) -> str:
 
 
 def line(segments, width: int, *, back: str | None = None) -> str:
-    """Paint (text, colour, bold) segments into at most `width` cells."""
+    """Paint (text, colour, bold) segments into at most `width` cells.
+
+    A segment may carry a fourth item, its own background, which is how the
+    Harness table bands one cell of a row rather than the whole row.
+    """
     out: list[str] = []
     used = 0
-    back_code = _sgr(back, back=True) if back else ""
-    for text, color, bold in segments:
+    for segment in segments:
+        text, color, bold = segment[0], segment[1], segment[2]
+        behind = segment[3] if len(segment) > 3 else back
         if used >= width:
             break
         piece = fit(text, width - used)
         if not piece:
             continue
         out.append(
-            ("\033[1m" if bold else "") + back_code + _sgr(color or PAL["fg"]) + piece + RESET
+            ("\033[1m" if bold else "")
+            + (_sgr(behind, back=True) if behind else "")
+            + _sgr(color or PAL["fg"])
+            + piece
+            + RESET
         )
         used += cells(piece)
     if back is not None and used < width:
-        out.append(back_code + " " * (width - used) + RESET)
+        out.append(_sgr(back, back=True) + " " * (width - used) + RESET)
     return "".join(out)
 
 
@@ -328,26 +346,35 @@ def harness_name(row_or_name: Any) -> str:
     return str(name or "").capitalize() or EMDASH
 
 
+CODE_ROLE = {code: role for code, role, _text in CODES}
+
+
+def code_color(code: str) -> str:
+    return PAL.get(CODE_ROLE.get(code, "fg"), PAL["fg"])
+
+
 def reason_code(row: dict[str, Any]) -> tuple[str, str]:
     """One code from the closed set, with the colour the scale gives it."""
     reason = str(row.get("reason") or "")
     if reason == "pick":
-        return "PICK", PAL["gold"]
-    if reason.startswith("stolen by pace"):
-        return "STEAL", PAL["steal"]
-    if reason.startswith("unknown meter") or row.get("remaining") is None:
-        return "NOMTR", PAL["mute"]
-    if reason.startswith("vetoed:gate"):
-        return "GATE", PAL["veto"]
-    if reason.startswith("vetoed:cli"):
-        return "CLI", PAL["veto"]
-    if reason.startswith("vetoed:floor"):
-        return "FLOOR", PAL["mute"]
-    if reason.startswith("vetoed:ceiling"):
-        return "CEIL", PAL["mute"]
-    if reason.startswith("vetoed:"):
-        return "VETO", PAL["veto"]
-    return "ELIG", PAL["fg"]
+        code = "PICK"
+    elif reason.startswith("stolen by pace"):
+        code = "STEAL"
+    elif reason.startswith("unknown meter") or row.get("remaining") is None:
+        code = "NOMTR"
+    elif reason.startswith("vetoed:gate"):
+        code = "GATE"
+    elif reason.startswith("vetoed:cli"):
+        code = "CLI"
+    elif reason.startswith("vetoed:floor"):
+        code = "FLOOR"
+    elif reason.startswith("vetoed:ceiling"):
+        code = "CEIL"
+    elif reason.startswith("vetoed:"):
+        code = "VETO"
+    else:
+        code = "ELIG"
+    return code, code_color(code)
 
 
 def status_icon(row: dict[str, Any]) -> tuple[str, str]:
@@ -398,35 +425,16 @@ def leader_label(state: dict[str, Any], lane: Any) -> str:
 
 
 def groups(state: dict[str, Any], view: dict[str, Any]) -> list[dict[str, Any]]:
-    """One deck per Tier, or per Harness and Tier inside it in the Harness view."""
-    tiers = state.get("tiers") or []
+    """One deck per Tier: the Tier list's own unit, and what `z` folds there."""
     out: list[dict[str, Any]] = []
-    if not view.get("harness_view"):
-        for tier in tiers:
-            number = tier.get("tier")
-            out.append({
-                "key": f"T{number}",
-                "tier": number,
-                "head": f"Tier {number}",
-                "leader": tier.get("leader"),
-                "rows": list(tier.get("rows") or []),
-            })
-        return out
-    buckets: dict[tuple[str, Any], list[dict[str, Any]]] = {}
-    leaders: dict[tuple[str, Any], Any] = {}
-    for tier in tiers:
-        for row in tier.get("rows") or []:
-            key = (str(row.get("harness") or ""), tier.get("tier"))
-            buckets.setdefault(key, []).append(row)
-            if row.get("lane") == tier.get("leader"):
-                leaders[key] = tier.get("leader")
-    for harness, number in sorted(buckets, key=lambda key: (key[0], key[1] is None, key[1])):
+    for tier in state.get("tiers") or []:
+        number = tier.get("tier")
         out.append({
-            "key": f"{harness}/T{number}",
+            "key": f"T{number}",
             "tier": number,
-            "head": f"{harness_name(harness)}  Tier {number}",
-            "leader": leaders.get((harness, number)),
-            "rows": buckets[(harness, number)],
+            "head": f"Tier {number}",
+            "leader": tier.get("leader"),
+            "rows": list(tier.get("rows") or []),
         })
     return out
 
@@ -444,16 +452,62 @@ def entries(state: dict[str, Any], view: dict[str, Any]) -> list[tuple[str, Any,
     return items
 
 
-def selectable(state: dict[str, Any], view: dict[str, Any]) -> list[str]:
-    """The Lane names j/k may walk.
+def table(state: dict[str, Any]) -> tuple[list[str], list[Any], dict]:
+    """The Harness table: Harnesses down the page, Tiers across it.
 
-    A folded deck keeps exactly one name, so one press leaves it and the hidden
-    rows are never walked.  The host paints that Lane's deck head as selected.
+    Returns the Harness names, the Tier numbers, and the Lanes of each cell.
+    """
+    tiers = [tier.get("tier") for tier in state.get("tiers") or []]
+    harnesses: list[str] = []
+    cell: dict[tuple[str, Any], list[dict[str, Any]]] = {}
+    for tier in state.get("tiers") or []:
+        for row in tier.get("rows") or []:
+            name = str(row.get("harness") or "")
+            if name not in harnesses:
+                harnesses.append(name)
+            cell.setdefault((name, tier.get("tier")), []).append(row)
+    harnesses.sort()
+    return harnesses, tiers, cell
+
+
+def table_order(state: dict[str, Any]) -> list[dict[str, Any]]:
+    """The table read down each Tier column in turn, which is how j/k walk it.
+
+    Column by column keeps the Tier list's own sequence, so `h` never moves the
+    selection, and `J`/`K` read as a move inside the column they are already in.
+    """
+    harnesses, tiers, cell = table(state)
+    out: list[dict[str, Any]] = []
+    for number in tiers:
+        for name in harnesses:
+            out.extend(cell.get((name, number)) or ())
+    return out
+
+
+def _harness_key(harness: Any) -> str:
+    return f"H/{harness}"
+
+
+def selectable(state: dict[str, Any], view: dict[str, Any]) -> list[str]:
+    """The Lane names j/k may walk, in the order the current view reads.
+
+    A folded deck, or a folded Harness row, keeps exactly one name, so one press
+    leaves it and the hidden rows are never walked.
     """
     if not isinstance(view, dict):
         view = {}
     folded = set(view.get("folded") or ())
     names: list[str] = []
+    if view.get("harness_view"):
+        seen: set[str] = set()
+        for row in table_order(state):
+            key = _harness_key(row.get("harness"))
+            if key in folded:
+                if key in seen:
+                    continue
+                seen.add(key)
+            names.append(row["lane"])
+        return names
     for group in groups(state, view):
         rows = group["rows"]
         if not rows:
@@ -465,20 +519,30 @@ def selectable(state: dict[str, Any], view: dict[str, Any]) -> list[str]:
     return names
 
 
-def _group_of(state: dict[str, Any], view: dict[str, Any], lane: Any) -> dict[str, Any] | None:
-    for group in groups(state, view):
-        if any(row.get("lane") == lane for row in group["rows"]):
-            return group
+def _fold_key_of(state: dict[str, Any], view: dict[str, Any], lane: Any) -> str | None:
+    """What `z` folds for this Lane: its Harness row, or its Tier's deck."""
+    for tier in state.get("tiers") or []:
+        for row in tier.get("rows") or []:
+            if row.get("lane") == lane:
+                if view.get("harness_view"):
+                    return _harness_key(row.get("harness"))
+                return f"T{tier.get('tier')}"
     return None
 
 
 def _stop_lane(state: dict[str, Any], view: dict[str, Any], lane: Any) -> Any:
     """The selectable Lane that stands for `lane` once the folds are applied."""
-    group = _group_of(state, view, lane)
-    if group is None or group["rows"] is None:
+    key = _fold_key_of(state, view, lane)
+    if key is None or key not in set(view.get("folded") or ()):
         return lane
-    if group["key"] in set(view.get("folded") or ()) and group["rows"]:
-        return group["rows"][0]["lane"]
+    if view.get("harness_view"):
+        for row in table_order(state):
+            if _harness_key(row.get("harness")) == key:
+                return row["lane"]
+        return lane
+    for group in groups(state, view):
+        if group["key"] == key and group["rows"]:
+            return group["rows"][0]["lane"]
     return lane
 
 
@@ -564,9 +628,7 @@ def head_segments(group, state, view, width, *, selected):
         lead = f"{LEADER} {leader_label(state, group['leader'])}"
         lead_color = PAL["gold"]
     else:
-        # In the Harness view a deck can hold eligible Lanes and still not hold
-        # its Tier's leader, so only an empty deck is called none eligible.
-        lead = f"{LEADER} none eligible" if not eligible else EMDASH
+        lead = f"{LEADER} none eligible"
         lead_color = PAL["mute"]
     tail = f"{len(rows)} Lane{'' if len(rows) == 1 else 's'} · {eligible} eligible"
     gap = max(1, width - cells(left) - cells(lead) - cells(tail))
@@ -577,6 +639,306 @@ def head_segments(group, state, view, width, *, selected):
         (" " * gap, PAL["mute"], False),
         (tail, PAL["mute"], False),
     ]
+
+
+# --- the Harness table ------------------------------------------------------
+
+# label, then one Tier column each behind a rule in the Tier's own hue.
+TABLE_LABEL = 9
+TABLE_GUTTER = 2  # the coloured rule and the space after it
+
+
+def table_cell_width(width: int, count: int) -> int:
+    if count <= 0:
+        return 0
+    deck = max(0, min(int(width), MEASURE))
+    return max(6, (deck - TABLE_LABEL) // count - TABLE_GUTTER)
+
+
+def table_entry(row, size, *, selected):
+    """One Lane in a cell: the icon, the model and the effort letter, no more.
+
+    The selected Lane is banded across its own cell, which is what the Tier
+    list bands across its whole row; gold carries it either way.
+    """
+    code, color = reason_code(row)
+    icon, icon_color = status_icon(row)
+    band = PAL["selbg"] if selected else None
+    text = f"{display_model(row)} {effort_letter(row)}"
+    return [
+        (icon, PAL["gold"] if selected else icon_color, code == "PICK", band),
+        (" ", PAL["mute"], False, band),
+        (pad(text, max(0, size - 2)), PAL["gold"] if selected else color,
+         selected or code == "PICK", band),
+    ]
+
+
+def table_lines(state, view, width, selected_lane):
+    """Harnesses down, Tiers across.  Each block is as tall as its fullest cell.
+
+    Returns the painted segments and the line the selection sits on.  Colour is
+    the only ink beyond the words: the rule down each column carries the Tier's
+    hue, and each Lane carries its reason's.
+    """
+    harnesses, tiers, cell = table(state)
+    folded = set(view.get("folded") or ())
+    size = table_cell_width(width, len(tiers))
+    out: list[list[tuple]] = []
+    cursor = None
+
+    head: list[tuple] = [(pad("", TABLE_LABEL), PAL["mute"], False)]
+    for number in tiers:
+        head.append((RULE, RAILS.get(number, PAL["mute"]), False))
+        head.append((" ", PAL["mute"], False))
+        head.append((pad(f"Tier {number}", size), RAILS.get(number, PAL["mute"]), True))
+    out.append(head)
+
+    for index, name in enumerate(harnesses):
+        if index:
+            out.append([])
+        rows_here = [row for number in tiers for row in (cell.get((name, number)) or ())]
+        here = any(row.get("lane") == selected_lane for row in rows_here)
+        if _harness_key(name) in folded:
+            eligible = sum(1 for row in rows_here if row.get("eligible"))
+            if here:
+                cursor = len(out)
+            out.append([
+                (pad(f"{glyph('folded')} {harness_name(name)}", TABLE_LABEL),
+                 PAL["gold"] if here else PAL["fg"], True,
+                 PAL["selbg"] if here else None),
+                (f"{len(rows_here)} Lanes folded · {eligible} eligible",
+                 PAL["gold"] if here else PAL["mute"], False,
+                 PAL["selbg"] if here else None),
+            ])
+            continue
+        depth = max((len(cell.get((name, number)) or ()) for number in tiers), default=0)
+        for line_no in range(max(1, depth)):
+            label = f"{glyph('open')} {harness_name(name)}" if line_no == 0 else ""
+            segments: list[tuple] = [(pad(label, TABLE_LABEL), PAL["fg"], line_no == 0)]
+            for number in tiers:
+                column = cell.get((name, number)) or ()
+                segments.append((RULE, RAILS.get(number, PAL["mute"]), False))
+                segments.append((" ", PAL["mute"], False))
+                if line_no < len(column):
+                    row = column[line_no]
+                    selected = row.get("lane") == selected_lane
+                    if selected:
+                        cursor = len(out)
+                    segments.extend(table_entry(row, size, selected=selected))
+                elif line_no == 0:
+                    # An empty cell says so; blank space would read as a fault.
+                    segments.append((pad(f"{EMDASH} none", size), PAL["mute"], False))
+                else:
+                    segments.append((pad("", size), PAL["mute"], False))
+            out.append(segments)
+    return out, cursor
+
+
+# --- the Gate and Margin aid -------------------------------------------------
+
+
+def meter_rows(state):
+    """One entry per Meter: its Harness, its Remaining and Pace, and its Lanes."""
+    order: list[str] = []
+    seen: dict[str, dict[str, Any]] = {}
+    for tier in state.get("tiers") or []:
+        for row in tier.get("rows") or []:
+            name = str(row.get("meter") or "")
+            entry = seen.get(name)
+            if entry is None:
+                order.append(name)
+                entry = seen[name] = {
+                    "meter": name,
+                    "harness": str(row.get("harness") or ""),
+                    "remaining": row.get("remaining"),
+                    "pace": row.get("pace"),
+                    "lanes": [],
+                }
+            entry["lanes"].append(dict(row, _tier=tier.get("tier")))
+    return [seen[name] for name in order]
+
+
+def steal_thresholds(state):
+    """``Pick's Pace + Margin`` per Tier: what a Lane must now reach to take it.
+
+    The rule is rank.py's, lines 177-183: scanning the eligible Lanes after the
+    first in sort order, a Lane takes the Pick when its Pace reaches the current
+    Pick's Pace plus the Margin, and the Pick then moves to it, so the bar this
+    draws is the one a further Lane has to clear.
+    """
+    margin = ((state.get("policy") or {}).get("margin") or {}).get("value") or 0.0
+    out: dict[Any, dict[str, Any]] = {}
+    for tier in state.get("tiers") or []:
+        for row in tier.get("rows") or []:
+            code, _color = reason_code(row)
+            if code in ("PICK", "STEAL"):
+                pace = row.get("pace")
+                out[tier.get("tier")] = {
+                    "pick": row.get("lane"),
+                    "meter": row.get("meter"),
+                    "pace": pace,
+                    "threshold": None if pace is None else float(pace) + float(margin),
+                }
+                break
+    return out
+
+
+def meter_verdict(entry, state, thresholds):
+    """What the Gate and the Margin do to this Meter, in one phrase each."""
+    gate = ((state.get("policy") or {}).get("gate") or {}).get("value") or 0.0
+    remaining = entry["remaining"]
+    if remaining is None:
+        rem_text, rem_color = "no Meter reading", PAL["mute"]
+    elif float(remaining) < float(gate):
+        # rank.py vetoes through usage.eligible: Remaining equal to Gate passes.
+        rem_text, rem_color = "under the Gate", PAL["veto"]
+    else:
+        rem_text, rem_color = "over the Gate", PAL["ok"]
+
+    pace = entry["pace"]
+    holds = [number for number, item in thresholds.items() if item["meter"] == entry["meter"]]
+    if holds:
+        return (rem_text, rem_color,
+                f"holds the Pick in T{min(holds)}", PAL["gold"])
+    if rem_color is PAL["veto"]:
+        # The Gate already vetoed it; the Margin never gets a say.
+        return rem_text, rem_color, EMDASH, PAL["mute"]
+    if pace is None:
+        return rem_text, rem_color, "no Pace reading", PAL["mute"]
+    reachable = [
+        (item["threshold"], number)
+        for number, item in thresholds.items()
+        if item["threshold"] is not None
+        and any(row["_tier"] == number and row.get("eligible") for row in entry["lanes"])
+    ]
+    if not reachable:
+        return rem_text, rem_color, "no Tier it can take", PAL["mute"]
+    threshold, number = min(reachable)
+    if float(pace) >= threshold:
+        return rem_text, rem_color, f"takes the Pick in T{number}", PAL["steal"]
+    return (rem_text, rem_color,
+            f"needs {threshold:.2f}{TIMES} to take T{number}", PAL["mute"])
+
+
+def marked_bar(value, width, *, mark_at, scale=1.0, color, mark_color):
+    """A solid bar with one threshold mark standing where the rule bites."""
+    segments: list[tuple[str, str, bool]] = []
+    if width <= 0:
+        return segments
+    position = None
+    if mark_at is not None and scale > 0:
+        position = int(round(float(mark_at) / float(scale) * width))
+        position = None if position < 0 or position >= width else position
+    exact = 0.0
+    if value is not None and scale > 0:
+        exact = max(0.0, min(1.0, float(value) / float(scale))) * width
+    filled = int(exact)
+    eighths = int((exact - filled) * 8)
+    for index in range(width):
+        if index == position:
+            segments.append((MARK, mark_color, True))
+        elif value is None:
+            segments.append((BAR_UNKNOWN, PAL["mute"], False))
+        elif index < filled:
+            segments.append((BAR_FULL, color, False))
+        elif index == filled and eighths:
+            segments.append((BAR_PART[eighths], color, False))
+        else:
+            segments.append((BAR_EMPTY, PAL["mute"], False))
+    return segments
+
+
+def aid_lines(state, width):
+    """Per Meter, under its Harness: Remaining against the Gate, Pace against
+    the Pace a Lane must reach to take the Pick."""
+    deck = max(0, min(int(width), MEASURE))
+    policy = state.get("policy") or {}
+    gate = (policy.get("gate") or {}).get("value") or 0.0
+    gate_text = (policy.get("gate") or {}).get("display") or EMDASH
+    margin_text = (policy.get("margin") or {}).get("display") or EMDASH
+    thresholds = steal_thresholds(state)
+    meters = meter_rows(state)
+    paces = [entry["pace"] for entry in meters if entry["pace"] is not None]
+    paces += [item["threshold"] for item in thresholds.values() if item["threshold"] is not None]
+    scale = max(2.0, (max(paces) if paces else 0.0) * 1.15)
+
+    bar_w = max(8, min(34, deck - 46))
+    out: list[list[tuple[str, str, bool]]] = [
+        [("How the Gate and the Margin act, per Meter", PAL["fg"], True)],
+        [(f"A Lane is vetoed when its Meter's Remaining is under {MARK}, the Gate "
+          f"at {gate_text}.", PAL["mute"], False)],
+        [(f"A Lane takes the Pick when its Pace reaches {MARK}, the Pick's Pace plus "
+          f"the Margin of {margin_text}.", PAL["mute"], False)],
+    ]
+    harness = None
+    meters.sort(key=lambda entry: (entry["harness"], entry["meter"]))
+    for entry in meters:
+        if entry["harness"] != harness:
+            harness = entry["harness"]
+            out.append([])
+            out.append([(harness_name(harness), PAL["fg"], True)])
+        rem_text, rem_color, pace_text_, pace_color = meter_verdict(entry, state, thresholds)
+        out.append(
+            [("  " + pad(entry["meter"], 16), PAL["mute"], False),
+             (pad("Rem", 5), PAL["mute"], False)]
+            + marked_bar(entry["remaining"], bar_w, mark_at=gate, scale=1.0,
+                         color=remaining_color(entry, state), mark_color=PAL["veto"])
+            + [(" " + pad(percent(entry["remaining"]), 5, ">"), PAL["fg"], False),
+               ("  " + rem_text, rem_color, False)]
+        )
+        reachable = [
+            item["threshold"]
+            for number, item in thresholds.items()
+            if item["threshold"] is not None
+            and any(row["_tier"] == number and row.get("eligible") for row in entry["lanes"])
+        ]
+        out.append(
+            [(pad("", 18), PAL["mute"], False), (pad("Pace", 5), PAL["mute"], False)]
+            + marked_bar(entry["pace"], bar_w, mark_at=min(reachable) if reachable else None,
+                         scale=scale, color=PAL["steal"], mark_color=PAL["gold"])
+            + [(" " + pad(pace_text(entry["pace"]), 5, ">"), PAL["fg"], False),
+               ("  " + pace_text_, pace_color, False)]
+        )
+    return out
+
+
+# --- the foot: descriptions and the reason codes ----------------------------
+
+
+def wrapped(term, text, *, term_width, measure):
+    """One term, then its sentence at a comfortable measure under one indent."""
+    body = measure - term_width
+    words = text.split()
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if cells(candidate) > body and current:
+            lines.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return [(pad(term, term_width), line_text) for term, line_text in
+            [(term, lines[0])] + [("", rest) for rest in lines[1:]]]
+
+
+def foot_lines(width):
+    """The descriptions and every reason code, in plain words, at the foot."""
+    measure = min(max(0, int(width)), 82)
+    out: list[list[tuple[str, str, bool]]] = [
+        [(HAIRLINE * min(max(0, int(width)), MEASURE), PAL["mute"], False)]
+    ]
+    for term, text in TERMS:
+        for label, body in wrapped(term, text, term_width=11, measure=measure):
+            out.append([(label, PAL["fg"], bool(label.strip())), (body, PAL["mute"], False)])
+    out.append([])
+    for code, role, text in CODES:
+        for label, body in wrapped(code, text, term_width=8, measure=measure):
+            out.append([(label, PAL.get(role, PAL["fg"]), bool(label.strip())),
+                        (body, PAL["mute"], False)])
+    return out
 
 
 # --- chrome -----------------------------------------------------------------
@@ -622,33 +984,34 @@ def column_header(columns):
     return segments
 
 
-def description_lines(width):
-    """4b: the five values, each with the description `d` turns on and off."""
-    written = [f"{pad(term, 9)}  {text}" for term, text in TERMS]
-    if width >= 106:
-        return [
-            [(" ".join(pad(text, 51) for text in written[index : index + 2]), PAL["mute"], False)]
-            for index in range(0, len(written), 2)
-        ]
-    return [[(text, PAL["mute"], False)] for text in written]
-
-
 def help_lines(width):
-    out = [[("deck · reason codes", PAL["fg"], True)]]
-    for code, meaning in CODES:
-        out.append([(f"  {pad(code, 7)}", PAL["gold"], False), (meaning, PAL["mute"], False)])
-    out.append([("keys", PAL["fg"], True)])
+    out = [[("deck", PAL["fg"], True),
+            ("   a Lane is a model at an effort on a harness", PAL["mute"], False)]]
     for key, meaning in KEYS:
         out.append([(f"  {pad(key, 7)}", PAL["gold"], False), (meaning, PAL["mute"], False)])
-    out.append([
-        ("  host   ", PAL["mute"], False),
-        ("j/k select  J/K move inside the Tier  g/m edit  r reload  v next  q close",
-         PAL["mute"], False),
-    ])
+    out.append([])
+    out.append([("  host   ", PAL["mute"], False),
+                ("j/k select  J/K move the Lane inside its Tier  g/m edit the Gate or "
+                 "the Margin", PAL["mute"], False)])
+    out.append([(pad("", 9), PAL["mute"], False),
+                ("r reload  v next layout  q close", PAL["mute"], False)])
+    out.append([])
+    out.append([("  In the Tier list j/k walk the Lanes down the page.  In the Harness "
+                 "table they", PAL["mute"], False)])
+    out.append([("  walk down one Tier column at a time, so a Tier keeps the sequence it "
+                 "has in the", PAL["mute"], False)])
+    out.append([("  list and J/K still move inside the column under the cursor.",
+                 PAL["mute"], False)])
+    out.append([])
+    out.append([("  d", PAL["gold"], False),
+                ("  writes out Remaining, Pace, Gate, Margin, Meter and every reason "
+                 "code at the foot.", PAL["mute"], False)])
     return out
 
 
-HINTS = ("j/k select", "J/K move", "d descriptions", "h Harness view", "z fold")
+HINTS_LIST = ("j/k select", "h Harness table", "a Gate/Margin", "d terms", "J/K move", "z fold")
+HINTS_TABLE = ("j/k down the column", "h Tier list", "a Gate/Margin", "d terms",
+               "J/K move", "z fold")
 
 
 def footer_line(state, view, editor, width):
@@ -669,7 +1032,7 @@ def footer_line(state, view, editor, width):
         saved = state["save"]["status"] == "saved"
         head, color, bold = str(state["save"]["detail"]), PAL["ok"] if saved else PAL["veto"], not saved
     else:
-        hints = list(HINTS)
+        hints = list(HINTS_TABLE if view.get("harness_view") else HINTS_LIST)
         head = "  ".join(hints + ["? help"])
         while hints and cells(head) > width - cells(tail) - 3:
             hints.pop()
@@ -709,11 +1072,49 @@ def render(state, *, width, height, selected_lane, editor, message, view):
         body.extend([""] * max(0, body_height - len(body)))
         return chrome + body + [footer]
 
-    chrome.append(line(column_header(columns), deck))
+    # The foot takes what it needs and leaves the body at least three lines.
+    foot: list[str] = []
     if view.get("descriptions"):
-        # A wider pane buys a shorter block, not a wider deck.
-        chrome.extend(line(part, width) for part in description_lines(width))
-    body_height = height - len(chrome) - 1
+        room = max(0, height - len(chrome) - 1 - 3)
+        foot = [line(part, width) for part in foot_lines(width)][:room]
+
+    if view.get("aid"):
+        body_height = height - len(chrome) - len(foot) - 1
+        if body_height < 1:
+            painted = [line(identity, width), footer]
+            painted.extend([""] * max(0, height - len(painted)))
+            return painted[:height]
+        body = [line(part, width) for part in aid_lines(state, width)][:body_height]
+        body.extend([""] * max(0, body_height - len(body)))
+        return chrome + body + foot + [footer]
+
+    if view.get("harness_view"):
+        body_height = height - len(chrome) - len(foot) - 1
+        if body_height < 1:
+            painted = [line(identity, width), footer]
+            painted.extend([""] * max(0, height - len(painted)))
+            return painted[:height]
+        parts, cursor = table_lines(state, view, width, selected_lane)
+        # The Tier row stays put; only the Harness blocks under it scroll.
+        head, blocks = parts[0], parts[1:]
+        cursor = None if cursor is None else cursor - 1
+        window = max(1, body_height - 1)
+        offset = min(max(0, int(view.get("offset") or 0)), max(0, len(blocks) - window))
+        if cursor is not None:
+            if cursor < offset:
+                offset = cursor
+            elif cursor >= offset + window:
+                offset = cursor - window + 1
+        view["offset"] = offset
+        view["_items"] = len(blocks)
+        body = [line(head, min(width, MEASURE))]
+        body.extend(line(part, min(width, MEASURE)) for part in blocks[offset : offset + window])
+        body = body[:body_height]
+        body.extend([""] * max(0, body_height - len(body)))
+        return chrome + body + foot + [footer]
+
+    chrome.append(line(column_header(columns), deck))
+    body_height = height - len(chrome) - len(foot) - 1
     if body_height < 1:
         painted = [line(identity, width), footer]
         painted.extend([""] * max(0, height - len(painted)))
@@ -765,7 +1166,7 @@ def render(state, *, width, height, selected_lane, editor, message, view):
             )
         )
     body.extend([""] * max(0, body_height - len(body)))
-    painted = chrome + body + [footer]
+    painted = chrome + body + foot + [footer]
     painted.extend([""] * max(0, height - len(painted)))
     return painted[:height]
 
@@ -790,17 +1191,22 @@ def handle_key(key, state, view):
     if key == "d":
         view["descriptions"] = not view.get("descriptions", False)
         return True
+    if key == "a":
+        view["aid"] = not view.get("aid", False)
+        return True
     if key == "h":
         view["harness_view"] = not view.get("harness_view", False)
+        view["aid"] = False
+        view["offset"] = 0
         return _stop_lane(state, view, selected) or True
     if key == "z":
-        group = _group_of(state, view, selected)
-        if group is None:
+        key_name = _fold_key_of(state, view, selected)
+        if key_name is None:
             return True
         folded = set(view.get("folded") or ())
-        folded.symmetric_difference_update({group["key"]})
+        folded.symmetric_difference_update({key_name})
         view["folded"] = folded
-        # Folding puts the selection on the deck's own line, which the head row
-        # paints; the first Lane of the deck is the one name that stands for it.
+        # Folding puts the selection on the deck's, or the Harness row's, own
+        # line; its first Lane is the one name that stands for the fold.
         return _stop_lane(state, view, selected) or True
     return False

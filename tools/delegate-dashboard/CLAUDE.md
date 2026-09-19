@@ -25,7 +25,12 @@ decisions, the review adjudication and the live evidence.
   `proto_layout_panel.py` is the instrument panel from
   `_work/tui-review/review-opus-high.md`; `proto_layout_deck.py` is the merge
   Orin's verdict asked for in ticket 11, and is the only variant that uses
-  `selectable`.
+  `selectable`. `deck` has three bodies: the Tier list, the Harness table (`h`;
+  Harnesses down, Tiers across, and `j`/`k` walk down one Tier column at a time)
+  and the Gate/Margin aid (`a`; per Meter, Remaining against the Gate mark and
+  Pace against the Pick's Pace plus the Margin, the rule at `rank.py:177-183`).
+  `d` writes the terms and every reason code at the foot, `z` folds the deck or
+  the Harness row under the cursor, and `?` lists the keys.
   `proto_dump.py --layout NAME --width N --height N` prints one frame with ANSI
   stripped; `--check` fails on an over-wide line. Do not add tests for variants.
 - `model.py` exposes `DashboardModel.state`, `refresh()`, and
