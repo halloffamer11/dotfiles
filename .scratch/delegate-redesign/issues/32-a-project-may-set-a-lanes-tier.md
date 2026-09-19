@@ -41,16 +41,30 @@ changes a Tier" is corrected by the session at landing.
 
 ## Acceptance
 
-**Status:** ready-for-agent
+**Status:** implemented 2026-09-18 (`0f76bac`) on `worktree/delegate-redesign`; all boxes ticked. The merge to `main` is Orin's, and the rule is a session decision he may overrule.
 
-- [ ] A fixture project that moves a Tier 3 Lane to Tier 2 makes it eligible for a
+- [x] A fixture project that moves a Tier 3 Lane to Tier 2 makes it eligible for a
       Range 1–2 Class and not for a Range 3–3 Class; the same catalog with no project
       file ranks as before.
-- [ ] Unknown Lane, a field other than `tier`, and a Tier outside 1–4 each fail with a
+- [x] Unknown Lane, a field other than `tier`, and a Tier outside 1–4 each fail with a
       message naming the file, the field and the rule.
-- [ ] `project_order` works on a Lane in its project Tier; a moved Lane without a place
+- [x] `project_order` works on a Lane in its project Tier; a moved Lane without a place
       sorts after the placed Lanes.
-- [ ] `catalog.py set lanes.<lane>.tier N --scope project` previews and applies, refuses
+- [x] `catalog.py set lanes.<lane>.tier N --scope project` previews and applies, refuses
       a stale revision, writes only the project file, and removes an entry that equals
       the global Tier.
-- [ ] No test reads Orin's Tiers; every suite under `tests/` exits 0.
+- [x] No test reads Orin's Tiers; every suite under `tests/` exits 0.
+
+## Landed, 2026-09-18
+
+`0f76bac`, by `opus-high@claude` (the ticket 31 worker, second job in the same worktree),
+about 900 s, verdict clean. `catalog.validate_project_lanes()` validates the file,
+`_effective_lanes()` applies the project Tier before the Order projection, the file is part
+of the edit revision, and `rank.py` and `catalog.py show` print a `project tier` line.
+
+Checked by the session: all 13 suites under `tests/` exit 0; live `rank.py scout` is
+unchanged with no project file. The implementer's fixture session shows the preview, a
+refused stale revision, the apply writing only `<project>/.delegate/lanes.json`, the Lane
+eligible in a Range 1-2 Class and `vetoed:floor` in a Range 3-3 Class, and the entry removed
+when the Tier is set back. Known cost: the private planners now return six items, which
+broke three dashboard prototype tests on merge into the layouts branch; fixed there.

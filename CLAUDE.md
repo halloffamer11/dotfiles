@@ -42,7 +42,8 @@ Orin set the global Gate to 5% on 2026-09-18 (`5be0848`).
 
 **Project routing backend** (2026-09-15, from the dashboard prototype): a
 project's `.delegate/routing.json` may carry `project_order`, a flat list of carried
-lane names that reorders them inside their global Tiers and never changes a Tier
+lane names that reorders them inside their effective Tiers; since ticket 32 a project's
+`.delegate/lanes.json` may also set a Lane's Tier for that project, and nothing else
 (`catalog.load_catalog()`, `catalog.validate_project_routing()`);
 `rank.tier_leaders()` gives one exact-Tier leader per Tier; `rank.meter_observations()`
 owns Meter cache validity. Spec
