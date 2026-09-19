@@ -15,18 +15,19 @@ Machine configuration and agent tooling managed as one Git repository.
 
 ## Active work
 
-**Dashboard compatibility pass: waits for Orin's review** (2026-09-18). Branch
-`worktree/delegate-monitor-herdr`, checkout
-`~/.herdr/worktrees/dotfiles/worktree-delegate-monitor-herdr` (the `/private/tmp`
-checkout was cleared and is gone). Ticket 10,
-`.scratch/delegate-dashboard-plugin/issues/10-current-backend-compatibility.md`, is
-implemented: 42 dashboard checks pass, an independent review is adjudicated,
-and the live Herdr check is recorded there. It also records one decision Orin may
-overrule: project saves keep the canonical `catalog.edit_catalog` document shape, not
-the complete Order list. Test it from a Herdr pane with
-`make -C ~/.herdr/worktrees/dotfiles/worktree-delegate-monitor-herdr delegate-dashboard`.
-Keep the branch's project policy off main. Production scope, UI integration into main,
-and the Rust monitor remain separate.
+**Dashboard layout: `deck` accepted, save flow open** (2026-09-19). Orin compared three
+throwaway layouts, dropped `current`, and accepted the merged layout `deck` after three
+feedback rounds ("this is excellent"). Ticket 11,
+`.scratch/delegate-dashboard-plugin/issues/11-merged-layout-from-orins-verdict.md`, holds
+his verdicts, the key map and the proposed Herdr shortcut. The code is on the throwaway
+branch `worktree/delegate-monitor-herdr-layouts`, checkout
+`~/.herdr/worktrees/dotfiles/worktree-delegate-monitor-herdr-layouts`; open it there with
+`python3 tools/delegate-dashboard/dashboard.py --cwd "$PWD" --layout deck`. Open: Orin
+asked for "a way to save the configuration"; what that means is not settled. Ticket 10
+(branch `worktree/delegate-monitor-herdr`) still records one decision he may overrule:
+project saves keep the canonical `catalog.edit_catalog` document shape. Keep each
+branch's project policy off main. Production scope, UI integration into main, and the
+Rust monitor remain separate.
 
 **Delegate modular batch complete** (2026-09-16): tickets 01–13 landed, all 13
 script suites and full/focused terminal checks passed, and independent review
@@ -83,20 +84,22 @@ read the redesign tickets rather than reconstructing deleted worker branches.
 
 **Open, in priority order:**
 
-1. **A Range served by one Meter stops the Class** (ticket 29, implemented 2026-09-18 on the branch below): on
-   2026-09-18 `scout` stopped because every carried Tier 1-2 Lane drains `codex`, which
-   was under the Gate. The ticket holds the options (catalog coverage with a one-Meter
-   warning; overflow past the ceiling) and why agy is underused. Orin chose both on
-   2026-09-18; the Tier 1-2 coverage itself is his to set in the wizard.
+1. **Tier 1-2 coverage**: every carried Tier 1-2 Lane drains `codex` (`catalog.py check`
+   warns). Since ticket 29 a Gate-only stop overflows one Tier up, so `scout` and
+   `mechanical` run on Tier 3 Lanes while codex is under the Gate. The coverage itself is
+   Orin's to set in the wizard, or per project since ticket 32.
 2. **Unmeasured figures**: `meter_weight` and `timeout` on the generated Lanes are still
    copies; each Lane's note says `UNMEASURED` and from which Lane. Prices are sourced
    since 2026-09-18 (OpenAI and Anthropic pricing pages, named in each note) except the
    grok and agy cache-write prices.
+3. **The Claude Meter probe hangs inside this project**: `claude -p ... /usage` did not
+   return within 45 s from a dotfiles checkout and takes about 3 s from `~`. The probe
+   now runs from `~` (`fb845e3`); the cause is not known.
 
-Tickets 29 and 30, the price and note changes, and the 2026-09-18 Status-line cleanup sit
-on branch `worktree/delegate-redesign` (Herdr checkout
-`~/.herdr/worktrees/dotfiles/worktree-delegate-redesign`) until Orin merges it. Ticket 30
-closed the carry-rule limit for agy.
+Tickets 29-32 merged to `main` on 2026-09-19: overflow and the one-Meter warning (29), the
+carry rule for agy efforts (30), agy Remaining and Pace, which reverses modular ticket 13
+(31), and a project's `.delegate/lanes.json`, which may set a Lane's Tier (32). Each
+ticket names the session decisions Orin may overrule.
 
 **Waiting on Orin** (nothing else blocks on these):
 

@@ -67,4 +67,4 @@ unchanged with no project file. The implementer's fixture session shows the prev
 refused stale revision, the apply writing only `<project>/.delegate/lanes.json`, the Lane
 eligible in a Range 1-2 Class and `vetoed:floor` in a Range 3-3 Class, and the entry removed
 when the Tier is set back. Known cost: the private planners now return six items, which
-broke three dashboard prototype tests on merge into the layouts branch; fixed there.
+broke three dashboard prototype tests on merge into the layouts branch; fixed there in `4580ae0`.
