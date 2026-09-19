@@ -199,9 +199,9 @@ def load_cached(cache_path=None):
 
 def which(b): return subprocess.run(["command", "-v", b], shell=False, capture_output=True, text=True).returncode == 0 if False else any(os.access(os.path.join(p, b), os.X_OK) for p in os.environ.get("PATH", "").split(os.pathsep))
 
-def run(cmd, timeout=60, stdin_data=None):
+def run(cmd, timeout=60, stdin_data=None, cwd=None):
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, input=stdin_data)
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, input=stdin_data, cwd=cwd)
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return None
 
@@ -296,7 +296,10 @@ def claude_reset(text):
 
 def probe_claude():
     if not which("claude"): return [lane("claude", None, note="absent")]
-    r = run(["claude", "-p", "--permission-mode", "plan", "--output-format", "json", "/usage"], timeout=60, stdin_data="")
+    # Run from the home directory: inside the dotfiles project the same command
+    # did not return within 45 s (2026-09-18), and from ~ it takes about 3 s.
+    r = run(["claude", "-p", "--permission-mode", "plan", "--output-format", "json", "/usage"], timeout=60, stdin_data="",
+            cwd=os.path.expanduser("~"))
     if not r or r.returncode != 0: return [lane("claude", None, note="probe failed")]
     try: text = json.loads(r.stdout)["result"]
     except Exception as e: return [lane("claude", None, note=f"unexpected output: {e}")]
