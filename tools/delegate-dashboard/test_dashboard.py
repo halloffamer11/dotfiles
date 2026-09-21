@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Model-boundary tests for the throwaway delegate dashboard."""
+"""Model-boundary tests for the delegate dashboard."""
 
 import json
 import os

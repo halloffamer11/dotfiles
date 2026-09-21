@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""PROTOTYPE: the `deck` layout, merged from Orin's verdict on panel and strip.
+"""The `deck` view, the one view the dashboard draws.
 
-Throwaway.  A tote board for one project: one Lane to a row, Tiers stacked as
-decks behind a coloured rail on the left edge.
+A tote board for one project: one Lane to a row, Tiers stacked as decks behind
+a coloured rail on the left edge.
 
-Kept from ``panel``: the vertical coloured Tier line at the left edge, the
-terminal's own background, and Remaining drawn as a solid rectangle.  Kept from
-``strip``: the quiet palette with gold for the selected Lane, the icon in the
-first content column, a top row naming the leading model of each Tier, and the
-fixed top-right block for Gate, Margin, Meters and usage.
+Orin's verdict of 2026-09-18 chose each part from two compared layouts.  From
+one: the vertical coloured Tier line at the left edge, the terminal's own
+background, and Remaining drawn as a solid rectangle.  From the other: the
+quiet palette with gold for the selected Lane, the icon in the first content
+column, a top row naming the leading model of each Tier, and the fixed
+top-right block for Gate, Margin, Meters and usage.
 
 The three identity columns are separated by a box rule rather than a space, so
 ``Luna 5.6 | H | Codex`` reads as one plate and never as a sentence.  The deck
@@ -162,8 +163,8 @@ KEYS = (
     ("?", "close this help"),
 )
 
-# Up and down never reach a variant: the host owns j, k and those two arrows,
-# and walks `selectable`, which is already the spatial order of each view.
+# Up and down never reach this module: the host owns j, k and those two arrows,
+# and walks `selectable`, which is already the spatial order of each body.
 ARROWS = {"\x1b[C": "l", "\x1b[D": "h"}
 
 # name, width, alignment.  One space between every column; the widths and the
@@ -1083,7 +1084,7 @@ def help_lines(width):
                 ("j/k select  J/K move the Lane inside its Tier  g/m edit the Gate or "
                  "the Margin", PAL["mute"], False)])
     out.append([(pad("", 11), PAL["mute"], False),
-                ("r reload  v next layout  q close", PAL["mute"], False)])
+                ("r reload  q close", PAL["mute"], False)])
     out.append([])
     out.append([("  In the Tier list j/k walk the Lanes down the page and h/l close and "
                  "open a deck.", PAL["mute"], False)])
@@ -1123,7 +1124,6 @@ HINTS = {
 
 def footer_line(state, view, editor, width):
     """The editor lives here, so opening it never moves the deck."""
-    tail = f"layout: {NAME} (v next)"
     if editor is not None:
         field = str(getattr(editor, "field", "") or "gate")
         text = str(getattr(editor, "text", "") or "")
@@ -1143,12 +1143,11 @@ def footer_line(state, view, editor, width):
     else:
         hints = list(HINTS[current_view(view)])
         head = "  ".join(hints + ["? help"])
-        while hints and cells(head) > width - cells(tail) - 3:
+        while hints and cells(head) > width - 3:
             hints.pop()
             head = "  ".join(hints + ["? help"])
         color, bold = PAL["mute"], False
-    gap = max(1, width - cells(head) - cells(tail))
-    return [(head, color, bold), (" " * gap, PAL["mute"], False), (tail, PAL["mute"], False)]
+    return [(head, color, bold)]
 
 
 # --- the frame --------------------------------------------------------------

@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 """Compact terminal dashboard for one pinned delegate project.
 
-PROTOTYPE seam: the drawing lives in the ``proto_layout_*.py`` modules beside
-this file, one per layout variant.  This host owns the model, the selected Lane,
+The host and the view are split.  This host owns the model, the selected Lane,
 the percentage editors and the keys ``j``/``k`` and arrows, ``J``/``K``, ``g``,
-``m``, ``r``, ``q`` and ``v``.  Every other key goes to the variant's
-``handle_key``; a variant that returns a carried Lane name from it also moves
-the selection to that Lane.  A variant that also exposes
-``selectable(state, view)`` names the Lanes ``j``/``k`` may stop on, so rows it
-hides are never walked.  A ``handle_key`` that accepts a ``model`` keyword is
-handed this host's :class:`DashboardModel`, which is how a variant reaches a
-save path of its own; one that does not is called exactly as before.
+``m``, ``r`` and ``q``.  Every other key goes to the view's ``handle_key``; a
+view that returns a carried Lane name from it also moves the selection to that
+Lane.  The view's ``selectable(state, view)`` names the Lanes ``j``/``k`` may
+stop on, so rows it hides are never walked.  A ``handle_key`` that accepts a
+``model`` keyword is handed this host's :class:`DashboardModel`, which is how
+the view reaches a save path of its own.
+
+``deck`` is the view.  It is imported directly, so the host has no layout
+argument and no layout key.
 """
 
 from __future__ import annotations
 
 import argparse
-import importlib
 import inspect
 import json
 import os
@@ -26,18 +26,13 @@ import sys
 import termios
 import tty
 
+import deck
 from model import DashboardError, DashboardModel
 
 
-LAYOUT_PREFIX = "proto_layout_"
-DEFAULT_LAYOUT = "current"
-
-# The order `v` cycles.  A variant not named here follows, alphabetically.
-LAYOUT_ORDER = ("current", "panel", "strip", "deck")
-
 # Left, right and Shift+Tab join the list so the parser reads them as one key.
-# Until they did, each one reached a variant as the three keys ESC, '[' and a
-# letter, which is why a Left arrow used to jump a Tier in `panel` and `strip`.
+# Until they did, each one reached the view as the three keys ESC, '[' and a
+# letter, so an arrow acted as the letter it ends with.
 KEY_SEQUENCES = (
     "\x1b[1;2A",
     "\x1b[1;2B",
@@ -104,39 +99,8 @@ class PercentageEditor:
         return True
 
 
-def discover_layouts():
-    """Import every proto_layout_*.py beside this file.
-
-    Returns ``(layouts, failures)``.  A module that fails to import, or that
-    does not expose ``NAME`` and ``render``, is skipped and named in
-    ``failures`` so a missing or broken variant never stops the host.
-    """
-    here = os.path.dirname(os.path.abspath(__file__))
-    if here not in sys.path:
-        sys.path.insert(0, here)
-    layouts = {}
-    failures = []
-    for entry in sorted(os.listdir(here)):
-        if not entry.startswith(LAYOUT_PREFIX) or not entry.endswith(".py"):
-            continue
-        module_name = entry[: -len(".py")]
-        short = module_name[len(LAYOUT_PREFIX) :]
-        try:
-            module = importlib.import_module(module_name)
-            name = module.NAME
-            render = module.render
-        except Exception as exc:  # a broken variant must not take the host down
-            failures.append(f"{short} ({type(exc).__name__}: {exc})")
-            continue
-        if not isinstance(name, str) or not callable(render):
-            failures.append(f"{short} (no NAME or render)")
-            continue
-        layouts[name] = module
-    return layouts, failures
-
-
 def draw(module, state, width, height, *, selected_lane, editor, message, view):
-    """Ask one variant for a frame and write exactly `height` lines."""
+    """Ask the view for a frame and write exactly `height` lines."""
     try:
         lines = list(
             module.render(
@@ -149,8 +113,8 @@ def draw(module, state, width, height, *, selected_lane, editor, message, view):
                 view=view,
             )
         )
-    except Exception as exc:  # the same rule as a failed import, one frame later
-        lines = [f"layout {module.NAME} failed to render: {type(exc).__name__}: {exc}"]
+    except Exception as exc:  # a failed frame must not take the host down
+        lines = [f"view {module.NAME} failed to render: {type(exc).__name__}: {exc}"]
     lines.extend([""] * max(0, height - len(lines)))
     sys.stdout.write("\033[H" + "\033[K\n".join(lines[:height]) + "\033[K")
     sys.stdout.flush()
@@ -161,12 +125,12 @@ def carried_lane_names(state):
 
 
 def walkable_lane_names(module, state, view):
-    """The carried Lane names ``j``/``k`` may stop on in this variant.
+    """The carried Lane names ``j``/``k`` may stop on in the current body.
 
-    A variant that hides rows -- a folded Tier, say -- exposes
+    A view that hides rows -- a folded Tier, say -- exposes
     ``selectable(state, view)`` and names the stops it paints, so one press
-    leaves a fold and no press ever walks a hidden row.  A variant without it
-    keeps today's behaviour: every carried Lane is a stop.
+    leaves a fold and no press ever walks a hidden row.  Without the hook every
+    carried Lane is a stop.
     """
     carried = carried_lane_names(state)
     chooser = getattr(module, "selectable", None)
@@ -180,11 +144,11 @@ def walkable_lane_names(module, state, view):
 
 
 def call_handle_key(handler, key, state, view, model):
-    """Call a variant's ``handle_key``, handing it the model if it asks for one.
+    """Call the view's ``handle_key``, handing it the model if it asks for one.
 
-    A variant that writes -- the Tier move in ``deck`` -- needs the model's save
-    path.  A variant whose handler takes only ``(key, state, view)`` is called
-    with exactly those three, so nothing else changes.
+    A key that writes -- the Tier move on ``H``/``L`` -- needs the model's save
+    path.  A handler that takes only ``(key, state, view)`` is called with
+    exactly those three.
     """
     try:
         params = inspect.signature(handler).parameters
@@ -199,27 +163,13 @@ def call_handle_key(handler, key, state, view, model):
     return handler(key, state, view)
 
 
-def run_terminal(model: DashboardModel, layout_name: str = DEFAULT_LAYOUT) -> int:
+def run_terminal(model: DashboardModel) -> int:
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         sys.stderr.write("dashboard: interactive view needs a terminal; use --json for diagnostics\n")
         return 2
 
-    layouts, failures = discover_layouts()
-    if not layouts:
-        sys.stderr.write(f"dashboard: no {LAYOUT_PREFIX}*.py layout found beside dashboard.py\n")
-        return 1
-    order = sorted(
-        layouts,
-        key=lambda name: (
-            LAYOUT_ORDER.index(name) if name in LAYOUT_ORDER else len(LAYOUT_ORDER),
-            name,
-        ),
-    )
-    message = f"skipped layouts: {', '.join(failures)}" if failures else ""
-    if layout_name not in layouts:
-        message = f"layout '{layout_name}' not found; showing '{order[0]}'"
-        layout_name = order[0]
-    views = {name: {} for name in order}
+    message = ""
+    view = {}
 
     fd = sys.stdin.fileno()
     previous = termios.tcgetattr(fd)
@@ -240,14 +190,14 @@ def run_terminal(model: DashboardModel, layout_name: str = DEFAULT_LAYOUT) -> in
             if dirty:
                 size = shutil.get_terminal_size((100, 30))
                 draw(
-                    layouts[layout_name],
+                    deck,
                     model.state,
                     size.columns,
                     size.lines,
                     selected_lane=selected,
                     editor=editor,
                     message=message,
-                    view=views[layout_name],
+                    view=view,
                 )
                 dirty = False
 
@@ -271,9 +221,7 @@ def run_terminal(model: DashboardModel, layout_name: str = DEFAULT_LAYOUT) -> in
                 if key in ("q", "Q", "\x03"):
                     return 0
                 message = ""
-                names = walkable_lane_names(
-                    layouts[layout_name], model.state, views[layout_name]
-                )
+                names = walkable_lane_names(deck, model.state, view)
                 selected_index = names.index(selected) if selected in names else 0
                 if key in ("j", "\x1b[B") and names:
                     selected = names[min(len(names) - 1, selected_index + 1)]
@@ -289,24 +237,20 @@ def run_terminal(model: DashboardModel, layout_name: str = DEFAULT_LAYOUT) -> in
                     editor = PercentageEditor(model, "margin")
                 elif key in ("r", "R"):
                     model.refresh()
-                elif key == "v":
-                    layout_name = order[(order.index(layout_name) + 1) % len(order)]
-                    if failures:
-                        message = f"skipped layouts: {', '.join(failures)}"
                 else:
-                    handler = getattr(layouts[layout_name], "handle_key", None)
+                    handler = getattr(deck, "handle_key", None)
                     if handler is not None:
                         try:
                             used = call_handle_key(
-                                handler, key, model.state, views[layout_name], model
+                                handler, key, model.state, view, model
                             )
                         except Exception as exc:
                             used = None
                             message = (
-                                f"layout {layout_name} key {key!r} failed: "
+                                f"view {deck.NAME} key {key!r} failed: "
                                 f"{type(exc).__name__}: {exc}"
                             )
-                        # A Lane name is truthy, so a boolean-only variant still works.
+                        # A Lane name is truthy, so a boolean return still works.
                         if isinstance(used, str) and used in names:
                             selected = used
                 dirty = True
@@ -326,11 +270,6 @@ def parse_args(argv=None):
     parser.add_argument("--config-dir", help="directory containing delegate lanes.json and routing.json")
     parser.add_argument("--meters", help="cached Meter JSON file; never refreshed with vendor probes")
     parser.add_argument("--json", action="store_true", help="print one diagnostic model state and exit")
-    parser.add_argument(
-        "--layout",
-        default=DEFAULT_LAYOUT,
-        help=f"layout variant to open (default {DEFAULT_LAYOUT}); v cycles them in the pane",
-    )
     return parser.parse_args(argv)
 
 
@@ -345,7 +284,7 @@ def main(argv=None):
         json.dump(model.state, sys.stdout, indent=2, ensure_ascii=False, allow_nan=False)
         sys.stdout.write("\n")
         return 0
-    return run_terminal(model, args.layout)
+    return run_terminal(model)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""State model for the delegate dashboard prototype.
+"""State model for the delegate dashboard.
 
 The model resolves one Git project during construction, reads only cached Meter
 observations, and never runs a vendor probe or acquires Meter data.  Eligibility
@@ -366,7 +366,6 @@ class DashboardModel:
         meters_on = catalog.meters_enabled(routing)
         self._revision += 1
         state = {
-            "prototype": True,
             "project": {
                 "name": self.project_root.name,
                 "root": str(self.project_root),

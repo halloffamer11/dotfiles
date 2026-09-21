@@ -160,7 +160,7 @@ def _read_socket_response(connection: socket.socket, request_id: str) -> dict[st
 
 def _open_popup(args: argparse.Namespace, plugin_id: str, entrypoint: str) -> int:
     if os.name == "nt":
-        raise OpenError("popup placement requires the Unix socket helper on this prototype")
+        raise OpenError("popup placement requires the Unix socket helper, which is POSIX only")
     socket_path = os.environ.get("HERDR_SOCKET_PATH")
     if not socket_path:
         raise OpenError("HERDR_SOCKET_PATH is required for popup placement")
