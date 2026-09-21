@@ -2536,4 +2536,161 @@ with tempfile.TemporaryDirectory() as td:
         res.stdout + res.stderr,
     )
 
+# 15. Ticket 14: catalog.plan_edits is the one planning path. It takes documents
+# already in hand, plans a list of the same operations edit_catalog accepts, and
+# returns named fields. It reads no Meter and writes no file.
+
+
+def refuse_meter_read(*args, **kwargs):
+    raise AssertionError("plan_edits read a Meter")
+
+
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, _real = make_edit_fixture(td, project={"note": "keep me", "margin": 0.5})
+    plan_files = {
+        "lanes": os.path.join(cfg, "lanes.json"),
+        "routing": os.path.join(cfg, "routing.json"),
+        "project": os.path.join(repo, ".delegate", "routing.json"),
+        "project_lanes": os.path.join(repo, ".delegate", "lanes.json"),
+    }
+    plan_ops = [
+        {"op": "order", "scope": "project", "lane": "flash-high@agy", "position": 1},
+        {"op": "order", "scope": "project", "lane": "grok46-high@grok", "position": 1},
+        {"op": "set", "scope": "project",
+         "field": "lanes.sol-high@codex.tier", "value": 2},
+    ]
+    plan_lanes_doc = catalog.load_json(plan_files["lanes"])
+    plan_routing_doc = catalog.load_json(plan_files["routing"])
+    plan_project_doc = catalog.load_json(plan_files["project"])
+    bytes_before = {
+        name: file_bytes(path)
+        for name, path in plan_files.items()
+        if os.path.exists(path)
+    }
+
+    saved_meters, saved_preview = catalog._cached_meters, catalog._rank_preview
+    catalog._cached_meters = refuse_meter_read
+    catalog._rank_preview = refuse_meter_read
+    try:
+        plan = catalog.plan_edits(
+            plan_ops,
+            plan_lanes_doc,
+            plan_routing_doc,
+            plan_project_doc,
+            plan_files,
+        )
+    finally:
+        catalog._cached_meters, catalog._rank_preview = saved_meters, saved_preview
+
+    record(
+        "15.1 plan_edits returns named documents, the effective catalog and one step per op",
+        set(plan) == {"lanes", "routing", "project", "project_lanes", "catalog", "steps"}
+        and [step["op"] for step in plan["steps"]] == ["order", "order", "set"]
+        and [step["dest"] for step in plan["steps"]]
+        == ["project", "project", "project_lanes"]
+        and all(step["scope"] == "project" for step in plan["steps"])
+        and plan["steps"][0]["values"]["sequence"]["resulting"]
+        == ["flash-high@agy", "luna-low@codex"],
+        repr(sorted(plan)),
+    )
+
+    record(
+        "15.2 each operation is planned on the result of the one before it",
+        plan["project"]["project_order"]
+        == ["flash-high@agy", "luna-low@codex", "grok46-high@grok", "terra-high@codex"]
+        and plan["project"]["note"] == "keep me"
+        and plan["project_lanes"] == {"lanes": {"sol-high@codex": {"tier": 2}}},
+        repr(plan["project"]),
+    )
+
+    record(
+        "15.3 the effective catalog is the one the planned documents produce",
+        plan["catalog"]["lanes"]["sol-high@codex"]["tier"] == 2
+        and plan["catalog"]["lanes"]["flash-high@agy"]["order"] == 1
+        and plan["catalog"]["lanes"]["grok46-high@grok"]["order"] == 1
+        and plan["catalog"]["project_tiers"]
+        == {"sol-high@codex": {"from": 3, "to": 2}},
+        repr(plan["catalog"]["project_tiers"]),
+    )
+
+    bytes_after = {
+        name: file_bytes(path)
+        for name, path in plan_files.items()
+        if os.path.exists(path)
+    }
+    record(
+        "15.4 planning writes no file and creates none",
+        bytes_after == bytes_before
+        and not os.path.exists(plan_files["project_lanes"]),
+        repr(sorted(bytes_after)),
+    )
+
+    record(
+        "15.5 the source documents handed in are not mutated",
+        plan_project_doc == catalog.load_json(plan_files["project"])
+        and plan_lanes_doc == catalog.load_json(plan_files["lanes"]),
+        repr(plan_project_doc),
+    )
+
+    # The same operations through edit_catalog leave exactly the planned bytes.
+    for op_spec in plan_ops:
+        kwargs = {k: v for k, v in op_spec.items() if k not in ("op", "scope")}
+        preview = catalog.edit_catalog(
+            op_spec["op"],
+            scope=op_spec["scope"],
+            cwd=repo,
+            config_dir=cfg,
+            present=ALL_HARNESSES,
+            meters=EMPTY_METERS,
+            **kwargs,
+        )
+        catalog.edit_catalog(
+            op_spec["op"],
+            scope=op_spec["scope"],
+            cwd=repo,
+            config_dir=cfg,
+            apply=True,
+            expect=preview["revision"],
+            present=ALL_HARNESSES,
+            meters=EMPTY_METERS,
+            **kwargs,
+        )
+    planned_dir = os.path.join(td, "planned")
+    os.makedirs(planned_dir)
+    catalog.write_json(os.path.join(planned_dir, "routing.json"), plan["project"])
+    catalog.write_json(os.path.join(planned_dir, "lanes.json"), plan["project_lanes"])
+    applied_cat = catalog.load_catalog(cwd=repo, config_dir=cfg)
+    record(
+        "15.6 the same edits through edit_catalog write the planned bytes and rank the same",
+        file_bytes(plan_files["project"])
+        == file_bytes(os.path.join(planned_dir, "routing.json"))
+        and file_bytes(plan_files["project_lanes"])
+        == file_bytes(os.path.join(planned_dir, "lanes.json"))
+        and applied_cat["lanes"] == plan["catalog"]["lanes"]
+        and applied_cat["routing"] == plan["catalog"]["routing"],
+        repr(file_bytes(plan_files["project"])),
+    )
+
+    record(
+        "15.7 an empty operation list is the documents as they stand",
+        catalog.plan_edits(
+            [], plan_lanes_doc, plan_routing_doc, plan_project_doc, plan_files
+        )["catalog"]["lanes"]["sol-high@codex"]["tier"] == 3,
+        "empty plan",
+    )
+
+    msg = check_catalog_error(
+        catalog.plan_edits,
+        [{"op": "carry", "scope": "project", "lane": "sol-high@codex"}],
+        plan_lanes_doc,
+        plan_routing_doc,
+        plan_project_doc,
+        plan_files,
+    )
+    record(
+        "15.8 an unknown operation is refused by name",
+        msg is not None and "carry" in msg,
+        msg,
+    )
+
 sys.exit(1 if fails else 0)

@@ -364,46 +364,34 @@ class DashboardModel:
             )
         return doc, "ok", None, signature
 
-    def _replay(
+    def _staged_plan(
         self,
         changes: Iterable[StagedChange],
         lanes_doc: dict[str, Any],
         routing_doc: dict[str, Any],
         project_doc: dict[str, Any] | None,
         project_lanes_doc: dict[str, Any] | None,
-    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-        """Apply the staged changes to the two project documents, in order.
+    ) -> dict[str, Any]:
+        """Plan the staged changes onto the documents, in the order they came.
 
-        The catalog's own planners do the work, so a staged document is the
-        document ``edit_catalog`` would write for the same call, and the second
-        change is planned against the result of the first exactly as a second
-        immediate save would be.  Nothing here touches the filesystem.
+        ``catalog.plan_edits`` is the catalog's one planning path, the same one
+        ``edit_catalog`` writes through, so a staged document is the document
+        ``edit_catalog`` would write for the same call, the second change is
+        planned against the result of the first exactly as a second immediate
+        save would be, and the staged view is ranked from the catalog those
+        documents produce.  Nothing here touches the filesystem.
         """
-        files = self._source_files()
-        for change in changes:
-            if change.op == "order":
-                planned = catalog._plan_order(
-                    change.kwargs["lane"],
-                    change.kwargs["position"],
-                    "project",
-                    lanes_doc,
-                    routing_doc,
-                    project_doc,
-                    files,
-                    project_lanes_doc,
-                )
-            else:
-                planned = catalog._plan_set(
-                    change.kwargs["field"],
-                    change.kwargs["value"],
-                    "project",
-                    lanes_doc,
-                    routing_doc,
-                    project_doc,
-                    project_lanes_doc,
-                )
-            project_doc, project_lanes_doc = planned[3], planned[4]
-        return project_doc, project_lanes_doc
+        return catalog.plan_edits(
+            [
+                dict(change.kwargs, op=change.op, scope="project")
+                for change in changes
+            ],
+            lanes_doc,
+            routing_doc,
+            project_doc,
+            self._source_files(),
+            project_lanes_doc,
+        )
 
     def _staged_effective(
         self,
@@ -413,19 +401,10 @@ class DashboardModel:
         project_doc: dict[str, Any] | None,
         project_lanes_doc: dict[str, Any] | None,
     ) -> dict[str, Any]:
-        """The effective catalog the staged documents produce.
-
-        ``catalog._catalog_from_docs`` is the catalog's own reader for documents
-        it already holds, and the one ``edit_catalog`` previews through; going
-        through it keeps the staged view on the single ranking rule and
-        validates both documents on the way.
-        """
-        project, project_lanes = self._replay(
+        """The effective catalog the staged documents produce."""
+        return self._staged_plan(
             changes, lanes_doc, routing_doc, project_doc, project_lanes_doc
-        )
-        return catalog._catalog_from_docs(
-            lanes_doc, routing_doc, project, self._source_files(), project_lanes
-        )
+        )["catalog"]
 
     def _staged_effective_from_disk(
         self, changes: Iterable[StagedChange]

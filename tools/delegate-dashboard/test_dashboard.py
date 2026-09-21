@@ -6,6 +6,7 @@ terminal, so `q` and its answer are tested as a person presses them. Nothing
 here draws a frame or measures one.
 """
 
+import inspect
 import json
 import os
 from pathlib import Path
@@ -434,17 +435,15 @@ class DashboardModelTest(ProjectFixture):
             "routing": str((self.config / "routing.json").resolve()),
             "project": str(project_policy.resolve()),
         }
-        # Ticket 32 gave every planner a project-lanes slot before `values`.
-        _dest, _lanes, _routing, planned, _project_lanes, values = catalog._plan_order(
-            lane,
-            position,
-            "project",
+        # Ticket 14: one public planning path, the one the dashboard stages on.
+        plan = catalog.plan_edits(
+            [{"op": "order", "scope": "project", "lane": lane, "position": position}],
             lanes_doc,
             routing_doc,
             project_doc,
             files,
         )
-        return planned["project_order"], values
+        return plan["project"]["project_order"], plan["steps"][0]["values"]
 
     def test_move_writes_plan_order_and_preserves_other_tiers(self):
         project_policy = self.root / ".delegate" / "routing.json"
@@ -880,7 +879,7 @@ class DashboardModelTest(ProjectFixture):
                 self.assertEqual(dashboard.state["tiers"][1]["leader"], previews[1]["leader"])
 
     def test_intervening_edit_mark_matches_catalog_message(self):
-        source = Path(catalog.__file__).read_text(encoding="utf-8")
+        source = inspect.getsource(catalog)
         self.assertIn(INTERVENING_EDIT_MARK, source)
         self.assertEqual(
             INTERVENING_EDIT_MARK,

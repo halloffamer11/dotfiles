@@ -1968,6 +1968,65 @@ def _plan_order(lane, position, scope, lanes_doc, routing_doc, project_doc, file
             })
 
 
+def plan_edits(ops, lanes_doc, routing_doc, project_doc, files,
+               project_lanes_doc=None):
+    """Plan a list of edits against source documents already in hand.
+
+    ``ops`` is a sequence of mappings, one per edit, each holding the arguments
+    ``edit_catalog`` takes for that edit: ``op``, which is 'set', 'range' or
+    'order'; ``scope``, which is 'global' or 'project'; and the operation's own
+    keys (``field`` and ``value``; ``cls``, ``floor`` and ``ceiling``; ``lane``
+    and ``position``).  Each edit is planned on the documents the edit before it
+    produced, so a list plans exactly as the same calls made one after another.
+    ``files`` names the four source paths, as a source snapshot names them, and
+    is used for messages only.
+
+    Nothing is read from disk, no Meter is read, and nothing is written.  The
+    documents handed in are left as they are.
+
+    Returns named fields: the four planned documents, ``lanes``, ``routing``,
+    ``project`` and ``project_lanes``; the effective ``catalog`` they produce;
+    and one ``steps`` entry per edit, holding its ``op``, ``scope``, ``dest``
+    (the document that edit writes) and ``values``.
+    """
+    lanes = copy.deepcopy(lanes_doc)
+    routing = copy.deepcopy(routing_doc)
+    project = copy.deepcopy(project_doc)
+    project_lanes = copy.deepcopy(project_lanes_doc)
+    steps = []
+    for spec in ops:
+        op = spec.get("op")
+        scope = _require_scope(spec.get("scope"))
+        if op == "set":
+            planned = _plan_set(
+                spec.get("field"), spec.get("value"), scope,
+                lanes, routing, project, project_lanes,
+            )
+        elif op == "range":
+            planned = _plan_range(
+                spec.get("cls"), spec.get("floor"), spec.get("ceiling"), scope,
+                lanes, routing, project, project_lanes,
+            )
+        elif op == "order":
+            planned = _plan_order(
+                spec.get("lane"), spec.get("position"), scope,
+                lanes, routing, project, files, project_lanes,
+            )
+        else:
+            raise CatalogError(f"unknown operation '{op}'")
+        dest, lanes, routing, project, project_lanes, values = planned
+        steps.append({"op": op, "scope": scope, "dest": dest, "values": values})
+    return {
+        "lanes": lanes,
+        "routing": routing,
+        "project": project,
+        "project_lanes": project_lanes,
+        # The proposal is validated here, before anything is computed from it.
+        "catalog": _catalog_from_docs(lanes, routing, project, files, project_lanes),
+        "steps": steps,
+    }
+
+
 def _changed_fields(op, values, original_doc, proposed_doc, dest):
     changed = []
     if op == "set":
@@ -2064,23 +2123,28 @@ def edit_catalog(
 
     lanes_doc, routing_doc, project_doc, project_lanes_doc = _load_docs_from_snapshot(snap)
     files = snap["files"]
-    if op == "set":
-        (dest, proposed_lanes, proposed_routing, proposed_project,
-         proposed_project_lanes, values) = _plan_set(
-            field, value, scope, lanes_doc, routing_doc, project_doc, project_lanes_doc
-        )
-    elif op == "range":
-        (dest, proposed_lanes, proposed_routing, proposed_project,
-         proposed_project_lanes, values) = _plan_range(
-            cls, floor, ceiling, scope, lanes_doc, routing_doc, project_doc,
-            project_lanes_doc
-        )
-    else:
-        (dest, proposed_lanes, proposed_routing, proposed_project,
-         proposed_project_lanes, values) = _plan_order(
-            lane, position, scope, lanes_doc, routing_doc, project_doc, files,
-            project_lanes_doc
-        )
+    # One edit is a plan of one operation: the planning path the staged view of
+    # the dashboard uses is the path this write uses.
+    plan = plan_edits(
+        [{
+            "op": op,
+            "scope": scope,
+            "field": field,
+            "value": value,
+            "cls": cls,
+            "floor": floor,
+            "ceiling": ceiling,
+            "lane": lane,
+            "position": position,
+        }],
+        lanes_doc, routing_doc, project_doc, files, project_lanes_doc,
+    )
+    proposed_lanes = plan["lanes"]
+    proposed_routing = plan["routing"]
+    proposed_project = plan["project"]
+    proposed_project_lanes = plan["project_lanes"]
+    dest = plan["steps"][0]["dest"]
+    values = plan["steps"][0]["values"]
 
     # Validate the proposal against the original global documents, then
     # the effective catalog the ranker would see after this one write.
@@ -2099,11 +2163,7 @@ def edit_catalog(
         ),
     }
 
-    # The proposal is validated before anything else is computed from it.
-    after_cat = _catalog_from_docs(
-        proposed_lanes, proposed_routing, proposed_project, files,
-        proposed_project_lanes
-    )
+    after_cat = plan["catalog"]
     before_cat = _catalog_from_docs(
         lanes_doc, routing_doc, project_doc, files, project_lanes_doc
     )

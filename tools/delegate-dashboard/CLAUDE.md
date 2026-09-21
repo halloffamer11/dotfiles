@@ -100,10 +100,12 @@ malformed Meter data becomes explicit unknown observations through
 
 A key changes a staged policy held in the model and writes nothing (ticket 13). Each
 staged change carries the `catalog.edit_catalog` call it will make, and the staged
-documents come from replaying those calls through the catalog's own planners
-(`_plan_order`, `_plan_set`) onto the documents on disk; the staged view is then built
-from `catalog._catalog_from_docs` and ranked by `tier_leaders()`, so it is the one
-ranking rule reading the documents the save will write. `save_staged()` makes the same
+documents come from `catalog.plan_edits`, which plans that list of calls onto the
+documents on disk and returns the planned documents and the effective catalog they
+produce (ticket 14). It is the catalog's one planning path, the one `edit_catalog`
+writes through, and the staged view is ranked from its catalog by `tier_leaders()`,
+so it is the one ranking rule reading the documents the save will write. The
+dashboard calls no private catalog name. `save_staged()` makes the same
 calls in the same order, which is why a staged sequence and the same sequence of
 immediate saves leave the same bytes.
 
