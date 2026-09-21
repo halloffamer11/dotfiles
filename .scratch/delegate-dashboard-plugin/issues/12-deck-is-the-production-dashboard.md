@@ -33,7 +33,7 @@ with main merged).
 
 ## Acceptance
 
-**Status:** implemented 2026-09-20 (`a067fd5`) on `worktree/delegate-dashboard-plugin`. Open: the root `CLAUDE.md` and spec wording (needs Orin's word, see Landed), and Orin's drive and merge.
+**Status:** implemented 2026-09-20 (`a067fd5`) on `worktree/delegate-dashboard-plugin`. The root `CLAUDE.md` and spec wording landed as `972face` after Orin's word. Open: Orin's drive and merge.
 
 - [ ] `python3 tools/delegate-dashboard/dashboard.py --cwd "$PWD"` opens `deck`; `--layout`
       is rejected as an unknown argument; `v` does nothing.
@@ -64,4 +64,4 @@ one pressed `v` in a TTY.
 
 Not done: the root `CLAUDE.md` and the spec still say the UI stays on the branch. The
 worker's permission check refused both edits, so the session did not apply the worker's
-text either. They wait for Orin's word.
+text either. Orin said yes on 2026-09-20 and the session wrote both in its own words (`972face`).
