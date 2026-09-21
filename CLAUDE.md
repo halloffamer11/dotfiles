@@ -26,12 +26,10 @@ this checkout. `tools/delegate-dashboard/CLAUDE.md` owns the keys, the model bou
 the save rules. Open, all Orin's: his confirmations in tickets 12 and 13 (`v` does nothing;
 staging, undo and save driven once), the worker decisions ticket 13 lists that he may
 overrule, and ticket 10's one decision (project saves keep the canonical
-`catalog.edit_catalog` document shape). A project's `.delegate/` policy never goes to main;
-the untracked `.delegate/` in this checkout is from driving the dashboard here, and whether
-to ignore or delete it is Orin's call. Cleanup left: the remote branch
-`origin/worktree/delegate-monitor-herdr` (the permission check refused the session's
-delete), and the merged worktrees `worktree/delegate-dashboard-plugin` and
-`worktree/delegate-redesign`. The Rust monitor `tools/delegate-mon/` stays separate.
+`catalog.edit_catalog` document shape). A project's `.delegate/` policy never goes to main; this checkout's own `.delegate/` is
+git-ignored. Cleanup left: the remote branch `origin/worktree/delegate-monitor-herdr` (the
+permission check refused the session's delete; Orin runs it). Every other dashboard and
+redesign worktree and branch is removed. The Rust monitor `tools/delegate-mon/` stays separate.
 
 **Delegate modular batch complete** (2026-09-16): tickets 01–13 landed, all 13
 script suites and full/focused terminal checks passed, and independent review
