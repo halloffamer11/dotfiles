@@ -2,13 +2,21 @@
 """Compact terminal dashboard for one pinned delegate project.
 
 The host and the view are split.  This host owns the model, the selected Lane,
-the percentage editors and the keys ``j``/``k`` and arrows, ``J``/``K``, ``g``,
-``m``, ``r`` and ``q``.  Every other key goes to the view's ``handle_key``; a
-view that returns a carried Lane name from it also moves the selection to that
-Lane.  The view's ``selectable(state, view)`` names the Lanes ``j``/``k`` may
-stop on, so rows it hides are never walked.  A ``handle_key`` that accepts a
-``model`` keyword is handed this host's :class:`DashboardModel`, which is how
-the view reaches a save path of its own.
+the percentage editors, the one open question and the keys ``j``/``k`` and
+arrows, ``J``/``K``, ``g``, ``m``, ``w``, ``u``, ``U``, ``r`` and ``q``; it is
+itself two halves, :class:`Session` for what a key does and ``run_terminal`` for
+the screen and the keyboard, so the key map can be driven without a pty.  Every
+other key goes to the view's ``handle_key``; a view that returns a carried Lane
+name from it also moves the selection to that Lane.  The view's
+``selectable(state, view)`` names the Lanes ``j``/``k`` may stop on, so rows it
+hides are never walked.  A ``handle_key`` that accepts a ``model`` keyword is
+handed this host's :class:`DashboardModel`, which is how the view reaches a
+staging path of its own.
+
+Every editing key stages (ticket 13).  ``w`` is the only key that writes, and
+``u``, ``U``, ``r`` and ``q`` are what a session does with work it has not
+written yet; the three that would drop staged changes ask first, through
+:class:`Confirm` in ``view['prompt']``, which the view draws in its footer.
 
 ``deck`` is the view.  It is imported directly, so the host has no layout
 argument and no layout key.
@@ -60,6 +68,31 @@ def pop_key(pending, *, flush_escape=False):
     return "\x1b", pending[1:]
 
 
+class Confirm:
+    """One question in the footer, and the single keys that answer it.
+
+    Staged work is dropped, saved or left alone by one press, so the question
+    holds no text to edit: an unlisted key is ignored rather than guessed at,
+    and Escape always means stay.
+    """
+
+    def __init__(self, text, choices):
+        self.text = text
+        self.choices = dict(choices)
+
+    @property
+    def prompt(self):
+        """The question and its keys, as the footer draws them."""
+        keys = "  ".join(f"{key} {name}" for key, name in self.choices.items())
+        return f"{self.text}   {keys}   esc stay"
+
+    def feed(self, key):
+        """Answer, 'stay', or None while the question is still open."""
+        if key in ("\x1b", "\x03"):
+            return "stay"
+        return self.choices.get(key)
+
+
 class PercentageEditor:
     """Small input editor backed by a model policy snapshot."""
 
@@ -83,7 +116,7 @@ class PercentageEditor:
         if key == "\x1b":
             return False
         if key in ("\r", "\n"):
-            self.model.save_percentage_edit(self.edit, self.text)
+            self.model.stage_percentage_edit(self.edit, self.text)
             return False
         if key in ("\x7f", "\b"):
             self.text = "" if self.pristine else self.text[:-1]
@@ -163,19 +196,142 @@ def call_handle_key(handler, key, state, view, model):
     return handler(key, state, view)
 
 
+class Session:
+    """What one key does, with no terminal in it.
+
+    The host is two halves: this one owns the model, the selected Lane, the
+    editor, the one open question and the key map; :func:`run_terminal` owns the
+    screen and the keyboard and does nothing else.  The split is what lets the
+    key map be driven the way a person drives it, ``q`` and its answer included,
+    without a pty.
+    """
+
+    def __init__(self, model, view=None):
+        self.model = model
+        self.view = {} if view is None else view
+        self.message = ""
+        self.editor = None
+        self.prompt = None
+        self.selected = None
+        self.reselect()
+
+    def reselect(self):
+        """Put the selection back on a carried Lane after a reload."""
+        names = carried_lane_names(self.model.state)
+        if self.selected not in names:
+            self.selected = names[0] if names else None
+
+    def _ask(self, text, choices):
+        self.prompt = Confirm(text, choices)
+        self.view["prompt"] = self.prompt.prompt
+
+    def _answer(self, key):
+        """Feed the open question; return 'quit' when the answer closes the pane."""
+        answer = self.prompt.feed(key)
+        if answer is None:
+            return None
+        self.prompt = None
+        self.view["prompt"] = None
+        if answer == "drop":
+            self.model.discard_staged()
+        elif answer == "drop and quit":
+            self.model.discard_staged()
+            return "quit"
+        elif answer == "reload":
+            self.model.discard_staged()
+            self.model.refresh()
+            self.reselect()
+        elif answer == "save and quit":
+            # A refused save must not take the work down with it.
+            if self.model.save_staged():
+                return "quit"
+        return None
+
+    def key(self, key):
+        """Feed one key; return 'quit' when the pane should close."""
+        model = self.model
+        view = self.view
+        if self.editor is not None:
+            if key == "\x03":
+                return "quit"
+            if not self.editor.feed(key):
+                self.editor = None
+            return None
+        if self.prompt is not None:
+            return self._answer(key)
+        if key == "\x03":
+            # The emergency exit asks nothing, the way a terminal's does.
+            return "quit"
+        if key in ("q", "Q"):
+            if not model.staged:
+                return "quit"
+            self._ask(
+                f"{len(model.staged)} unsaved change"
+                f"{'' if len(model.staged) == 1 else 's'}.",
+                {"s": "save and quit", "d": "drop and quit"},
+            )
+            return None
+
+        self.message = ""
+        names = walkable_lane_names(deck, model.state, view)
+        selected_index = names.index(self.selected) if self.selected in names else 0
+        if key in ("j", "\x1b[B") and names:
+            self.selected = names[min(len(names) - 1, selected_index + 1)]
+        elif key in ("k", "\x1b[A") and names:
+            self.selected = names[max(0, selected_index - 1)]
+        elif key in ("K", "\x1b[1;2A") and self.selected is not None:
+            model.stage_move_lane(self.selected, -1)
+        elif key in ("J", "\x1b[1;2B") and self.selected is not None:
+            model.stage_move_lane(self.selected, 1)
+        elif key == "g":
+            self.editor = PercentageEditor(model, "gate")
+        elif key == "m":
+            self.editor = PercentageEditor(model, "margin")
+        elif key == "w":
+            model.save_staged()
+        elif key == "u":
+            model.undo_staged()
+        elif key == "U":
+            if model.staged:
+                self._ask(f"Drop all {len(model.staged)} staged changes?", {"y": "drop"})
+            else:
+                model.discard_staged()
+        elif key in ("r", "R"):
+            if model.staged:
+                self._ask(
+                    f"Reload drops {len(model.staged)} staged change"
+                    f"{'' if len(model.staged) == 1 else 's'}.",
+                    {"y": "reload"},
+                )
+            else:
+                model.refresh()
+                self.reselect()
+        else:
+            handler = getattr(deck, "handle_key", None)
+            if handler is not None:
+                try:
+                    used = call_handle_key(handler, key, model.state, view, model)
+                except Exception as exc:
+                    used = None
+                    self.message = (
+                        f"view {deck.NAME} key {key!r} failed: "
+                        f"{type(exc).__name__}: {exc}"
+                    )
+                # A Lane name is truthy, so a boolean return still works.
+                if isinstance(used, str) and used in names:
+                    self.selected = used
+        return None
+
+
 def run_terminal(model: DashboardModel) -> int:
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         sys.stderr.write("dashboard: interactive view needs a terminal; use --json for diagnostics\n")
         return 2
 
-    message = ""
-    view = {}
+    session = Session(model)
 
     fd = sys.stdin.fileno()
     previous = termios.tcgetattr(fd)
-    names = carried_lane_names(model.state)
-    selected = names[0] if names else None
-    editor = None
     pending = ""
     try:
         tty.setcbreak(fd)
@@ -183,9 +339,7 @@ def run_terminal(model: DashboardModel) -> int:
         dirty = True
         while True:
             if model.refresh_if_changed():
-                names = carried_lane_names(model.state)
-                if selected not in names:
-                    selected = names[0] if names else None
+                session.reselect()
                 dirty = True
             if dirty:
                 size = shutil.get_terminal_size((100, 30))
@@ -194,10 +348,10 @@ def run_terminal(model: DashboardModel) -> int:
                     model.state,
                     size.columns,
                     size.lines,
-                    selected_lane=selected,
-                    editor=editor,
-                    message=message,
-                    view=view,
+                    selected_lane=session.selected,
+                    editor=session.editor,
+                    message=session.message,
+                    view=session.view,
                 )
                 dirty = False
 
@@ -211,48 +365,8 @@ def run_terminal(model: DashboardModel) -> int:
                 key, pending = pop_key(pending, flush_escape=flush_escape)
                 if key is None:
                     break
-                if editor is not None:
-                    if key == "\x03":
-                        return 0
-                    if not editor.feed(key):
-                        editor = None
-                    dirty = True
-                    continue
-                if key in ("q", "Q", "\x03"):
+                if session.key(key) == "quit":
                     return 0
-                message = ""
-                names = walkable_lane_names(deck, model.state, view)
-                selected_index = names.index(selected) if selected in names else 0
-                if key in ("j", "\x1b[B") and names:
-                    selected = names[min(len(names) - 1, selected_index + 1)]
-                elif key in ("k", "\x1b[A") and names:
-                    selected = names[max(0, selected_index - 1)]
-                elif key in ("K", "\x1b[1;2A") and selected is not None:
-                    model.move_lane(selected, -1)
-                elif key in ("J", "\x1b[1;2B") and selected is not None:
-                    model.move_lane(selected, 1)
-                elif key == "g":
-                    editor = PercentageEditor(model, "gate")
-                elif key == "m":
-                    editor = PercentageEditor(model, "margin")
-                elif key in ("r", "R"):
-                    model.refresh()
-                else:
-                    handler = getattr(deck, "handle_key", None)
-                    if handler is not None:
-                        try:
-                            used = call_handle_key(
-                                handler, key, model.state, view, model
-                            )
-                        except Exception as exc:
-                            used = None
-                            message = (
-                                f"view {deck.NAME} key {key!r} failed: "
-                                f"{type(exc).__name__}: {exc}"
-                            )
-                        # A Lane name is truthy, so a boolean return still works.
-                        if isinstance(used, str) and used in names:
-                            selected = used
                 dirty = True
     except KeyboardInterrupt:
         return 0

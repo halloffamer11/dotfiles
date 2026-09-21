@@ -17,6 +17,11 @@ keeps a readable measure: past ``MEASURE`` cells the extra pane stays quiet
 instead of stretching a row, and the Remaining bar takes the slack below it,
 because Remaining is the value the Gate acts on.
 
+Since ticket 13 the pane draws work that is not written yet: a staged Lane or
+value carries a mark of its own in the column after the icon, the header counts
+what is unsaved, and the footer carries the one open question when a key would
+drop or write it.  The mark is a glyph, never colour alone.
+
 Standard library only.  Host-owned keys are not handled here.
 """
 
@@ -78,6 +83,10 @@ _NERD_GLYPHS = {
     "project": "",
     "folded": "",
     "open": "",
+    # One mark for "changed and not written", the same in both sets: a Codicon
+    # could not be identified here without the font, and a bullet holds one
+    # cell in any font the pane is read in.
+    "staged": "•",
 }
 _PLAIN_GLYPHS = {
     "pick": "*",
@@ -90,6 +99,7 @@ _PLAIN_GLYPHS = {
     "project": "P",
     "folded": "▸",
     "open": "▾",
+    "staged": "•",
 }
 
 RAIL = "▌"
@@ -142,6 +152,10 @@ TERMS = (
                "when it sorts after the Pick."),
     ("Meter", "One subscription quota. Each Lane uses exactly one, and many Lanes "
               "can share one."),
+    ("Unsaved", "A change made here and not written yet. The mark in the column "
+                "after the icon, and beside the Lane in the Harness table, says "
+                "which Lanes and values carry one; the header counts them. w "
+                "writes them all, u drops the last, U drops all of them."),
     ("Project Tier", "A Tier this project set for itself, in its own "
                      ".delegate/lanes.json. Every other project still sees the "
                      "Lane in the Tier the machine gives it. The mark in the T "
@@ -157,7 +171,10 @@ KEYS = (
     ("Tab", "the next view: Tier list, Harness table, Gate/Margin"),
     ("a", "the Gate/Margin view, and back to the one before it"),
     ("h j k l", "move the selection; the arrow keys do the same"),
-    ("H  L", "move the selected Lane one Tier left or right, for this project"),
+    ("H  L", "stage the selected Lane one Tier left or right, for this project"),
+    ("w", "save every staged change"),
+    ("u", "drop the last staged change"),
+    ("U", "drop all of them, after one confirm key"),
     ("d", "the terms and every reason code, at the foot"),
     ("z", "fold the deck, or the Harness row, under the cursor"),
     ("?", "close this help"),
@@ -169,10 +186,12 @@ ARROWS = {"\x1b[C": "l", "\x1b[D": "h"}
 
 # name, width, alignment.  One space between every column; the widths and the
 # gaps add up to MEASURE.  The bar takes the largest share, because Remaining
-# is the value the Gate acts on and is the one loud thing on the deck.
+# is the value the Gate acts on and is the one loud thing on the deck.  The
+# unsaved mark's cell came out of the bar, the one column with slack to give.
 PLAN = (
     ("rail", 1, "<"),
     ("icon", 1, "<"),
+    ("stage", 1, "<"),
     ("ord", 3, ">"),
     ("tsrc", 1, "<"),
     ("model", 14, "<"),
@@ -182,7 +201,7 @@ PLAN = (
     ("harness", 7, "<"),
     ("meter", 14, "<"),
     ("rem", 4, ">"),
-    ("bar", 24, "<"),
+    ("bar", 22, "<"),
     ("pace", 6, ">"),
     ("code", 7, "<"),
 )
@@ -200,8 +219,9 @@ LABELS = {
     "pace": "Pace",
     "code": "Reason",
 }
-# Dropped in this order as the pane narrows; rail, icon, the project Tier mark
-# and model never go: the mark says the Tier is not the one the machine sets.
+# Dropped in this order as the pane narrows; rail, icon, the unsaved mark, the
+# project Tier mark and model never go: one says the change is not written yet,
+# the other that the Tier is not the one the machine sets.
 DROPS = (
     ("code",),
     ("pace",),
@@ -433,6 +453,13 @@ def order_mark(row: dict[str, Any], state: dict[str, Any]) -> str:
         return " "
     project = (state.get("project") or {}).get("policy")
     return glyph("order_p") if source == project else glyph("order_g")
+
+
+def staged_mark(row: dict[str, Any]) -> tuple[str, str]:
+    """The mark, and its colour, for a Lane with a change not written yet."""
+    if not row.get("staged"):
+        return " ", PAL["mute"]
+    return glyph("staged"), PAL["watch"]
 
 
 def project_tier(row: dict[str, Any]) -> bool:
@@ -678,6 +705,7 @@ def lane_segments(row, group, state, columns, *, selected):
     values = {
         "rail": (RAIL, RAILS.get(group.get("tier"), PAL["mute"]), False),
         "icon": (icon, icon_color, is_pick),
+        "stage": staged_mark(row) + (True,),
         "ord": (f"{EMDASH if order is None else order}{order_mark(row, state)}", PAL["mute"], False),
         "tsrc": tier_mark(row) + (False,),
         "model": (display_model(row), name_color, selected or is_pick),
@@ -750,15 +778,18 @@ def table_entry(row, size, *, selected):
     icon, icon_color = status_icon(row)
     band = PAL["selbg"] if selected else None
     text = f"{display_model(row)} {effort_letter(row)}"
-    # The cell keeps its width: the project Tier mark takes a cell of its own
-    # between the icon and the name, so a Lane this project moved reads at a
-    # glance and the names still start on the same column in every cell.
+    # The cell keeps its width: the unsaved mark and the project Tier mark take
+    # a cell each between the icon and the name, so a Lane this project moved,
+    # or has not written yet, reads at a glance and the names still start on
+    # the same column in every cell.
     mark, mark_color = tier_mark(row)
+    unsaved, unsaved_color = staged_mark(row)
     return [
         (icon, PAL["gold"] if selected else icon_color, code == "PICK", band),
+        (unsaved, unsaved_color, True, band),
         (mark, mark_color, False, band),
         (" ", PAL["mute"], False, band),
-        (pad(text, max(0, size - 3)), PAL["gold"] if selected else color,
+        (pad(text, max(0, size - 4)), PAL["gold"] if selected else color,
          selected or code == "PICK", band),
     ]
 
@@ -1034,23 +1065,39 @@ def foot_lines(width):
 # --- chrome -----------------------------------------------------------------
 
 
+def unsaved_count(state):
+    """How many changes are staged, and the phrase the header shows for them."""
+    staged = state.get("staged") or {}
+    count = staged.get("count") or 0
+    if not count:
+        return 0, ""
+    return count, f"{glyph('staged')} {count} unsaved  "
+
+
 def header_lines(state, width):
     """The identity row with the fixed top-right block, then the leaders row."""
     policy = state.get("policy") or {}
     gate = (policy.get("gate") or {}).get("display") or EMDASH
     margin = (policy.get("margin") or {}).get("display") or EMDASH
+    # A staged value carries the same mark its Lane would, beside the number.
+    gate += glyph("staged") if (policy.get("gate") or {}).get("staged") else ""
+    margin += glyph("staged") if (policy.get("margin") or {}).get("staged") else ""
     meters = policy.get("meters") or {}
     meters_off = meters.get("value") is False
     meters_text = meters.get("display") or ("off" if meters_off else "on")
     usage = str((state.get("usage") or {}).get("status") or "")
+    count, unsaved = unsaved_count(state)
     block = f"Gate {gate}  Margin {margin}  Meters {meters_text}  usage {usage}"
     project = str((state.get("project") or {}).get("name") or "")
-    if cells(block) + 12 > width:
+    if cells(unsaved + block) + 12 > width:
         block = f"G {gate}  M {margin}"
-    room = max(0, width - cells(block) - 2)
+    if cells(unsaved + block) + 12 > width:
+        unsaved = f"{glyph('staged')}{count}  " if count else ""
+    room = max(0, width - cells(block) - cells(unsaved) - 2)
     identity = [
         (pad(project, room), PAL["fg"], True),
         ("  ", PAL["mute"], False),
+        (unsaved, PAL["watch"], True),
         (block, PAL["watch"] if meters_off else PAL["mute"], False),
     ]
 
@@ -1084,7 +1131,27 @@ def help_lines(width):
                 ("j/k select  J/K move the Lane inside its Tier  g/m edit the Gate or "
                  "the Margin", PAL["mute"], False)])
     out.append([(pad("", 11), PAL["mute"], False),
-                ("r reload  q close", PAL["mute"], False)])
+                ("w save  u undo one  U drop all  r reload  q close",
+                 PAL["mute"], False)])
+    out.append([])
+    out.append([("  Every key above stages; ", PAL["mute"], False),
+                ("w", PAL["gold"], False),
+                (" is the one key that writes a file. ", PAL["mute"], False),
+                ("u", PAL["gold"], False),
+                (" drops the last staged", PAL["mute"], False)])
+    out.append([("  change and ", PAL["mute"], False),
+                ("U", PAL["gold"], False),
+                (" drops all of them after one confirm key. ", PAL["mute"], False),
+                ("r", PAL["gold"], False),
+                (" and ", PAL["mute"], False),
+                ("q", PAL["gold"], False),
+                (" ask first when", PAL["mute"], False)])
+    out.append([("  changes are unsaved: ", PAL["mute"], False),
+                ("q", PAL["gold"], False),
+                (" offers save, drop or stay. The header counts what is unsaved and",
+                 PAL["mute"], False)])
+    out.append([(f"  {glyph('staged')} marks every Lane and value in it.",
+                 PAL["mute"], False)])
     out.append([])
     out.append([("  In the Tier list j/k walk the Lanes down the page and h/l close and "
                  "open a deck.", PAL["mute"], False)])
@@ -1099,10 +1166,10 @@ def help_lines(width):
                  "Tier shares.", PAL["mute"], False)])
     out.append([("  H/L", PAL["gold"], False),
                 ("  move it to the Tier left or right, for this project only. Both "
-                 "save at once,", PAL["mute"], False)])
+                 "stage the", PAL["mute"], False)])
     out.append([(pad("", 7), PAL["mute"], False),
-                ("and the line above says what changed. Tier 1 has nothing to its left "
-                 "and", PAL["mute"], False)])
+                ("move, and the line above says what changed. Tier 1 has nothing to "
+                 "its left and", PAL["mute"], False)])
     out.append([(pad("", 7), PAL["mute"], False),
                 ("Tier 4 nothing to its right.", PAL["mute"], False)])
     out.append([])
@@ -1116,19 +1183,23 @@ def help_lines(width):
 
 
 HINTS = {
-    "list": ("j/k select", "h/l fold", "Tab Harness table", "d terms", "J/K move", "z fold"),
-    "table": ("hjkl move", "HL Tier", "Tab Gate/Margin", "d terms", "J/K Order", "z fold"),
-    "aid": ("Tab Tier list", "a back", "d terms"),
+    "list": ("j/k select", "J/K move", "w save", "u undo", "h/l fold",
+             "Tab Harness table", "d terms"),
+    "table": ("hjkl move", "HL Tier", "w save", "u undo", "Tab Gate/Margin",
+              "d terms", "z fold"),
+    "aid": ("Tab Tier list", "a back", "w save", "d terms"),
 }
 
 
 def footer_line(state, view, editor, width):
-    """The editor lives here, so opening it never moves the deck."""
+    """The editor and the one open question live here, so the deck never moves."""
     if editor is not None:
         field = str(getattr(editor, "field", "") or "gate")
         text = str(getattr(editor, "text", "") or "")
-        head = f"{field.title()}  [ {text}_ ]%   ↵ save   esc cancel"
+        head = f"{field.title()}  [ {text}_ ]%   ↵ stage   esc cancel"
         color, bold = PAL["fg"], True
+    elif view.get("prompt"):
+        head, color, bold = str(view["prompt"]), PAL["gold"], True
     elif view.get("note") or view.get("order_note"):
         head, color, bold = str(view.get("note") or view["order_note"]), PAL["watch"], False
     elif view.get("message"):
@@ -1138,8 +1209,10 @@ def footer_line(state, view, editor, width):
     elif (state.get("save") or {}).get("status") not in (None, "idle") and (
         state.get("save") or {}
     ).get("detail"):
-        saved = state["save"]["status"] == "saved"
-        head, color, bold = str(state["save"]["detail"]), PAL["ok"] if saved else PAL["veto"], not saved
+        status = state["save"]["status"]
+        # Staged is neither a save nor a fault: it is work still in hand.
+        role = {"saved": "ok", "staged": "watch"}.get(status, "veto")
+        head, color, bold = str(state["save"]["detail"]), PAL[role], role == "veto"
     else:
         hints = list(HINTS[current_view(view)])
         head = "  ".join(hints + ["? help"])
@@ -1329,14 +1402,14 @@ def _set_view(state, view, name):
 def _move_tier(state, view, model, delta):
     """`H`/`L`: move the selected Lane one Tier, for this project.
 
-    The save is the model's and is immediate, the way `J`/`K` move the Order
-    inside a Tier.  The model puts what it did, or why it could not, into the
+    The move is staged, the way `J`/`K` stage the Order inside a Tier, and `w`
+    writes it.  The model puts what it staged, or why it could not, into the
     save state, which the footer draws; the two Tier edges are answered here so
     the pane never asks the catalog for a move it already knows is off the board.
     """
     selected = view.get("_selected")
     if model is None:
-        view["note"] = "Tier moves need the host's save path; this build did not pass one."
+        view["note"] = "Tier moves need the host's staging path; this build did not pass one."
         return True
     tier = None
     for item in state.get("tiers") or []:
@@ -1351,7 +1424,7 @@ def _move_tier(state, view, model, delta):
             f"{selected} cannot move {'left' if delta < 0 else 'right'}."
         )
         return True
-    model.move_lane_tier(selected, delta)
+    model.stage_move_lane_tier(selected, delta)
     return True
 
 

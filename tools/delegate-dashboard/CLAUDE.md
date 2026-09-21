@@ -26,15 +26,24 @@ verdicts and the key map, ticket 12 the lock-in.
 ## The host and the view
 
 `dashboard.py` is the host and `deck.py` is the view; the split stays. The host owns the
-model, the selected Lane and the percentage editors, and it handles `j`/`k` and the up
-and down arrows, `J`/`K` and the Shift arrows, `g`, `m`, `r` and `q`. Every other key
-goes to `deck.handle_key`. The view exposes `NAME`, `render(state, *, width, height,
-selected_lane, editor, message, view)` returning exactly `height` painted strings,
-`handle_key(key, state, view, model=None)` and `selectable(state, view)`.
+model, the selected Lane, the percentage editors and the one open question, and it
+handles `j`/`k` and the up and down arrows, `J`/`K` and the Shift arrows, `g`, `m`, `w`,
+`u`, `U`, `r` and `q`. Every other key goes to `deck.handle_key`. The view exposes
+`NAME`, `render(state, *, width, height, selected_lane, editor, message, view)`
+returning exactly `height` painted strings, `handle_key(key, state, view, model=None)`
+and `selectable(state, view)`.
+
+The host is itself two halves. `Session` owns what a key does — the model, the
+selection, the editor, the question — and `Session.key(key)` returns `'quit'` when the
+pane should close; `run_terminal` owns the screen and the keyboard and nothing else.
+Keep the terminal out of `Session`: that split is what lets the key map be driven from a
+test the way a person drives it, `q` and its answer included.
 
 - `selectable` names the carried Lanes `j`/`k` may stop on, so a folded row is never
   walked. A Lane name returned from `handle_key` moves the selection to that Lane.
-- `handle_key` takes a `model` keyword, which is how `H`/`L` reach a save path.
+- `handle_key` takes a `model` keyword, which is how `H`/`L` reach a staging path.
+- A question is one `Confirm` in `view['prompt']`, which the view draws in its footer;
+  an unlisted key leaves it open and Escape always means stay.
 - Left, right and Shift+Tab are in `KEY_SEQUENCES`, so the view reads each as one key
   instead of as `ESC`, `[` and a letter.
 - A render that raises is caught and painted as one line, so a fault never closes the
@@ -43,11 +52,16 @@ selected_lane, editor, message, view)` returning exactly `height` painted string
 ## Keys
 
 - `j`/`k` or the arrows select; `J`/`K` or the Shift arrows move the Lane inside its
-  Tier's Order and save at once.
-- `H`/`L` move the Lane one Tier left or right for this project only, and save at once.
-  Tier 1 has nothing to its left and Tier 4 nothing to its right.
-- `g`/`m` open Gate or Margin percentage entry; Enter saves and Escape cancels. A
+  Tier's Order.
+- `H`/`L` move the Lane one Tier left or right for this project only. Tier 1 has
+  nothing to its left and Tier 4 nothing to its right.
+- `g`/`m` open Gate or Margin percentage entry; Enter stages and Escape cancels. A
   percentage edit keeps its opening policy snapshot across hot reloads.
+- Every one of those four stages a change and writes nothing. `w` saves all of them,
+  `u` drops the last, and `U` drops all of them after one confirm key. `r` and `q`
+  ask first when changes are unsaved, and the `q` prompt offers save, drop or stay.
+  The header counts what is unsaved and a mark, not colour alone, names each Lane
+  and value in the count.
 - `Tab` and `Shift+Tab` cycle the three bodies: the Tier list, the Harness table
   (Harnesses down, Tiers across) and the Gate/Margin aid, which draws per Meter the
   Remaining against the Gate mark and the Pace against the Pick's Pace plus the Margin,
@@ -60,13 +74,16 @@ selected_lane, editor, message, view)` returning exactly `height` painted string
 ## The model boundary
 
 `model.py` exposes `DashboardModel.state`, `refresh()` and `refresh_if_changed()`, plus
-project-policy editing through `move_lane()`, `move_lane_tier()` and
-`save_project_policy()`. Construction resolves and pins one Git root. Refreshes read the
-effective catalog and call delegate's canonical `tier_leaders()`; they use cached
-observations and never acquire Meter data or run a vendor probe.
+staged editing through `stage_move_lane()`, `stage_move_lane_tier()`,
+`stage_percentage_edit()`, `undo_staged()`, `discard_staged()` and `save_staged()`.
+`move_lane()`, `move_lane_tier()` and `save_project_policy()` are the immediate writers
+underneath; no key reaches them any more, and they stay as the reference a staged save
+is compared against byte for byte. Construction resolves and pins one Git root.
+Refreshes read the effective catalog and call delegate's canonical `tier_leaders()`;
+they use cached observations and never acquire Meter data or run a vendor probe.
 
 The public state contains `project`, sourced `policy`, read-only `usage`, four `tiers`,
-`project_tiers`, `revision` and `error`. Rows remain in effective Order even though the
+`project_tiers`, `staged`, `revision` and `error`. Rows remain in effective Order even though the
 canonical ranking result puts its Pick first. Each row's `order_source` comes from the
 effective catalog: `p` marks project Order and `g` marks global Order or fallback. A
 fallback position can be derived, not literally stored. `project_tiers` is
@@ -78,6 +95,26 @@ Project policy, project Lanes, global catalog and Meter cache watches compare fi
 bytes. An invalid policy reload retains the last valid view with an error; missing or
 malformed Meter data becomes explicit unknown observations through
 `rank.meter_observations()`. The dashboard does not maintain a separate validity rule.
+
+## Staged edits
+
+A key changes a staged policy held in the model and writes nothing (ticket 13). Each
+staged change carries the `catalog.edit_catalog` call it will make, and the staged
+documents come from replaying those calls through the catalog's own planners
+(`_plan_order`, `_plan_set`) onto the documents on disk; the staged view is then built
+from `catalog._catalog_from_docs` and ranked by `tier_leaders()`, so it is the one
+ranking rule reading the documents the save will write. `save_staged()` makes the same
+calls in the same order, which is why a staged sequence and the same sequence of
+immediate saves leave the same bytes.
+
+Staging pins the two project files and both global files when the first change is made.
+A save answers the conflict, then the symlink refusals for each document it would
+write, then one replay of the whole list, before the first write; a change leaves the
+staged list only once it is on disk, so a write that fails part way keeps itself and
+everything after it staged. A conflict is reported once, reloads, and re-pins, so a
+second `w` saves onto what is there now. Row `staged`, `policy.gate.staged`,
+`policy.margin.staged` and the `staged` block (`count`, `changes`, `lanes`, `fields`,
+`conflict`) are what the view marks and counts.
 
 ## The save rules
 
@@ -110,6 +147,9 @@ save, which is where that rule has always lived.
 
 ## Tests
 
-Run `python3 test_dashboard.py`. Tests stay at the public model boundary; do not add
-terminal-spacing or color snapshots and do not add drawing tests. `_work/` beside the
-tickets (git-ignored) holds `make_live_fixture.py` and `verify_no_probes.py`.
+Run `python3 test_dashboard.py`. Tests stay at the public model boundary and at the
+host's key boundary, `Session.key`; do not add terminal-spacing or color snapshots and
+do not add drawing tests. The no-probe rule is a test there as well as in `_work/`:
+staging, undo and save run with the process, socket and URL entry points trapped.
+`_work/` beside the tickets (git-ignored) holds `make_live_fixture.py` and
+`verify_no_probes.py`, which walk the same path over the live fixture.

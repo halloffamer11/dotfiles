@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
-"""Model-boundary tests for the delegate dashboard."""
+"""Model-boundary tests for the delegate dashboard.
+
+The host's key map is driven through `dashboard.Session`, which holds no
+terminal, so `q` and its answer are tested as a person presses them. Nothing
+here draws a frame or measures one.
+"""
 
 import json
 import os
 from pathlib import Path
+import shutil
+import socket
 import subprocess
 import sys
 import tempfile
 import unittest
+import urllib.request
 from unittest import mock
 
 HERE = Path(__file__).resolve().parent
@@ -15,7 +23,9 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 from model import DashboardError, DashboardModel, INTERVENING_EDIT_MARK, METERS_OFF_EFFECT
-from dashboard import PercentageEditor, pop_key
+from dashboard import PercentageEditor, Session, pop_key
+
+import deck
 
 import catalog
 import rank
@@ -52,7 +62,12 @@ def meter(name, r, pace):
     }
 
 
-class DashboardModelTest(unittest.TestCase):
+class ProjectFixture(unittest.TestCase):
+    """One pinned Git project, one global catalog, one Meter cache.
+
+    Carries no test of its own: both test classes below read the same fixture.
+    """
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name) / "project"
@@ -120,6 +135,8 @@ class DashboardModelTest(unittest.TestCase):
             present={"codex", "claude", "grok"},
         )
 
+
+class DashboardModelTest(ProjectFixture):
     def test_project_is_resolved_once_and_remains_pinned(self):
         dashboard = self.make_model()
         other = Path(self.temp.name) / "other"
@@ -145,7 +162,7 @@ class DashboardModelTest(unittest.TestCase):
         row = state["tiers"][1]["rows"][0]
         self.assertEqual(
             set(row),
-            {"lane", "model", "effort", "harness", "meter", "remaining", "pace", "eligible", "reason", "order", "order_source", "tier_source"},
+            {"lane", "model", "effort", "harness", "meter", "remaining", "pace", "eligible", "reason", "order", "order_source", "tier_source", "staged"},
         )
         self.assertEqual(state["usage"]["label"], "Global subscription usage")
 
@@ -1168,6 +1185,465 @@ class DashboardModelTest(unittest.TestCase):
             set(data["policy"]["meters"]),
             {"value", "display", "source", "effect"},
         )
+
+
+class StagedEditTest(ProjectFixture):
+    """Ticket 13: every editing key stages, and only `w` writes.
+
+    The fixture and the helpers are the model-boundary ones above, so a staged
+    sequence and the immediate sequence it replaces are compared on one fixture.
+    """
+
+    def delegate_bytes(self):
+        """Every file under the project's `.delegate/`, by path and bytes."""
+        folder = self.root / ".delegate"
+        if not folder.is_dir():
+            return {}
+        return {
+            str(path.relative_to(folder)): path.read_bytes()
+            for path in sorted(folder.rglob("*"))
+            if path.is_file()
+        }
+
+    def global_bytes(self):
+        return {
+            name: (self.config / name).read_bytes()
+            for name in ("lanes.json", "routing.json")
+        }
+
+    def stage_four(self, dashboard):
+        """One of each staged change, in the order a session would make them."""
+        self.assertTrue(dashboard.stage_move_lane("sol-high@codex", -1))
+        self.assertTrue(dashboard.stage_move_lane_tier("fable-xhigh@claude", -1))
+        self.assertTrue(
+            dashboard.stage_percentage_edit(dashboard.begin_percentage_edit("gate"), "4.5")
+        )
+        self.assertTrue(
+            dashboard.stage_percentage_edit(dashboard.begin_percentage_edit("margin"), "30")
+        )
+
+    def save_four_at_once(self, dashboard):
+        """The same four, each written the moment it is made."""
+        self.assertTrue(dashboard.move_lane("sol-high@codex", -1))
+        self.assertTrue(dashboard.move_lane_tier("fable-xhigh@claude", -1))
+        self.assertTrue(
+            dashboard.save_percentage_edit(dashboard.begin_percentage_edit("gate"), "4.5")
+        )
+        self.assertTrue(
+            dashboard.save_percentage_edit(dashboard.begin_percentage_edit("margin"), "30")
+        )
+
+    def test_staged_changes_write_no_file_at_all(self):
+        write_json(self.root / ".delegate" / "routing.json",
+                   {"version": "delegate-routing.v1", "note": "keep"})
+        write_json(self.root / ".delegate" / "lanes.json",
+                   {"lanes": {"grok46-high@grok": {"tier": 3}}})
+        project_before = self.delegate_bytes()
+        global_before = self.global_bytes()
+        meters_before = self.meters.read_bytes()
+
+        dashboard = self.make_model()
+        self.stage_four(dashboard)
+
+        self.assertEqual(dashboard.state["staged"]["count"], 4)
+        self.assertEqual(self.delegate_bytes(), project_before)
+        self.assertEqual(self.global_bytes(), global_before)
+        self.assertEqual(self.meters.read_bytes(), meters_before)
+
+    def reasons(self, dashboard, tier):
+        return {row["lane"]: row["reason"] for row in dashboard.state["tiers"][tier]["rows"]}
+
+    def test_staged_view_ranks_the_staged_policy_without_writing(self):
+        dashboard = self.make_model()
+        self.assertEqual(dashboard.state["tiers"][1]["leader"], "terra-high@codex")
+        before = self.reasons(dashboard, 1)
+        self.assertEqual(before["terra-high@codex"], "pick")
+        self.assertNotEqual(before["sol-high@codex"], "pick")
+
+        self.assertTrue(dashboard.stage_move_lane("sol-high@codex", -1))
+
+        self.assertEqual(
+            [row["lane"] for row in dashboard.state["tiers"][1]["rows"]],
+            ["sol-high@codex", "terra-high@codex"],
+        )
+        self.assertEqual(dashboard.state["tiers"][1]["leader"], "sol-high@codex")
+        after = self.reasons(dashboard, 1)
+        self.assertEqual(after["sol-high@codex"], "pick")
+        self.assertNotEqual(after["terra-high@codex"], "pick")
+        self.assertEqual(self.delegate_bytes(), {})
+        json.dumps(dashboard.state, allow_nan=False)
+
+    def test_staged_tier_move_and_percentages_rank_before_any_save(self):
+        self.write_meters(a_r=0.05, a_pace=0.5, b_r=0.7, b_pace=0.6)
+        dashboard = self.make_model()
+        terra = next(row for row in dashboard.state["tiers"][1]["rows"]
+                     if row["lane"] == "terra-high@codex")
+        self.assertIn("vetoed:gate", terra["reason"])
+
+        self.assertTrue(
+            dashboard.stage_percentage_edit(dashboard.begin_percentage_edit("gate"), "4.5")
+        )
+        self.assertEqual(dashboard.state["policy"]["gate"]["display"], "4.5%")
+        self.assertEqual(dashboard.state["tiers"][1]["leader"], "terra-high@codex")
+
+        self.assertTrue(dashboard.stage_move_lane_tier("fable-xhigh@claude", -1))
+        self.assertEqual(
+            dashboard.state["project_tiers"]["fable-xhigh@claude"], {"from": 3, "to": 2}
+        )
+        self.assertEqual(dashboard._tier_of("fable-xhigh@claude"), 2)
+        self.assertEqual(self.delegate_bytes(), {})
+
+    def test_save_writes_what_the_same_immediate_saves_wrote_byte_for_byte(self):
+        immediate = self.make_model()
+        self.save_four_at_once(immediate)
+        expected = self.delegate_bytes()
+        self.assertEqual(sorted(expected), ["lanes.json", "routing.json"])
+
+        shutil.rmtree(self.root / ".delegate")
+        staged = self.make_model()
+        self.stage_four(staged)
+        self.assertEqual(self.delegate_bytes(), {})
+
+        self.assertTrue(staged.save_staged())
+        self.assertEqual(self.delegate_bytes(), expected)
+        self.assertEqual(staged.state["staged"]["count"], 0)
+        self.assertEqual(staged.state["save"]["status"], "saved")
+        self.assertEqual(
+            [tier["leader"] for tier in staged.state["tiers"]],
+            [tier["leader"] for tier in immediate.state["tiers"]],
+        )
+
+    def test_undo_drops_the_last_change_and_discard_drops_them_all(self):
+        dashboard = self.make_model()
+        before = [row["lane"] for row in dashboard.state["tiers"][1]["rows"]]
+        self.stage_four(dashboard)
+        self.assertEqual(dashboard.state["staged"]["count"], 4)
+
+        self.assertTrue(dashboard.undo_staged())
+        self.assertEqual(dashboard.state["staged"]["count"], 3)
+        self.assertEqual(dashboard.state["policy"]["margin"]["display"], "20%")
+        self.assertEqual(dashboard.state["policy"]["gate"]["display"], "4.5%")
+
+        self.assertTrue(dashboard.discard_staged())
+        self.assertEqual(dashboard.state["staged"]["count"], 0)
+        self.assertEqual(dashboard.state["policy"]["gate"]["display"], "10%")
+        self.assertEqual([row["lane"] for row in dashboard.state["tiers"][1]["rows"]], before)
+        self.assertEqual(dashboard._tier_of("fable-xhigh@claude"), 3)
+        self.assertEqual(self.delegate_bytes(), {})
+
+        self.assertFalse(dashboard.undo_staged())
+        self.assertFalse(dashboard.discard_staged())
+
+    def test_undo_of_the_only_change_saves_nothing_on_a_later_w(self):
+        dashboard = self.make_model()
+        self.assertTrue(dashboard.stage_move_lane("sol-high@codex", -1))
+        self.assertTrue(dashboard.undo_staged())
+        self.assertTrue(dashboard.save_staged())
+        self.assertEqual(self.delegate_bytes(), {})
+
+    def test_a_changed_project_file_or_catalog_refuses_the_save_and_keeps_the_staging(self):
+        cases = (
+            ("routing.json", self.root / ".delegate" / "routing.json",
+             {"version": "delegate-routing.v1", "note": "another writer"}),
+            ("lanes.json", self.root / ".delegate" / "lanes.json",
+             {"lanes": {"grok46-high@grok": {"tier": 3}}}),
+            ("the global lane catalog", self.config / "lanes.json", None),
+            ("the global routing policy", self.config / "routing.json", None),
+        )
+        for name, path, document in cases:
+            with self.subTest(changed=name):
+                shutil.rmtree(self.root / ".delegate", ignore_errors=True)
+                dashboard = self.make_model()
+                self.assertTrue(dashboard.stage_move_lane("sol-high@codex", -1))
+
+                if document is None:
+                    changed = json.loads(path.read_text())
+                    changed["note"] = "another writer"
+                    write_json(path, changed)
+                else:
+                    write_json(path, document)
+                after = path.read_bytes()
+
+                self.assertFalse(dashboard.save_staged())
+                self.assertEqual(dashboard.state["save"]["status"], "conflict")
+                self.assertIn(name, dashboard.state["save"]["detail"])
+                self.assertEqual(path.read_bytes(), after)
+                self.assertEqual(dashboard.state["staged"]["count"], 1)
+
+                # The conflict was reported once; a second `w` saves onto it.
+                self.assertTrue(dashboard.save_staged())
+                self.assertEqual(dashboard.state["staged"]["count"], 0)
+                saved = json.loads((self.root / ".delegate" / "routing.json").read_text())
+                self.assertEqual(
+                    saved["project_order"], ["sol-high@codex", "terra-high@codex"]
+                )
+                if name == "routing.json":
+                    self.assertEqual(saved["note"], "another writer")
+
+    def test_staged_changes_carry_a_mark_and_a_header_count(self):
+        dashboard = self.make_model()
+        self.stage_four(dashboard)
+        staged = dashboard.state["staged"]
+
+        self.assertEqual(staged["count"], 4)
+        self.assertEqual(
+            set(staged["lanes"]), {"sol-high@codex", "fable-xhigh@claude"}
+        )
+        self.assertEqual(set(staged["fields"]), {"gate", "margin"})
+        self.assertTrue(dashboard.state["policy"]["gate"]["staged"])
+        self.assertTrue(dashboard.state["policy"]["margin"]["staged"])
+        marked = {
+            row["lane"]
+            for tier in dashboard.state["tiers"]
+            for row in tier["rows"]
+            if row["staged"]
+        }
+        self.assertEqual(marked, {"sol-high@codex", "fable-xhigh@claude"})
+        self.assertEqual(
+            [change["kind"] for change in staged["changes"]],
+            ["order", "tier", "gate", "margin"],
+        )
+        self.assertTrue(all(change["label"] for change in staged["changes"]))
+
+    def test_a_refused_staging_changes_nothing_and_says_why(self):
+        dashboard = self.make_model()
+        self.assertFalse(dashboard.stage_move_lane("terra-high@codex", -1))
+        self.assertEqual(dashboard.state["staged"]["count"], 0)
+        self.assertEqual(dashboard.state["save"]["status"], "error")
+
+        self.assertFalse(dashboard.stage_move_lane_tier("luna-low@codex", -1))
+        self.assertEqual(dashboard.state["staged"]["count"], 0)
+        self.assertFalse(dashboard.stage_move_lane_tier("grok46-high@grok", 1))
+        self.assertEqual(dashboard.state["staged"]["count"], 0)
+
+        edit = dashboard.begin_percentage_edit("gate")
+        self.assertFalse(dashboard.stage_percentage_edit(edit, "101"))
+        self.assertEqual(dashboard.state["staged"]["count"], 0)
+        self.assertEqual(self.delegate_bytes(), {})
+
+    def test_a_symlinked_project_file_refuses_the_staged_save(self):
+        project_policy = self.root / ".delegate" / "routing.json"
+        project_policy.parent.mkdir(parents=True)
+        project_policy.symlink_to(self.config / "routing.json")
+        global_before = (self.config / "routing.json").read_bytes()
+        dashboard = self.make_model()
+
+        self.assertTrue(dashboard.stage_move_lane("sol-high@codex", -1))
+        self.assertFalse(dashboard.save_staged())
+        self.assertEqual(dashboard.state["save"]["status"], "error")
+        self.assertTrue(project_policy.is_symlink())
+        self.assertEqual((self.config / "routing.json").read_bytes(), global_before)
+        self.assertEqual(dashboard.state["staged"]["count"], 1)
+
+    def test_a_failing_second_write_keeps_the_rest_staged(self):
+        dashboard = self.make_model()
+        self.assertTrue(dashboard.stage_move_lane("sol-high@codex", -1))
+        self.assertTrue(
+            dashboard.stage_percentage_edit(dashboard.begin_percentage_edit("gate"), "4.5")
+        )
+        real_edit = catalog.edit_catalog
+        seen = []
+
+        def fail_the_second_apply(*args, **kwargs):
+            if kwargs.get("apply"):
+                seen.append(kwargs.get("field") or kwargs.get("lane"))
+                if len(seen) > 1:
+                    raise OSError("disk full")
+            return real_edit(*args, **kwargs)
+
+        with mock.patch.object(catalog, "edit_catalog", side_effect=fail_the_second_apply):
+            self.assertFalse(dashboard.save_staged())
+        self.assertEqual(dashboard.state["save"]["status"], "error")
+        self.assertEqual(dashboard.state["staged"]["count"], 1)
+        self.assertEqual(dashboard.state["staged"]["changes"][0]["kind"], "gate")
+        saved = json.loads((self.root / ".delegate" / "routing.json").read_text())
+        self.assertEqual(saved["project_order"], ["sol-high@codex", "terra-high@codex"])
+        self.assertNotIn("gate", saved)
+
+    def test_a_staged_view_follows_an_external_change_and_still_refuses(self):
+        project_policy = self.root / ".delegate" / "routing.json"
+        dashboard = self.make_model()
+        self.assertTrue(dashboard.stage_move_lane("sol-high@codex", -1))
+
+        write_json(project_policy, {"version": "delegate-routing.v1", "gate": 0.0})
+        self.assertTrue(dashboard.refresh_if_changed())
+        self.assertEqual(dashboard.state["policy"]["gate"]["display"], "0%")
+        self.assertEqual(
+            [row["lane"] for row in dashboard.state["tiers"][1]["rows"]],
+            ["sol-high@codex", "terra-high@codex"],
+        )
+        self.assertIsNotNone(dashboard.state["staged"]["conflict"])
+        self.assertIn("routing.json", dashboard.state["staged"]["conflict"])
+
+    def test_the_editor_stages_instead_of_saving(self):
+        dashboard = self.make_model()
+        editor = PercentageEditor(dashboard, "margin")
+        pending = "10.01\r"
+        active = True
+        while pending:
+            key, pending = pop_key(pending)
+            active = editor.feed(key)
+        self.assertFalse(active)
+        self.assertEqual(dashboard.state["policy"]["margin"]["display"], "10.01%")
+        self.assertEqual(dashboard.state["staged"]["count"], 1)
+        self.assertEqual(self.delegate_bytes(), {})
+
+    def session(self):
+        """One host session over the fixture, with two changes staged by key.
+
+        `j` first: the Lane the pane opens on is the only carried Lane in Tier
+        1, so `J` there is a move off the board and stages nothing.
+        """
+        model = self.make_model()
+        session = Session(model)
+        self.assertIsNone(session.key("j"))
+        self.assertEqual(session.selected, "terra-high@codex")
+        self.assertIsNone(session.key("J"))
+        self.assertIsNone(session.key("g"))
+        for key in "4.5\r":
+            self.assertIsNone(session.key(key))
+        self.assertEqual(model.state["staged"]["count"], 2)
+        self.assertEqual(self.delegate_bytes(), {})
+        return session, model
+
+    def test_q_with_unsaved_changes_saves_drops_or_stays(self):
+        session, model = self.session()
+        self.assertIsNone(session.key("q"))
+        self.assertEqual(model.state["staged"]["count"], 2)
+        self.assertIn("2 unsaved changes", session.view["prompt"])
+        self.assertIn("s save and quit", session.view["prompt"])
+        self.assertIn("d drop and quit", session.view["prompt"])
+        self.assertIn("esc stay", session.view["prompt"])
+
+        # Stay: the question closes, the pane does not, the work is still here.
+        self.assertIsNone(session.key("\x1b"))
+        self.assertIsNone(session.view["prompt"])
+        self.assertEqual(model.state["staged"]["count"], 2)
+        self.assertEqual(self.delegate_bytes(), {})
+
+        # An unlisted key leaves the question open and answers nothing.
+        self.assertIsNone(session.key("q"))
+        self.assertIsNone(session.key("x"))
+        self.assertIsNotNone(session.view["prompt"])
+        self.assertEqual(self.delegate_bytes(), {})
+
+        self.assertEqual(session.key("s"), "quit")
+        self.assertEqual(model.state["staged"]["count"], 0)
+        saved = json.loads((self.root / ".delegate" / "routing.json").read_text())
+        self.assertEqual(saved["gate"], 0.045)
+        self.assertEqual(saved["project_order"], ["sol-high@codex", "terra-high@codex"])
+
+    def test_q_drop_and_quit_closes_the_pane_without_writing(self):
+        session, model = self.session()
+        self.assertIsNone(session.key("q"))
+        self.assertEqual(session.key("d"), "quit")
+        self.assertEqual(model.state["staged"]["count"], 0)
+        self.assertEqual(self.delegate_bytes(), {})
+
+    def test_q_without_unsaved_changes_asks_nothing(self):
+        model = self.make_model()
+        session = Session(model)
+        self.assertEqual(session.key("q"), "quit")
+        self.assertIsNone(session.view.get("prompt"))
+
+    def test_a_refused_save_from_the_quit_prompt_keeps_the_pane_open(self):
+        session, model = self.session()
+        project_policy = self.root / ".delegate" / "routing.json"
+        project_policy.parent.mkdir(parents=True)
+        project_policy.symlink_to(self.config / "routing.json")
+        global_before = (self.config / "routing.json").read_bytes()
+
+        # A file appeared where the staging found none, so the pinned-bytes
+        # check answers first and the symlink refusal answers the retry.
+        for expected in ("conflict", "error"):
+            with self.subTest(refusal=expected):
+                self.assertIsNone(session.key("q"))
+                self.assertIsNone(session.key("s"))
+                self.assertEqual(model.state["save"]["status"], expected)
+                self.assertEqual(model.state["staged"]["count"], 2)
+                self.assertIsNone(session.view["prompt"])
+                self.assertTrue(project_policy.is_symlink())
+                self.assertEqual((self.config / "routing.json").read_bytes(), global_before)
+
+    def test_U_drops_every_staged_change_only_after_its_confirm_key(self):
+        session, model = self.session()
+        self.assertIsNone(session.key("U"))
+        self.assertIn("Drop all 2 staged changes?", session.view["prompt"])
+        self.assertEqual(model.state["staged"]["count"], 2)
+
+        self.assertIsNone(session.key("n"))
+        self.assertEqual(model.state["staged"]["count"], 2)
+        self.assertIsNone(session.key("\x1b"))
+        self.assertIsNone(session.view["prompt"])
+        self.assertEqual(model.state["staged"]["count"], 2)
+
+        self.assertIsNone(session.key("U"))
+        self.assertIsNone(session.key("y"))
+        self.assertIsNone(session.view["prompt"])
+        self.assertEqual(model.state["staged"]["count"], 0)
+        self.assertEqual(model.state["policy"]["gate"]["display"], "10%")
+        self.assertEqual(self.delegate_bytes(), {})
+
+    def test_u_and_w_undo_one_and_write_the_rest(self):
+        session, model = self.session()
+        self.assertIsNone(session.key("u"))
+        self.assertEqual(model.state["staged"]["count"], 1)
+        self.assertIsNone(session.key("w"))
+        self.assertEqual(model.state["staged"]["count"], 0)
+        saved = json.loads((self.root / ".delegate" / "routing.json").read_text())
+        self.assertEqual(saved["project_order"], ["sol-high@codex", "terra-high@codex"])
+        self.assertNotIn("gate", saved)
+
+    def test_r_asks_before_a_reload_drops_staged_changes(self):
+        session, model = self.session()
+        self.assertIsNone(session.key("r"))
+        self.assertIn("Reload drops 2 staged changes", session.view["prompt"])
+        self.assertEqual(model.state["staged"]["count"], 2)
+        self.assertIsNone(session.key("y"))
+        self.assertEqual(model.state["staged"]["count"], 0)
+        self.assertEqual(self.delegate_bytes(), {})
+
+    def test_staging_undo_and_save_start_no_process_socket_or_url_call(self):
+        """The no-probe rule of ticket 09, over the whole editing path.
+
+        `catalog.find_git_root` walks the filesystem rather than calling git, so
+        nothing on this path has a reason to start a process at all.
+        """
+        calls = []
+
+        def trap(name):
+            def refuse(*args, **kwargs):
+                calls.append(name)
+                raise AssertionError(f"forbidden: {name}")
+            return refuse
+
+        with mock.patch.object(subprocess, "run", trap("subprocess.run")), \
+                mock.patch.object(subprocess, "Popen", trap("subprocess.Popen")), \
+                mock.patch.object(os, "system", trap("os.system")), \
+                mock.patch.object(socket, "socket", trap("socket.socket")), \
+                mock.patch.object(urllib.request, "urlopen", trap("urlopen")), \
+                mock.patch.object(shutil, "which", trap("shutil.which")):
+            dashboard = self.make_model()
+            dashboard.refresh()
+            dashboard.refresh_if_changed()
+            self.stage_four(dashboard)
+            self.assertTrue(dashboard.undo_staged())
+            self.assertTrue(dashboard.save_staged())
+
+        self.assertEqual(calls, [])
+        self.assertEqual(dashboard.state["staged"]["count"], 0)
+        self.assertEqual(sorted(self.delegate_bytes()), ["lanes.json", "routing.json"])
+
+    def test_the_new_keys_are_listed_for_the_reader(self):
+        listed = " ".join(f"{key} {meaning}" for key, meaning in deck.KEYS)
+        listed += " " + " ".join(
+            text for parts in deck.help_lines(100) for text, _c, _b in parts
+        )
+        for key in ("w", "u", "U"):
+            self.assertIn(key, listed.split())
+        context = (HERE / "CLAUDE.md").read_text(encoding="utf-8")
+        for key in ("`w`", "`u`", "`U`"):
+            self.assertIn(key, context)
 
 
 if __name__ == "__main__":

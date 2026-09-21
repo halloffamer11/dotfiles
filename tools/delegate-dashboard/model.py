@@ -9,6 +9,16 @@ and the construction-time harness set.  ``move_lane_tier`` is the same path for 
 Lane's Tier, written against ticket 32's project Lanes document; until that backend
 is installed its preview raises and nothing is written.  The dashboard makes no
 write at ``scope='global'``.  Direct catalog writes are not a dashboard save path.
+
+Ticket 13 put a staging step in front of all four writes.  ``stage_move_lane``,
+``stage_move_lane_tier`` and ``stage_percentage_edit`` hold one change each in
+:attr:`DashboardModel.staged` and write nothing; the state they build is ranked
+from the staged documents, so a Tier leader or a Pick moves on the screen before
+any file does.  ``save_staged`` is the only writer, and it makes exactly the
+catalog calls the immediate methods above make, in the order they were staged,
+so a staged sequence and the same sequence of immediate saves leave the same
+bytes.  Those immediate methods remain the reference for that and are no longer
+bound to a key.
 """
 
 from __future__ import annotations
@@ -63,6 +73,40 @@ class PercentageEdit:
     project_doc: dict[str, Any]
     policy_bytes: bytes | None
     global_signatures: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
+class StagedChange:
+    """One unsaved change: the catalog call it will make, and its one line.
+
+    ``kind`` is what the pane marks -- ``order``, ``tier``, ``gate`` or
+    ``margin``.  ``op`` and ``kwargs`` are the ``catalog.edit_catalog``
+    arguments, which are also what replays the change onto a document, so the
+    staged view and the save cannot drift apart.
+    """
+
+    kind: str
+    op: str
+    label: str
+    kwargs: dict[str, Any]
+    lane: str | None = None
+    field: str | None = None
+    # What the change moves away from, which the write reports but never reads.
+    origin: Any = None
+
+    @property
+    def writes_project_lanes(self) -> bool:
+        """True when this change is written to the project's Lanes document."""
+        return self.kind == "tier"
+
+
+# The four files staging pins, in the words the pane uses for each one.
+STAGE_BASE_NAMES = (
+    ("project", "routing.json"),
+    ("project_lanes", "lanes.json"),
+    ("lanes", "the global lane catalog"),
+    ("routing", "the global routing policy"),
+)
 
 
 # catalog.edit_catalog raises this while a project may not carry Lane Tiers.
@@ -182,7 +226,14 @@ class DashboardModel:
         self._project_doc: dict[str, Any] = {}
         self._global_lanes_doc: dict[str, Any] = {}
         self._global_routing_doc: dict[str, Any] = {}
+        self._staged: list[StagedChange] = []
+        self._stage_base: dict[str, tuple[str, str]] | None = None
         self.refresh()
+
+    @property
+    def staged(self) -> tuple[StagedChange, ...]:
+        """The unsaved changes, oldest first."""
+        return tuple(self._staged)
 
     def _global_target_of(self, path: Path) -> str | None:
         """Name the global document `path` resolves to, if it resolves to one."""
@@ -244,20 +295,36 @@ class DashboardModel:
             raise DashboardError(f"{path}: document must be a JSON object")
         return doc, raw
 
-    def _load_project_snapshot(self) -> tuple[dict[str, Any], bytes | None]:
+    def _load_optional_snapshot(self, path: Path) -> tuple[dict[str, Any], bytes | None]:
+        """Read one project document that may not exist yet."""
         try:
-            raw = self._read_optional_bytes(self.project_policy_path)
+            raw = self._read_optional_bytes(path)
         except OSError as exc:
-            raise DashboardError(f"{self.project_policy_path}: cannot read: {exc}") from exc
+            raise DashboardError(f"{path}: cannot read: {exc}") from exc
         if raw is None:
             return {}, None
         try:
             doc = _strict_json(raw)
         except (UnicodeError, ValueError) as exc:
-            raise DashboardError(f"{self.project_policy_path}: malformed JSON: {exc}") from exc
+            raise DashboardError(f"{path}: malformed JSON: {exc}") from exc
         if not isinstance(doc, dict):
-            raise DashboardError(f"{self.project_policy_path}: document must be a JSON object")
+            raise DashboardError(f"{path}: document must be a JSON object")
         return doc, raw
+
+    def _load_project_snapshot(self) -> tuple[dict[str, Any], bytes | None]:
+        return self._load_optional_snapshot(self.project_policy_path)
+
+    def _load_project_lanes_snapshot(self) -> tuple[dict[str, Any], bytes | None]:
+        return self._load_optional_snapshot(self.project_lanes_path)
+
+    def _source_files(self) -> dict[str, str]:
+        """The four source paths, named as ``catalog`` names them in a snapshot."""
+        return {
+            "lanes": str(self.global_lanes_path),
+            "routing": str(self.global_routing_path),
+            "project": str(self.project_policy_path),
+            "project_lanes": str(self.project_lanes_path),
+        }
 
     def _load_meters(
         self,
@@ -297,6 +364,135 @@ class DashboardModel:
             )
         return doc, "ok", None, signature
 
+    def _replay(
+        self,
+        changes: Iterable[StagedChange],
+        lanes_doc: dict[str, Any],
+        routing_doc: dict[str, Any],
+        project_doc: dict[str, Any] | None,
+        project_lanes_doc: dict[str, Any] | None,
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        """Apply the staged changes to the two project documents, in order.
+
+        The catalog's own planners do the work, so a staged document is the
+        document ``edit_catalog`` would write for the same call, and the second
+        change is planned against the result of the first exactly as a second
+        immediate save would be.  Nothing here touches the filesystem.
+        """
+        files = self._source_files()
+        for change in changes:
+            if change.op == "order":
+                planned = catalog._plan_order(
+                    change.kwargs["lane"],
+                    change.kwargs["position"],
+                    "project",
+                    lanes_doc,
+                    routing_doc,
+                    project_doc,
+                    files,
+                    project_lanes_doc,
+                )
+            else:
+                planned = catalog._plan_set(
+                    change.kwargs["field"],
+                    change.kwargs["value"],
+                    "project",
+                    lanes_doc,
+                    routing_doc,
+                    project_doc,
+                    project_lanes_doc,
+                )
+            project_doc, project_lanes_doc = planned[3], planned[4]
+        return project_doc, project_lanes_doc
+
+    def _staged_effective(
+        self,
+        changes: Iterable[StagedChange],
+        lanes_doc: dict[str, Any],
+        routing_doc: dict[str, Any],
+        project_doc: dict[str, Any] | None,
+        project_lanes_doc: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """The effective catalog the staged documents produce.
+
+        ``catalog._catalog_from_docs`` is the catalog's own reader for documents
+        it already holds, and the one ``edit_catalog`` previews through; going
+        through it keeps the staged view on the single ranking rule and
+        validates both documents on the way.
+        """
+        project, project_lanes = self._replay(
+            changes, lanes_doc, routing_doc, project_doc, project_lanes_doc
+        )
+        return catalog._catalog_from_docs(
+            lanes_doc, routing_doc, project, self._source_files(), project_lanes
+        )
+
+    def _staged_effective_from_disk(
+        self, changes: Iterable[StagedChange]
+    ) -> dict[str, Any]:
+        """The same, against the documents on disk right now."""
+        lanes_doc, _ = self._load_json_snapshot(self.global_lanes_path)
+        routing_doc, _ = self._load_json_snapshot(self.global_routing_path)
+        project_doc, project_raw = self._load_project_snapshot()
+        project_lanes_doc, project_lanes_raw = self._load_project_lanes_snapshot()
+        return self._staged_effective(
+            changes,
+            lanes_doc,
+            routing_doc,
+            project_doc if project_raw is not None else None,
+            project_lanes_doc if project_lanes_raw is not None else None,
+        )
+
+    def _record_stage_base(self) -> None:
+        """Pin the bytes a staged save is allowed to write onto."""
+        self._stage_base = {
+            "project": _file_signature(self.project_policy_path),
+            "project_lanes": _file_signature(self.project_lanes_path),
+            "lanes": _file_signature(self.global_lanes_path),
+            "routing": _file_signature(self.global_routing_path),
+        }
+
+    def _staged_conflict(self) -> str | None:
+        """Name the pinned files another writer changed since staging began."""
+        if self._stage_base is None or not self._staged:
+            return None
+        now = {
+            "project": _file_signature(self.project_policy_path),
+            "project_lanes": _file_signature(self.project_lanes_path),
+            "lanes": _file_signature(self.global_lanes_path),
+            "routing": _file_signature(self.global_routing_path),
+        }
+        changed = [name for key, name in STAGE_BASE_NAMES if now[key] != self._stage_base[key]]
+        if not changed:
+            return None
+        return f"{' and '.join(changed)} changed on disk since the first staged change"
+
+    def _staged_summary(self) -> dict[str, Any]:
+        """The public, JSON-safe account of what is unsaved."""
+        changes = []
+        lanes: list[str] = []
+        fields: list[str] = []
+        for change in self._staged:
+            changes.append(
+                {
+                    "kind": change.kind,
+                    "lane": change.lane,
+                    "field": change.field,
+                    "label": change.label,
+                }
+            )
+            if change.lane and change.lane not in lanes:
+                lanes.append(change.lane)
+            if change.field and change.field not in fields:
+                fields.append(change.field)
+        return {
+            "count": len(self._staged),
+            "changes": changes,
+            "lanes": lanes,
+            "fields": fields,
+            "conflict": self._staged_conflict(),
+        }
+
     @staticmethod
     def _display_order(row: dict[str, Any]) -> tuple[int, int, str]:
         order = row.get("order")
@@ -306,6 +502,7 @@ class DashboardModel:
         global_lanes, global_lanes_raw = self._load_json_snapshot(self.global_lanes_path)
         global_routing, global_routing_raw = self._load_json_snapshot(self.global_routing_path)
         project_doc, project_raw = self._load_project_snapshot()
+        project_lanes_doc, project_lanes_raw = self._load_project_lanes_snapshot()
         try:
             if project_raw is not None:
                 catalog.validate_project_routing(
@@ -316,10 +513,19 @@ class DashboardModel:
                     lanes_source=str(self.global_lanes_path),
                     global_source=str(self.global_routing_path),
                 )
-            effective = catalog.load_catalog(
-                cwd=str(self.project_root),
-                config_dir=str(self.config_dir) if self.config_dir is not None else None,
-            )
+            if self._staged:
+                effective = self._staged_effective(
+                    self._staged,
+                    global_lanes,
+                    global_routing,
+                    project_doc if project_raw is not None else None,
+                    project_lanes_doc if project_lanes_raw is not None else None,
+                )
+            else:
+                effective = catalog.load_catalog(
+                    cwd=str(self.project_root),
+                    config_dir=str(self.config_dir) if self.config_dir is not None else None,
+                )
         except catalog.CatalogError as exc:
             raise DashboardError(str(exc)) from exc
 
@@ -328,6 +534,9 @@ class DashboardModel:
         sources = effective["sources"]
         # Ticket 32: the Lanes whose Tier this project moved, and where from.
         project_tiers = dict(effective.get("project_tiers") or {})
+        staged = self._staged_summary()
+        staged_lanes = set(staged["lanes"])
+        staged_fields = set(staged["fields"])
         tiers = []
         for preview in previews:
             carried = [
@@ -350,6 +559,7 @@ class DashboardModel:
                     "order": row["order"],
                     "order_source": sources.get(f"lanes.{row['lane']}.order"),
                     "tier_source": "project" if row["lane"] in project_tiers else "global",
+                    "staged": row["lane"] in staged_lanes,
                 }
                 for row in carried
             ]
@@ -377,11 +587,13 @@ class DashboardModel:
                     "value": routing["gate"],
                     "display": f"{_percentage_text(routing['gate'])}%",
                     "source": sources.get("gate"),
+                    "staged": "gate" in staged_fields,
                 },
                 "margin": {
                     "value": routing["margin"],
                     "display": f"{_percentage_text(routing['margin'])}%",
                     "source": sources.get("margin"),
+                    "staged": "margin" in staged_fields,
                 },
                 "meters": {
                     "value": meters_on,
@@ -399,6 +611,7 @@ class DashboardModel:
             },
             "tiers": tiers,
             "project_tiers": project_tiers,
+            "staged": staged,
             "revision": self._revision,
             "error": None,
             "save": {"status": "idle", "detail": None},
@@ -408,8 +621,12 @@ class DashboardModel:
             "project_raw": project_raw,
             "global_lanes": global_lanes,
             "global_routing": global_routing,
+            # The same five files, in the same order, as `_signatures()`: a
+            # shorter tuple never compares equal, so the watch would reload on
+            # every pass.
             "signatures": (
                 _bytes_signature(project_raw),
+                _bytes_signature(project_lanes_raw),
                 meter_signature,
                 _bytes_signature(global_lanes_raw),
                 _bytes_signature(global_routing_raw),
@@ -429,6 +646,8 @@ class DashboardModel:
             new_state = dict(self.state)
             new_state["revision"] = self._revision
             new_state["error"] = f"Reload failed; showing last valid state: {exc}"
+            # The rows are the last valid ones, but the staged count is now.
+            new_state["staged"] = self._staged_summary()
             self._watch_signatures = self._signatures()
         else:
             self._project_doc = copy.deepcopy(snapshot["project_doc"])
@@ -718,31 +937,53 @@ class DashboardModel:
             value=fraction,
         )
 
-    def move_lane(self, lane_name: str, direction: int) -> bool:
-        """Move one carried lane by one position inside its existing Tier."""
-        if type(direction) is not int or direction not in (-1, 1):
-            self._set_save_state("error", "Not saved: movement must be one position up or down.")
-            return False
+    def _order_move_target(
+        self, lane_name: str, direction: int
+    ) -> tuple[tuple[dict[str, Any], int] | None, str | None]:
+        """The Tier and the one-based destination of one Order move.
 
-        selected_tier = None
-        selected_index = None
+        Returns ``(None, reason)`` when the move is off the board.  The shown
+        Tier is the staged one, so a staged move is measured against the
+        positions the pane is painting, not against the file.
+        """
+        if type(direction) is not int or direction not in (-1, 1):
+            return None, "movement must be one position up or down"
         for tier in self.state.get("tiers", []):
             names = [row["lane"] for row in tier["rows"]]
-            if lane_name in names:
-                selected_tier = tier
-                selected_index = names.index(lane_name)
-                break
-        if selected_tier is None or selected_index is None:
-            self._set_save_state("error", f"Not saved: lane '{lane_name}' is not carried.")
-            return False
+            if lane_name not in names:
+                continue
+            destination = names.index(lane_name) + direction
+            if destination < 0 or destination >= len(names):
+                return None, f"'{lane_name}' is already at the Tier {tier['tier']} boundary"
+            return (tier, destination + 1), None
+        return None, f"lane '{lane_name}' is not carried"
 
-        destination = selected_index + direction
-        if destination < 0 or destination >= len(selected_tier["rows"]):
-            self._set_save_state(
-                "error",
-                f"Not saved: '{lane_name}' is already at the Tier {selected_tier['tier']} boundary.",
+    def _tier_move_target(
+        self, lane_name: str, direction: int
+    ) -> tuple[tuple[int, int] | None, str | None]:
+        """The current and destination Tier of one project Tier move."""
+        if type(direction) is not int or direction not in (-1, 1):
+            return None, "a Tier move is one Tier left or right"
+        current = self._tier_of(lane_name)
+        if current is None:
+            return None, f"lane '{lane_name}' is not carried"
+        destination = current + direction
+        if destination not in TIER_COLORS:
+            edge = "first" if direction < 0 else "last"
+            return None, (
+                f"Tier {current} is the {edge} Tier, so '{lane_name}' "
+                f"cannot move {'left' if direction < 0 else 'right'}"
             )
+        return (current, destination), None
+
+    def move_lane(self, lane_name: str, direction: int) -> bool:
+        """Move one carried lane by one position inside its existing Tier."""
+        target, reason = self._order_move_target(lane_name, direction)
+        if target is None:
+            self._set_save_state("error", f"Not saved: {reason}.")
             return False
+        selected_tier, position = target
+        destination = position - 1
 
         displayed_names = [row["lane"] for row in selected_tier["rows"]]
         try:
@@ -810,25 +1051,17 @@ class DashboardModel:
         not this method.  An installation without that backend raises at the
         preview and the caller shows :data:`PROJECT_TIER_MISSING`.
         """
-        if type(direction) is not int or direction not in (-1, 1):
-            self._set_save_state("error", "Not saved: a Tier move is one Tier left or right.")
+        target, reason = self._tier_move_target(lane_name, direction)
+        if target is None:
+            self._set_save_state("error", f"Not saved: {reason}.")
             return False
+        current, destination = target
+        return self._apply_project_lane_tier(lane_name, current, destination)
 
-        current = self._tier_of(lane_name)
-        if current is None:
-            self._set_save_state("error", f"Not saved: lane '{lane_name}' is not carried.")
-            return False
-
-        destination = current + direction
-        if destination not in TIER_COLORS:
-            edge = "first" if direction < 0 else "last"
-            self._set_save_state(
-                "error",
-                f"Not saved: Tier {current} is the {edge} Tier, so '{lane_name}' "
-                f"cannot move {'left' if direction < 0 else 'right'}.",
-            )
-            return False
-
+    def _apply_project_lane_tier(
+        self, lane_name: str, current: int, destination: int
+    ) -> bool:
+        """Write one Lane's project Tier: the write half of ``move_lane_tier``."""
         unsafe = self._unsafe_lanes_target()
         if unsafe is not None:
             self._set_save_state("error", f"Not saved: {unsafe}")
@@ -885,6 +1118,199 @@ class DashboardModel:
         self._set_save_state(
             "saved",
             f"{lane_name}  Tier {current} {ARROW} Tier {destination}, for this project.",
+        )
+        return True
+
+    # --- staged edits (ticket 13) -------------------------------------------
+
+    def _stage(self, change: StagedChange) -> bool:
+        """Add one change after replaying it, or refuse it and change nothing.
+
+        A change that the catalog would not plan, or that leaves a catalog the
+        ranker cannot read, is refused here rather than at the save, so the
+        staged list is always a list a save can make.
+        """
+        try:
+            self._staged_effective_from_disk(list(self._staged) + [change])
+        except (DashboardError, catalog.CatalogError, OSError, ValueError) as exc:
+            self._set_save_state("error", f"Not staged: {exc}")
+            return False
+
+        first = self._stage_base is None
+        if first:
+            self._record_stage_base()
+        self._staged.append(change)
+        self.refresh()
+        if self.state.get("error"):
+            self._staged.pop()
+            if first:
+                self._stage_base = None
+            self.refresh()
+            self._set_save_state("error", "Not staged: the staged view could not be built.")
+            return False
+        self._set_save_state("staged", f"{change.label}  ·  {len(self._staged)} unsaved")
+        return True
+
+    def stage_move_lane(self, lane_name: str, direction: int) -> bool:
+        """Stage one Order move inside the Lane's shown Tier."""
+        target, reason = self._order_move_target(lane_name, direction)
+        if target is None:
+            self._set_save_state("error", f"Not staged: {reason}.")
+            return False
+        tier, position = target
+        return self._stage(
+            StagedChange(
+                kind="order",
+                op="order",
+                lane=lane_name,
+                label=(
+                    f"{lane_name}  Order {position - direction} {ARROW} {position} "
+                    f"in Tier {tier['tier']}"
+                ),
+                kwargs={"lane": lane_name, "position": position},
+            )
+        )
+
+    def stage_move_lane_tier(self, lane_name: str, direction: int) -> bool:
+        """Stage one Lane's Tier move, for this project only."""
+        target, reason = self._tier_move_target(lane_name, direction)
+        if target is None:
+            self._set_save_state("error", f"Not staged: {reason}.")
+            return False
+        current, destination = target
+        return self._stage(
+            StagedChange(
+                kind="tier",
+                op="set",
+                lane=lane_name,
+                origin=current,
+                label=(
+                    f"{lane_name}  Tier {current} {ARROW} Tier {destination}, "
+                    "for this project"
+                ),
+                kwargs={"field": f"lanes.{lane_name}.tier", "value": destination},
+            )
+        )
+
+    def stage_percentage_edit(self, edit: PercentageEdit, text: str) -> bool:
+        """Stage one Gate or Margin value from a percentage editor."""
+        if not isinstance(edit, PercentageEdit) or edit.field not in ("gate", "margin"):
+            self._set_save_state("error", "Not staged: invalid percentage edit.")
+            return False
+        try:
+            fraction = _parse_percentage(text)
+        except ValueError as exc:
+            self._set_save_state("error", f"Not staged: {edit.field.title()} {exc}.")
+            return False
+        shown = (self.state.get("policy") or {}).get(edit.field) or {}
+        return self._stage(
+            StagedChange(
+                kind=edit.field,
+                op="set",
+                field=edit.field,
+                label=(
+                    f"{edit.field.title()} {shown.get('display') or ''} {ARROW} "
+                    f"{_percentage_text(fraction)}%"
+                ),
+                kwargs={"field": f"routing.{edit.field}", "value": fraction},
+            )
+        )
+
+    def undo_staged(self) -> bool:
+        """Drop the last staged change."""
+        if not self._staged:
+            self._set_save_state("staged", "Nothing staged to undo.")
+            return False
+        dropped = self._staged.pop()
+        if not self._staged:
+            self._stage_base = None
+        self.refresh()
+        self._set_save_state(
+            "staged", f"Dropped {dropped.label}  ·  {len(self._staged)} unsaved"
+        )
+        return True
+
+    def discard_staged(self) -> bool:
+        """Drop every staged change."""
+        count = len(self._staged)
+        if not count:
+            self._set_save_state("staged", "Nothing staged to drop.")
+            return False
+        self._staged.clear()
+        self._stage_base = None
+        self.refresh()
+        self._set_save_state(
+            "staged", f"Dropped all {count} staged change{'' if count == 1 else 's'}."
+        )
+        return True
+
+    def save_staged(self) -> bool:
+        """Write every staged change, or none of them that this can detect.
+
+        The conflict, the two symlink refusals and one replay of the whole list
+        are answered before the first write; then each change makes the catalog
+        call its immediate method makes, in the order it was staged.  A change
+        leaves the staged list only once it is on disk, so a write that fails
+        part way keeps itself and everything after it staged.
+        """
+        if not self._staged:
+            self._set_save_state("saved", "Nothing staged to save.")
+            return True
+
+        conflict = self._staged_conflict()
+        if conflict is not None:
+            self.refresh()
+            self._record_stage_base()
+            self._set_save_state(
+                "conflict",
+                f"Not saved: {conflict}; reloaded it. Press w again to save onto it.",
+            )
+            return False
+
+        if any(not change.writes_project_lanes for change in self._staged):
+            unsafe = self._unsafe_policy_target()
+            if unsafe is not None:
+                self._set_save_state("error", f"Not saved: {unsafe}")
+                return False
+        if any(change.writes_project_lanes for change in self._staged):
+            unsafe = self._unsafe_lanes_target()
+            if unsafe is not None:
+                self._set_save_state("error", f"Not saved: {unsafe}")
+                return False
+
+        try:
+            self._staged_effective_from_disk(self._staged)
+        except (DashboardError, catalog.CatalogError, OSError, ValueError) as exc:
+            self._set_save_state("error", f"Not saved: {exc}")
+            return False
+
+        total = len(self._staged)
+        while self._staged:
+            change = self._staged.pop(0)
+            if change.writes_project_lanes:
+                written = self._apply_project_lane_tier(
+                    change.lane, change.origin, change.kwargs["value"]
+                )
+            else:
+                written = self._apply_catalog_edit(change.op, **change.kwargs)
+            if not written:
+                detail = (self.state.get("save") or {}).get("detail") or "the catalog refused it"
+                self._staged.insert(0, change)
+                self._record_stage_base()
+                self.refresh()
+                self._set_save_state(
+                    "error",
+                    f"Saved {total - len(self._staged)} of {total}; "
+                    f"stopped at {change.label}: {detail}",
+                )
+                return False
+            if self._staged:
+                self._record_stage_base()
+
+        self._stage_base = None
+        self.refresh()
+        self._set_save_state(
+            "saved", f"Saved {total} staged change{'' if total == 1 else 's'} to the project."
         )
         return True
 
