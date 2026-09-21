@@ -6,7 +6,7 @@ existing variants on `worktree/delegate-monitor-herdr-layouts` and `v` reaches i
 
 **Blocked by:** None — can start immediately.
 
-**Status:** implemented 2026-09-18 (`c04a75d`) on `worktree/delegate-monitor-herdr-layouts` — Orin's live review of `deck` is open
+**Status:** closed 2026-09-20. Orin accepted `deck` on 2026-09-19 ("this is excellent") and made it the production view on 2026-09-20; tickets 12-14 carry it from there. The boxes below stay unticked here: his acceptance covers the layout ones, and `--layout` and `v` were removed by ticket 12. The branch `worktree/delegate-monitor-herdr-layouts` is deleted; its history is in `main`.
 
 ## Verdict, Orin, 2026-09-18
 

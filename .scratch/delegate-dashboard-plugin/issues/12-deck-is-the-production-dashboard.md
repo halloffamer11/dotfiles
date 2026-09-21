@@ -33,7 +33,7 @@ with main merged).
 
 ## Acceptance
 
-**Status:** implemented 2026-09-20 (`a067fd5`) on `worktree/delegate-dashboard-plugin`. The root `CLAUDE.md` and spec wording landed as `972face` after Orin's word. Open: Orin's drive and merge.
+**Status:** landed 2026-09-20 (`a067fd5`, `972face`), merged to `main` by Orin as `0ffffea`. Open, Orin's: confirm `v` does nothing in a pane (box 1); the last box is met by his merge, and his drive verdict is not recorded yet.
 
 - [ ] `python3 tools/delegate-dashboard/dashboard.py --cwd "$PWD"` opens `deck`; `--layout`
       is rejected as an unknown argument; `v` does nothing.

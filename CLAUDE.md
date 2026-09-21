@@ -15,19 +15,23 @@ Machine configuration and agent tooling managed as one Git repository.
 
 ## Active work
 
-**Dashboard: `deck` is the production view** (2026-09-20). Orin accepted the layout
-`deck` on 2026-09-19 (ticket 11 of `.scratch/delegate-dashboard-plugin/issues/` holds his
-verdicts and the key map) and on 2026-09-20 said "lock in the deck layout as the production
-version". Ticket 12 removed the other layouts and the prototype wording; ticket 13 adds
-staged edits with one save (`w` saves, `u` and `U` drop), which is what Orin chose for "a
-way to save the configuration". The work is on branch `worktree/delegate-dashboard-plugin`,
-checkout `~/.herdr/worktrees/dotfiles/worktree-delegate-dashboard-plugin`; open it with
-`python3 tools/delegate-dashboard/dashboard.py --cwd "$PWD"`. Open: Orin drives it once and
-merges the branch, which puts `tools/delegate-dashboard/` on main for the first time.
-Ticket 10 still records one decision he may overrule: project saves keep the canonical
-`catalog.edit_catalog` document shape. No branch's own `.delegate/` policy goes to main. The
-older branches `worktree/delegate-monitor-herdr`, `-layouts` and `-strip` are history once
-this one merges. The Rust monitor `tools/delegate-mon/` stays separate.
+**Dashboard: `deck` is production and on main** (merged 2026-09-20, `0ffffea`). Orin
+accepted the layout `deck` (ticket 11) and said "lock in the deck layout as the production
+version". Tickets 12-14 of `.scratch/delegate-dashboard-plugin/issues/` carry the record:
+the one view `deck.py` (12), staged edits with one save, `w` saves and `u`/`U` drop (13),
+and `catalog.plan_edits`, the one public in-memory planning path (14). Open it with
+`make delegate-dashboard` from a Herdr pane, or
+`python3 tools/delegate-dashboard/dashboard.py --cwd "$PWD"`; the Herdr plugin link points at
+this checkout. `tools/delegate-dashboard/CLAUDE.md` owns the keys, the model boundary and
+the save rules. Open, all Orin's: his confirmations in tickets 12 and 13 (`v` does nothing;
+staging, undo and save driven once), the worker decisions ticket 13 lists that he may
+overrule, and ticket 10's one decision (project saves keep the canonical
+`catalog.edit_catalog` document shape). A project's `.delegate/` policy never goes to main;
+the untracked `.delegate/` in this checkout is from driving the dashboard here, and whether
+to ignore or delete it is Orin's call. Cleanup left: the remote branch
+`origin/worktree/delegate-monitor-herdr` (the permission check refused the session's
+delete), and the merged worktrees `worktree/delegate-dashboard-plugin` and
+`worktree/delegate-redesign`. The Rust monitor `tools/delegate-mon/` stays separate.
 
 **Delegate modular batch complete** (2026-09-16): tickets 01–13 landed, all 13
 script suites and full/focused terminal checks passed, and independent review
@@ -41,21 +45,13 @@ unimplemented bootstrap and maintenance tickets, separate from the monitor work.
 `prompt.md` is the original modular-research brief, retained as scope history.
 Orin set the global Gate to 5% on 2026-09-18 (`5be0848`).
 
-**Project routing backend** (2026-09-15, from the dashboard prototype): a
-project's `.delegate/routing.json` may carry `project_order`, a flat list of carried
-lane names that reorders them inside their effective Tiers; since ticket 32 a project's
-`.delegate/lanes.json` may also set a Lane's Tier for that project, and nothing else
-(`catalog.load_catalog()`, `catalog.validate_project_routing()`);
-`rank.tier_leaders()` gives one exact-Tier leader per Tier; `rank.meter_observations()`
-owns Meter cache validity. Spec
-`docs/superpowers/specs/2026-09-13-delegate-dashboard-plugin.md`; tickets
-`.scratch/delegate-dashboard-plugin/issues/`, of which 02-04 are this backend and
-carry their Landed notes here. Orin's verdict, 2026-09-15: a Herdr plugin is the
-right host for a persistent delegation control surface, and project Order, Gate and
-Margin give useful manual steering. Since 2026-09-18 the effort's
-records (tickets and `research/`) are on main and are the copy to edit. The spec kept the
-UI on a branch while it was a prototype; Orin's word of 2026-09-20 replaces that rule, and
-tickets 12 and 13 are the production control surface.
+**Project routing backend** (tickets 02-04 of the dashboard effort, and ticket 32): a
+project's `.delegate/routing.json` may carry `project_order`, which reorders carried Lanes
+inside their effective Tiers, and its `.delegate/lanes.json` may set a Lane's Tier for that
+project and nothing else (`catalog.load_catalog()`, `catalog.validate_project_routing()`).
+`rank.tier_leaders()` gives one leader per Tier; `rank.meter_observations()` owns Meter
+cache validity. Spec `docs/superpowers/specs/2026-09-13-delegate-dashboard-plugin.md`,
+whose branch-only rule for the UI Orin's word of 2026-09-20 replaced.
 
 **Delegate redesign follow-ups:** spec
 `docs/superpowers/specs/2026-09-08-delegate-redesign.md`; tickets in
@@ -94,10 +90,9 @@ read the redesign tickets rather than reconstructing deleted worker branches.
    return within 45 s from a dotfiles checkout and takes about 3 s from `~`. The probe
    now runs from `~` (`fb845e3`); the cause is not known.
 
-Tickets 29-32 merged to `main` on 2026-09-19: overflow and the one-Meter warning (29), the
-carry rule for agy efforts (30), agy Remaining and Pace, which reverses modular ticket 13
-(31), and a project's `.delegate/lanes.json`, which may set a Lane's Tier (32). Each
-ticket names the session decisions Orin may overrule.
+Tickets 29-32 merged to `main` on 2026-09-19 (overflow and the one-Meter warning; the agy
+carry rule; agy Remaining and Pace, which reverses modular ticket 13; a project's
+`.delegate/lanes.json`). Each ticket names the session decisions Orin may overrule.
 
 **Waiting on Orin** (nothing else blocks on these):
 
