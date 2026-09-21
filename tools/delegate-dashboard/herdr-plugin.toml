@@ -1,0 +1,12 @@
+id = "delegate.project-dashboard"
+name = "Delegate Project Dashboard"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "Project-pinned delegate dashboard"
+platforms = ["linux", "macos"]
+
+[[panes]]
+id = "dashboard"
+title = "Delegate dashboard"
+placement = "split"
+command = ["python3", "launcher.py"]
