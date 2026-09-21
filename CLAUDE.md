@@ -15,19 +15,19 @@ Machine configuration and agent tooling managed as one Git repository.
 
 ## Active work
 
-**Dashboard layout: `deck` accepted, save flow open** (2026-09-19). Orin compared three
-throwaway layouts, dropped `current`, and accepted the merged layout `deck` after three
-feedback rounds ("this is excellent"). Ticket 11,
-`.scratch/delegate-dashboard-plugin/issues/11-merged-layout-from-orins-verdict.md`, holds
-his verdicts, the key map and the proposed Herdr shortcut. The code is on the throwaway
-branch `worktree/delegate-monitor-herdr-layouts`, checkout
-`~/.herdr/worktrees/dotfiles/worktree-delegate-monitor-herdr-layouts`; open it there with
-`python3 tools/delegate-dashboard/dashboard.py --cwd "$PWD" --layout deck`. Open: Orin
-asked for "a way to save the configuration"; what that means is not settled. Ticket 10
-(branch `worktree/delegate-monitor-herdr`) still records one decision he may overrule:
-project saves keep the canonical `catalog.edit_catalog` document shape. Keep each
-branch's project policy off main. Production scope, UI integration into main, and the
-Rust monitor remain separate.
+**Dashboard: `deck` is the production view** (2026-09-20). Orin accepted the layout
+`deck` on 2026-09-19 (ticket 11 of `.scratch/delegate-dashboard-plugin/issues/` holds his
+verdicts and the key map) and on 2026-09-20 said "lock in the deck layout as the production
+version". Ticket 12 removed the other layouts and the prototype wording; ticket 13 adds
+staged edits with one save (`w` saves, `u` and `U` drop), which is what Orin chose for "a
+way to save the configuration". The work is on branch `worktree/delegate-dashboard-plugin`,
+checkout `~/.herdr/worktrees/dotfiles/worktree-delegate-dashboard-plugin`; open it with
+`python3 tools/delegate-dashboard/dashboard.py --cwd "$PWD"`. Open: Orin drives it once and
+merges the branch, which puts `tools/delegate-dashboard/` on main for the first time.
+Ticket 10 still records one decision he may overrule: project saves keep the canonical
+`catalog.edit_catalog` document shape. No branch's own `.delegate/` policy goes to main. The
+older branches `worktree/delegate-monitor-herdr`, `-layouts` and `-strip` are history once
+this one merges. The Rust monitor `tools/delegate-mon/` stays separate.
 
 **Delegate modular batch complete** (2026-09-16): tickets 01–13 landed, all 13
 script suites and full/focused terminal checks passed, and independent review
@@ -53,11 +53,9 @@ owns Meter cache validity. Spec
 carry their Landed notes here. Orin's verdict, 2026-09-15: a Herdr plugin is the
 right host for a persistent delegation control surface, and project Order, Gate and
 Margin give useful manual steering. Since 2026-09-18 the effort's
-records (tickets 01-10 and `research/`) are on main and are the copy to edit; only the
-prototype code (`tools/delegate-dashboard/`, its Makefile target, and the branch's own
-`.delegate/routing.json`) stays on branch `worktree/delegate-monitor-herdr`, as the spec
-requires for the UI.
-A production control surface is not ticketed yet.
+records (tickets and `research/`) are on main and are the copy to edit. The spec kept the
+UI on a branch while it was a prototype; Orin's word of 2026-09-20 replaces that rule, and
+tickets 12 and 13 are the production control surface.
 
 **Delegate redesign follow-ups:** spec
 `docs/superpowers/specs/2026-09-08-delegate-redesign.md`; tickets in
