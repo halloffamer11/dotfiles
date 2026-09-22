@@ -24,6 +24,7 @@ CATALOG_PY = os.path.join(DELEGATE_DIR, "catalog.py")
 sys.path.insert(0, DELEGATE_DIR)
 import catalog
 import discover
+import setup_tui
 
 fails = 0
 
@@ -880,6 +881,30 @@ record(
     and not any(u["slug"] in ("gpt-6-sol", "grok-4.7") for u in remapped["unmapped"])
     and remapped["retired"] == [],
     repr(sorted(adopted)),
+)
+
+# A model with no lane is worth naming only where the refresh would have given
+# it one. A superseded model, another vendor's model on agy and a hidden model
+# are not shown, so after a refresh the list is empty and the line goes.
+record(
+    "the models-with-no-lane notice names only what the refresh would propose",
+    remapped["unmapped"] == []
+    and not any(line.startswith("Models with no lane")
+                for line in setup_tui.discovery_notices(remapped, 10_000))
+    and setup_tui.discovery_notices(remapped, 10_000) == ["Model discovery: no drift"],
+    repr(setup_tui.discovery_notices(remapped, 10_000)),
+)
+
+# A current-generation model of the harness's own vendor that really has no lane
+# is still named: that is the notice doing its job.
+no_lanes = copy.deepcopy(refreshed)
+for name in [n for n, lane in no_lanes["lanes"].items() if lane["model"].startswith("gpt-6-sol")]:
+    del no_lanes["lanes"][name]
+still_named = [u["slug"] for u in discover.map_lanes(refresh_discovery, no_lanes)["unmapped"]]
+record(
+    "a current-generation model that truly has no lane is still named",
+    still_named == ["gpt-6-sol"],
+    repr(still_named),
 )
 
 sys.exit(1 if fails else 0)

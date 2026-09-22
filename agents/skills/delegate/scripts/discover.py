@@ -647,6 +647,17 @@ def model_slugs(model):
     return set((model.get("members") or {}).values()) or {model["slug"]}
 
 
+def own_vendor(model):
+    """True when the model is the harness's own vendor's: `gpt-*` on codex,
+    `gemini-*` on agy, `grok-*` on grok, `claude-*` on claude.
+
+    The refresh proposes lanes for these only, and nothing else names them
+    either: the other vendors' models agy serves are somebody else's business.
+    """
+    slug = model.get("slug") or ""
+    return bool(model.get("level")) and slug.split("-")[0] == HARNESS_VENDOR.get(model.get("harness"))
+
+
 def claude_generation(models, published_models):
     """The claude models the refresh works from, newest version per level.
 
@@ -767,9 +778,7 @@ def refresh_catalog(lanes_doc, discovery, published_models=()):
     models = ([item for item in models if item.get("harness") != "claude"]
               + claude_generation([item for item in models if item.get("harness") == "claude"],
                                   published_models))
-    own = [item for item in models
-           if item.get("level")
-           and item["slug"].split("-")[0] == HARNESS_VENDOR.get(item.get("harness"))]
+    own = [item for item in models if own_vendor(item)]
 
     levels = {}
     for item in own:
@@ -873,6 +882,12 @@ def map_lanes(discovery, lanes_doc):
     The refresh changes the catalog in memory, so the drift the start page
     states has to be drift against the catalog the wizard is about to write and
     not against the one it read (ticket 33).
+
+    A model with no lane is worth naming only when the refresh would have given
+    it one: a superseded model, another vendor's model that agy serves, and a
+    model its harness hides are all not shown, so listing them as lanes missing
+    would name exactly what the refresh has just decided not to propose. After
+    a refresh that list is normally empty, and the line goes with it.
     """
     result = copy.deepcopy(discovery)
     lane_map = {}
@@ -894,7 +909,8 @@ def map_lanes(discovery, lanes_doc):
         matched = [name for slug in sorted(members) for name in lane_map.get((harness, slug), [])]
         item["lane"] = ", ".join(matched) if matched else "none"
         item["lanes"] = matched
-        if not matched and harness != "claude":
+        if (not matched and harness != "claude"
+                and own_vendor(item) and not item.get("superseded")):
             unmapped.append({
                 "harness": harness,
                 "slug": item.get("slug"),
