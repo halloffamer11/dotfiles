@@ -12,6 +12,11 @@ verdicts and the key map, ticket 12 the lock-in.
 
 ## How to open it
 
+- `delegate project` is the short way: it opens this view for the Git project of the
+  current directory, in the current terminal, with no Herdr and no checkout path to
+  type, and passes anything further to `dashboard.py`. Outside a Git project it says so
+  and exits 1. The command is `stow/delegate/.local/bin/delegate`, which `make configs`
+  links into `~/.local/bin` (ticket 34).
 - `dashboard.py --cwd DIRECTORY [--config-dir DIRECTORY] [--meters FILE]` opens the
   view. Add `--json` for one noninteractive diagnostic projection. There is no layout
   argument. Python 3.11+ is required.

@@ -16,6 +16,11 @@
 #   make delegate-wizard  # the delegate catalog wizard on the repo catalog with the accepted benchmark rows; WIZARD_ARGS adds flags (e.g. --tiers-from FILE, --plain)
 #   make delegate-dashboard  # link and open the local dashboard; DELEGATE_DASHBOARD_PLACEMENT overrides split
 #
+# The two short forms, once `make configs` has linked stow/delegate/.local/bin/delegate
+# into ~/.local/bin (ticket 34). Neither needs a checkout path:
+#   delegate global [args]   # this target, with the args as WIZARD_ARGS
+#   delegate project [args]  # the dashboard for the current directory's Git project
+#
 # Editing:
 #   - CONFIG_PACKAGES: config packages under stow/, targeted at ~
 #   - delegate ships ~/.config/delegate/{lanes,routing}.json. One catalog serves every

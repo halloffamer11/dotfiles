@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""delegate — the two delegate settings screens, from any directory.
+
+    delegate global [args]    the global catalog, through the setup wizard
+    delegate project [args]   this Git project's settings, in the dashboard
+
+Both run out of the checkout this file belongs to, found from its own resolved
+path rather than a fixed `~/dotfiles`, so the Mac checkout, a Herdr worktree and
+omarchy each run their own (ticket 34). The Makefile stays the one place that
+lists the wizard's arguments: `global` passes anything further as WIZARD_ARGS.
+"""
+import os
+import shlex
+import subprocess
+import sys
+
+USAGE = (
+    "delegate global [args]   edit the global catalog (the setup wizard)\n"
+    "delegate project [args]  edit this Git project's settings (the dashboard)"
+)
+
+# This file is <checkout>/stow/delegate/.local/bin/delegate, and stow links it
+# into ~/.local/bin, so the path has to be resolved before it is walked up.
+CHECKOUT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.dirname(os.path.realpath(__file__))))))
+
+
+def git_root(start):
+    """The Git project holding `start`, or None.
+
+    The same rule as `catalog.find_git_root`, which is what everything else in
+    delegate means by a project: the nearest directory above with a `.git`
+    entry, a file as readily as a directory, so a worktree counts. It is spelled
+    out here rather than imported, because a command on PATH that has to load
+    the skill to tell you it cannot find a project is a command that breaks
+    whenever the skill does.
+    """
+    here = os.path.abspath(start)
+    while True:
+        marker = os.path.join(here, ".git")
+        if os.path.exists(marker) or os.path.islink(marker):
+            return here
+        parent = os.path.dirname(here)
+        if parent == here:
+            return None
+        here = parent
+
+
+def main(argv):
+    command, rest = (argv[0] if argv else None), argv[1:]
+
+    if command in (None, "-h", "--help", "help"):
+        print(USAGE)
+        return 0
+
+    if command == "global":
+        return subprocess.call([
+            "make", "-C", CHECKOUT, "delegate-wizard",
+            # one make variable, re-split by the recipe's shell, so a path with
+            # a space in it survives
+            "WIZARD_ARGS=" + " ".join(shlex.quote(arg) for arg in rest),
+        ])
+
+    if command == "project":
+        here = os.getcwd()
+        if git_root(here) is None:
+            sys.stderr.write(
+                f"delegate: {here}: no Git project here, and project settings belong to "
+                "one; run delegate global for the catalog every project shares\n"
+            )
+            return 1
+        return subprocess.call([
+            sys.executable,
+            os.path.join(CHECKOUT, "tools", "delegate-dashboard", "dashboard.py"),
+            "--cwd", here, *rest,
+        ])
+
+    sys.stderr.write(f"delegate: unknown command '{command}'\n{USAGE}\n")
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

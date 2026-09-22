@@ -44,12 +44,50 @@ The session decisions below are Orin's to overrule.
 
 **Status:** ready-for-agent
 
-- [ ] `delegate global` runs the wizard target in the command's own checkout, from any
+- [x] `delegate global` runs the wizard target in the command's own checkout, from any
   directory.
-- [ ] `delegate project` opens the dashboard for the current directory's project, and
+- [x] `delegate project` opens the dashboard for the current directory's project, and
   outside a Git project it prints one line and exits 1.
-- [ ] `delegate`, `-h` and an unknown word behave as the Rule says.
-- [ ] Through a symlink, as stow links it, the command resolves the real checkout.
-- [ ] `make configs` links it; a dry run (`stow -n -v -d stow -t "$HOME" delegate`)
+- [x] `delegate`, `-h` and an unknown word behave as the Rule says.
+- [x] Through a symlink, as stow links it, the command resolves the real checkout.
+- [x] `make configs` links it; a dry run (`stow -n -v -d stow -t "$HOME" delegate`)
   shows the one new link and no conflict.
-- [ ] All delegate test suites pass.
+- [x] All delegate test suites pass.
+
+## Landed
+
+`stow/delegate/.local/bin/delegate`, 80 lines of Python 3 and stdlib only, with
+`tests/test_delegate_command.py` beside the delegate tests: seven cases against a
+temp checkout holding the layout the command walks up through, with `make` and the
+dashboard stubbed, so no wizard, no dashboard and no terminal is ever started.
+Docs: the Makefile header, the `SKILL.md` setup line and the dashboard's "How to
+open it". The root `CLAUDE.md` is the session's.
+
+The `make configs` dry run from this worktree:
+
+    $ stow -n -v -d "$PWD/stow" -t "$HOME" delegate
+    LINK: .local/bin/delegate => ../../.herdr/worktrees/dotfiles/worktree-delegate-redesign/stow/delegate/.local/bin/delegate
+    WARNING! stowing delegate would cause conflicts:
+      * existing target is not owned by stow: .config/delegate/lanes.json
+      * existing target is not owned by stow: .config/delegate/routing.json
+    All operations aborted.
+
+The one new link is the command, and `~/.local/bin/delegate` does not exist yet, so
+nothing conflicts with it. The two warnings are `~/.config/delegate/{lanes,routing}.json`,
+which are stow links into `~/dotfiles` and so are not this worktree's to own; they say
+the same thing on `main` today and have nothing to do with this ticket. The real
+`make configs` runs from `~/dotfiles`, where stow owns them.
+
+Session decisions, Orin's to overrule:
+
+- The command spells out the Git-project walk rather than importing
+  `catalog.find_git_root`. A command on PATH that has to load the skill to say it
+  cannot find a project breaks whenever the skill does, and it lets the test stub
+  the dashboard and still exercise the no-project path. The comment names
+  `catalog.find_git_root` as the rule it mirrors.
+- `global` passes the rest as one `WIZARD_ARGS=` make variable with each argument
+  shell-quoted, so the recipe's shell re-splits them and a path with a space
+  survives.
+- An unknown word prints the two lines on stderr, not stdout: it is an error.
+- `project` runs the dashboard with `sys.executable`, the same interpreter the
+  command itself is running under, rather than whatever `python3` PATH gives.
