@@ -104,8 +104,12 @@ test-recorder:
 
 # Writes the repo catalog under stow/delegate, never ~/.config/delegate: setup.py
 # renames over its target, which would turn a stowed symlink into a plain file.
+# The wizard's refresh writes an agent file for each new native claude lane, so
+# the per-file agent links are restowed after it exits — the `skills` step, and
+# the reason a new lane is live with no second command (ticket 33).
 delegate-wizard:
 	python3 $(CURDIR)/agents/skills/delegate/scripts/setup.py --config-dir $(CURDIR)/stow/delegate/.config/delegate $(foreach f,$(DELEGATE_ROWS),--effort-rows $(CURDIR)/$(f)) $(WIZARD_ARGS)
+	mkdir -p $(HOME)/.claude/agents && (cd $(CURDIR)/agents && stow -t $(HOME)/.claude/agents -R agents)
 
 delegate-dashboard:
 	@test "$${HERDR_ENV:-}" = 1
