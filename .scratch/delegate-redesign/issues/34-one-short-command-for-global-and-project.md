@@ -42,7 +42,7 @@ The session decisions below are Orin's to overrule.
 
 ## Acceptance
 
-**Status:** ready-for-agent
+**Status:** implemented 2026-09-22 (`44b21b5`) on `worktree/delegate-redesign`; all boxes ticked. The merge and `make configs`, which links `~/.local/bin/delegate`, are Orin's, and he may overrule the session decisions under Landed.
 
 - [x] `delegate global` runs the wizard target in the command's own checkout, from any
   directory.
@@ -54,7 +54,7 @@ The session decisions below are Orin's to overrule.
   shows the one new link and no conflict.
 - [x] All delegate test suites pass.
 
-## Landed
+## Landed, 2026-09-22
 
 `stow/delegate/.local/bin/delegate`, 80 lines of Python 3 and stdlib only, with
 `tests/test_delegate_command.py` beside the delegate tests: seven cases against a

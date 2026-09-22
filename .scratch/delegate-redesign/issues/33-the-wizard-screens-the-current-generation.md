@@ -130,7 +130,7 @@ They check the rule on fixtures, never Orin's Tiers.
 
 ## Acceptance
 
-**Status:** ready-for-agent
+**Status:** implemented 2026-09-22 (`3d90491`, `0af3650`, `f9a2aa0`, `33158fa`, `967462f`, review fixes `f861916`, `01de19d`, `eb9f335`) on `worktree/delegate-redesign`; all boxes ticked. The merge and the first `delegate global` run are Orin's, and he may overrule the session decisions under Landed.
 
 - [x] On today's fixtures and the repo catalog, the refresh proposes these changes:
   - new: `sol6-*@codex` (low…ultra), `luna6-*@codex` (low…max), `opus55-*@claude`
@@ -176,7 +176,7 @@ Read on 2026-09-22 from the fixtures above:
 - Claude Opus 5.5 (`claude-opus-5-5`) costs $4 in / $20 out per 1M tokens, and $0.20
   for cache reads. Opus 5 costs $5 / $25.
 
-## Landed
+## Landed, 2026-09-22
 
 The refresh runs at the start of `make delegate-wizard`, in memory, and writes
 nothing until the confirm.

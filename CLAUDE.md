@@ -15,21 +15,39 @@ Machine configuration and agent tooling managed as one Git repository.
 
 ## Active work
 
+**Current generation and the `delegate` command** (redesign tickets 33-34, 2026-09-22).
+`delegate global` runs the wizard, and `delegate project` opens the dashboard for the Git
+project of the current directory. `make configs` links the command into `~/.local/bin`.
+
+Ticket 33 changed what the wizard does at start. It refreshes the Artificial Analysis
+rows (cached 24 h in `~/.cache/delegate/bench/aa/`) and each harness's model list, then
+shows the current generation of every harness, at every effort, on the carry page.
+- A superseded model's Lanes leave the catalog on save.
+- A successor Lane takes its predecessor's Tier, Order and carried state.
+- New claude Lanes get their agent files, and `make delegate-wizard` relinks them.
+
+The terms are in `CONTEXT.md` (**Level**, **Superseded**, **Generation**). agy shows only
+its Gemini models; Orin: "ignore the Gemini Claude pool".
+
+Orin's steps: `make -C ~/dotfiles configs`, then one `delegate global` run. The session's
+steps after that run:
+- prices for the new Lanes, from
+  `.scratch/delegate-redesign/research/2026-09-22-new-model-prices.md`;
+- this checkout's `.delegate/routing.json` `project_order`, moved from `luna-*` to `luna6-*`.
+
 **Dashboard: `deck` is production and on main** (merged 2026-09-20, `0ffffea`). Orin
 accepted the layout `deck` (ticket 11) and said "lock in the deck layout as the production
 version". Tickets 12-14 of `.scratch/delegate-dashboard-plugin/issues/` carry the record:
 the one view `deck.py` (12), staged edits with one save, `w` saves and `u`/`U` drop (13),
 and `catalog.plan_edits`, the one public in-memory planning path (14). Open it with
-`make delegate-dashboard` from a Herdr pane, or
-`python3 tools/delegate-dashboard/dashboard.py --cwd "$PWD"`; the Herdr plugin link points at
-this checkout. `tools/delegate-dashboard/CLAUDE.md` owns the keys, the model boundary and
+`delegate project` from any project directory, or `make delegate-dashboard` for a Herdr
+split; the Herdr plugin link points at this checkout. `tools/delegate-dashboard/CLAUDE.md` owns the keys, the model boundary and
 the save rules. Open, all Orin's: his confirmations in tickets 12 and 13 (`v` does nothing;
 staging, undo and save driven once), the worker decisions ticket 13 lists that he may
 overrule, and ticket 10's one decision (project saves keep the canonical
 `catalog.edit_catalog` document shape). A project's `.delegate/` policy never goes to main; this checkout's own `.delegate/` is
-git-ignored. Cleanup left: the remote branch `origin/worktree/delegate-monitor-herdr` (the
-permission check refused the session's delete; Orin runs it). Every other dashboard and
-redesign worktree and branch is removed. The Rust monitor `tools/delegate-mon/` stays separate.
+git-ignored. Every dashboard worktree and branch is removed, the remote one included
+(checked 2026-09-22). The Rust monitor `tools/delegate-mon/` stays separate.
 
 **Delegate modular batch complete** (2026-09-16): tickets 01–13 landed, all 13
 script suites and full/focused terminal checks passed, and independent review
@@ -69,9 +87,9 @@ Mac behavior and outstanding Grok, native Claude, and Omarchy work.
 **Live configuration:** `~/.config/delegate/{lanes,routing}.json` are stow links
 into this repo since 2026-09-13. The replaced plain files in
 `~/.config/delegate/_pre-stow-2026-09-13/` are unused. Orin's Tier and Order choices
-are recorded in ticket 28; current values belong to the catalog. From any directory,
-`make -C <checkout> delegate-wizard` edits that catalog with the accepted benchmark
-rows; `WIZARD_ARGS` adds setup flags. For historical implementation and validation,
+are recorded in ticket 28; current values belong to the catalog. `delegate global` edits
+that catalog from any directory. The long form `make -C <checkout> delegate-wizard` still
+works, and `WIZARD_ARGS` adds setup flags. For historical implementation and validation,
 read the redesign tickets rather than reconstructing deleted worker branches.
 
 **Open, in priority order:**
@@ -82,8 +100,9 @@ read the redesign tickets rather than reconstructing deleted worker branches.
    Orin's to set in the wizard, or per project since ticket 32.
 2. **Unmeasured figures**: `meter_weight` and `timeout` on the generated Lanes are still
    copies; each Lane's note says `UNMEASURED` and from which Lane. Prices are sourced
-   since 2026-09-18 (OpenAI and Anthropic pricing pages, named in each note) except the
-   grok and agy cache-write prices.
+   since 2026-09-18 (OpenAI and Anthropic pricing pages, named in each note), except the
+   grok and agy cache-write prices. The Lanes that ticket 33 adds start with the note
+   `UNPRICED`; `grok-4.7-build-fast` has no published price.
 3. **The Claude Meter probe hangs inside this project**: `claude -p ... /usage` did not
    return within 45 s from a dotfiles checkout and takes about 3 s from `~`. The probe
    now runs from `~` (`fb845e3`); the cause is not known.
