@@ -734,12 +734,55 @@ def case_a_catalog_elsewhere_gets_no_agent_file():
     with tempfile.TemporaryDirectory() as td:
         lines = setup.save_native_agents(plan, refreshed, setup.native_agents_dir(td))
         ok = (setup.native_agents_dir(td) is None
-              and setup.native_agents_dir(
-                  os.path.join(os.path.dirname(setup.NATIVE_AGENTS_DIR),
-                               "stow", "delegate", ".config", "delegate"))
-              == setup.NATIVE_AGENTS_DIR
               and len(lines) == 1 and "agent file" in lines[0])
         return ok, f"lines={lines}"
+
+
+def case_the_wizards_own_config_dir_gets_the_agent_files():
+    """`make delegate-wizard` passes --config-dir <checkout>/stow/delegate/.config
+    /delegate, and that is the catalog the agent files belong to. The path is
+    built the way the Makefile builds it, from the checkout that holds both
+    `agents/` and `stow/` (ticket 33)."""
+    import setup
+    checkout = os.path.dirname(os.path.dirname(setup.NATIVE_AGENTS_DIR))
+    wizard_config = os.path.join(checkout, "stow", "delegate", ".config", "delegate")
+    ok = (setup.native_agents_dir(wizard_config) == setup.NATIVE_AGENTS_DIR
+          and os.path.isdir(wizard_config)
+          and os.path.isdir(setup.NATIVE_AGENTS_DIR))
+    return ok, f"checkout={checkout} config={wizard_config} -> {setup.native_agents_dir(wizard_config)}"
+
+
+def case_the_real_layout_saves_the_agent_files():
+    """The same layout in a temp directory, end to end: the wizard's config dir
+    under a checkout gets the new claude lanes' agent files and loses the
+    superseded ones. A copy of the layout, so the checkout's own agents/agents
+    is never written by a test."""
+    import setup
+    _frozen, refreshed, plan = refresh_fixture()
+    real = setup.NATIVE_AGENTS_DIR
+    with tempfile.TemporaryDirectory() as td:
+        agents = os.path.join(td, "checkout", "agents", "agents")
+        config = os.path.join(td, "checkout", "stow", "delegate", ".config", "delegate")
+        os.makedirs(agents)
+        os.makedirs(config)
+        for effort in ("low", "medium", "high", "xhigh", "max"):
+            with open(os.path.join(agents, f"lane-opus-{effort}.md"), "w") as f:
+                f.write("superseded\n")
+        setup.NATIVE_AGENTS_DIR = agents
+        try:
+            found = setup.native_agents_dir(config)
+            lines = setup.save_native_agents(plan, refreshed, found)
+        finally:
+            setup.NATIVE_AGENTS_DIR = real
+        written = sorted(os.listdir(agents))
+        ok = (found == agents
+              and written == sorted(f"lane-opus55-{e}.md"
+                                    for e in ("low", "medium", "high", "xhigh", "max"))
+              and len(lines) == 10
+              # the checkout's own agent files are untouched by a test
+              and not any(name.startswith("lane-opus55-") for name in os.listdir(real))
+              and "lane-opus-high.md" in os.listdir(real))
+        return ok, f"found={found} written={written}"
 
 
 def case_the_refreshed_rows_reach_the_new_lanes():
@@ -830,6 +873,9 @@ for name, case in (
     ("native agent files follow the claude lanes",
      case_native_agent_files_follow_the_claude_lanes),
     ("a catalog elsewhere gets no agent file", case_a_catalog_elsewhere_gets_no_agent_file),
+    ("the wizard's own config dir gets the agent files",
+     case_the_wizards_own_config_dir_gets_the_agent_files),
+    ("the real layout saves the agent files", case_the_real_layout_saves_the_agent_files),
     ("the refreshed rows reach the new lanes", case_the_refreshed_rows_reach_the_new_lanes),
     ("no-discover fetches no rows", case_no_discover_fetches_no_rows),
     ("plain prints the refresh change lines", case_plain_prints_the_refresh_change_lines),

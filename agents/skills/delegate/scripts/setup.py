@@ -386,13 +386,15 @@ def native_agents_dir(config_dir):
 
     The agent files and the catalog have to stay in step, so they are written
     only when the catalog being written is this checkout's own, which is how
-    `make delegate-wizard` runs the wizard. A catalog somewhere else — a test,
-    a throwaway copy — gets none, because the files beside this script are not
-    that catalog's.
+    `make delegate-wizard` runs the wizard: `--config-dir
+    <checkout>/stow/delegate/.config/delegate`. A catalog somewhere else — a
+    test, a throwaway copy — gets none, because the files beside this script are
+    not that catalog's. The checkout is the directory holding both `agents/` and
+    `stow/`, which is two above the agent files.
     """
-    root = os.path.dirname(NATIVE_AGENTS_DIR)
-    here = os.path.abspath(os.path.expanduser(config_dir or ""))
-    return NATIVE_AGENTS_DIR if here.startswith(root + os.sep) else None
+    checkout = os.path.dirname(os.path.dirname(NATIVE_AGENTS_DIR))
+    here = os.path.realpath(os.path.expanduser(config_dir or ""))
+    return NATIVE_AGENTS_DIR if here.startswith(os.path.realpath(checkout) + os.sep) else None
 
 
 def save_native_agents(refresh, lanes_doc, agents_dir):
