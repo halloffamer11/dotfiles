@@ -862,21 +862,38 @@ record(
     msg,
 )
 
-for bad_order, lane_name, rule in (
-    (["terra-high@codex", "terra-high@codex"], "terra-high@codex", "duplicate"),
-    (["not-a-lane@codex"], "not-a-lane@codex", "global lane catalog"),
-):
-    msg = check_catalog_error(
-        catalog.validate_project_routing,
-        {"project_order": bad_order},
+msg = check_catalog_error(
+    catalog.validate_project_routing,
+    {"project_order": ["terra-high@codex", "terra-high@codex"]},
+    copy.deepcopy(lanes_sample),
+    copy.deepcopy(routing_sample),
+)
+record(
+    "8.3 Project order rejects duplicate",
+    bool(msg and "terra-high@codex" in msg and "duplicate" in msg),
+    msg,
+)
+
+# A refresh takes a superseded model's lanes out of the global catalog, and a
+# project file written before it still names one. That must never stop routing,
+# so it warns and the entry is ignored (ticket 33).
+stale_err = io.StringIO()
+_stderr = sys.stderr
+sys.stderr = stale_err
+try:
+    kept = catalog.validate_project_routing(
+        {"project_order": ["not-a-lane@codex", "terra-high@codex"]},
         copy.deepcopy(lanes_sample),
         copy.deepcopy(routing_sample),
     )
-    record(
-        f"8.3 Project order rejects {rule}",
-        bool(msg and lane_name in msg and rule in msg),
-        msg,
-    )
+finally:
+    sys.stderr = _stderr
+record(
+    "8.3 Project order warns about a lane the catalog no longer has",
+    kept is not None and "not-a-lane@codex" in stale_err.getvalue()
+    and "warning" in stale_err.getvalue(),
+    repr(stale_err.getvalue()),
+)
 
 off_lanes = copy.deepcopy(lanes_sample)
 off_lanes["lanes"]["terra-high@codex"]["enabled"] = False
@@ -2222,17 +2239,24 @@ record(
 
 PROJECT_LANES_SOURCE = "project lanes.json"
 
-msg = check_catalog_error(
-    catalog.validate_project_lanes,
-    {"lanes": {"no-such@codex": {"tier": 2}}},
-    lanes_sample,
-    source=PROJECT_LANES_SOURCE,
-)
+stale_err = io.StringIO()
+_stderr = sys.stderr
+sys.stderr = stale_err
+try:
+    kept = catalog.validate_project_lanes(
+        {"lanes": {"no-such@codex": {"tier": 2}, "sol-high@codex": {"tier": 2}}},
+        lanes_sample,
+        source=PROJECT_LANES_SOURCE,
+    )
+finally:
+    sys.stderr = _stderr
 record(
-    "14.2 an unknown Lane names the file, the Lane and the rule",
-    msg is not None and PROJECT_LANES_SOURCE in msg and "no-such@codex" in msg
-    and "not in the global lane catalog" in msg,
-    msg,
+    "14.2 an unknown Lane warns, names the file and the Lane, and is ignored",
+    kept is not None and PROJECT_LANES_SOURCE in stale_err.getvalue()
+    and "no-such@codex" in stale_err.getvalue()
+    and "warning" in stale_err.getvalue()
+    and catalog.project_tier_changes(lanes_sample, kept).get("no-such@codex") is None,
+    repr(stale_err.getvalue()),
 )
 
 msg = check_catalog_error(
@@ -2691,6 +2715,45 @@ with tempfile.TemporaryDirectory() as td:
         "15.8 an unknown operation is refused by name",
         msg is not None and "carry" in msg,
         msg,
+    )
+
+# ---------------------------------------------------------------------------
+# 16. A project file written before a refresh still names a superseded Lane
+# (ticket 33). The name is ignored with one warning, and routing goes on.
+
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, _real = make_edit_fixture(
+        td,
+        project={"project_order": ["gone-high@codex", "terra-high@codex"]},
+        project_lanes={"lanes": {"gone-high@codex": {"tier": 4},
+                                 "flash-high@agy": {"tier": 2}}},
+    )
+    stale_err = io.StringIO()
+    _stderr = sys.stderr
+    sys.stderr = stale_err
+    try:
+        cat_stale = catalog.load_catalog(cwd=repo, config_dir=cfg)
+        rows = rank.rank("impl", cat_stale, {}, ALL_HARNESSES)
+    finally:
+        sys.stderr = _stderr
+    warned = stale_err.getvalue()
+    record(
+        "16.1 a stale project name warns once and does not stop the load",
+        warned.count("gone-high@codex") >= 1 and "warning" in warned
+        and "gone-high@codex" not in cat_stale["lanes"],
+        repr(warned),
+    )
+    record(
+        "16.2 rank still picks a lane in that project",
+        bool(rows) and rows[0].get("pick") and rows[0]["lane"] in cat_stale["lanes"],
+        repr(rows[:1]),
+    )
+    record(
+        "16.3 the project settings that name live lanes still apply",
+        cat_stale["lanes"]["flash-high@agy"]["tier"] == 2
+        and cat_stale["lanes"]["terra-high@codex"]["order"] == 1,
+        repr({name: (lane["tier"], lane.get("order"))
+              for name, lane in cat_stale["lanes"].items()}),
     )
 
 sys.exit(1 if fails else 0)

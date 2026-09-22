@@ -498,6 +498,20 @@ def validate_lanes(doc, source="lanes.json"):
     return doc
 
 
+def warn_stale_lane(source, lane_name, lanes_source):
+    """Say once, on stderr, that a project file names a lane the catalog lost.
+
+    The wizard's refresh takes a superseded model's lanes out of the global
+    catalog, and a project file written before it still names one. Routing in
+    that project must not stop over a stale name, so the entry is ignored and
+    the next project save drops it (ticket 33).
+    """
+    sys.stderr.write(
+        f"warning: {source}: lane '{lane_name}' is not in {lanes_source} any more; "
+        "ignoring it. The next project save drops it.\n"
+    )
+
+
 def validate_project_lanes(doc, global_lanes, source="project lanes.json",
                            lanes_source="lanes.json"):
     """Validate a project's lane customization against the global lane catalog.
@@ -536,11 +550,8 @@ def validate_project_lanes(doc, global_lanes, source="project lanes.json",
     known = global_lanes.get("lanes", {}) if isinstance(global_lanes, dict) else {}
     for lane_name, lane in lanes.items():
         if lane_name not in known:
-            raise CatalogError(
-                f"{source}: lane '{lane_name}': lane is not in the global lane "
-                f"catalog ({lanes_source}); a project customizes a lane the "
-                "catalog already has"
-            )
+            warn_stale_lane(source, lane_name, lanes_source)
+            continue
         if not isinstance(lane, dict):
             raise CatalogError(f"{source}: lane '{lane_name}': must be an object")
         for field in lane:
@@ -858,10 +869,8 @@ def validate_project_routing(
             )
         seen.add(lane_name)
         if lane_name not in lanes:
-            raise CatalogError(
-                f"{source}: project_order lane '{lane_name}': lane is not in the "
-                "global lane catalog"
-            )
+            warn_stale_lane(source, lane_name, lanes_source)
+            continue
         if not lanes[lane_name].get("enabled", True):
             raise CatalogError(
                 f"{source}: project_order lane '{lane_name}': lane is globally off; "
@@ -954,7 +963,10 @@ def _effective_lanes(lanes, routing, sources, lanes_source, project_lanes=None,
         return effective
 
     project_source = sources.get("project_order", "project routing.json")
-    project_order = routing["project_order"]
+    # A name the global catalog no longer has was warned about in validation and
+    # is ignored here, so a refreshed catalog never stops routing in a project
+    # whose file predates it (ticket 33).
+    project_order = [name for name in routing["project_order"] if name in effective]
     named = set(project_order)
 
     for tier in range(1, 5):
