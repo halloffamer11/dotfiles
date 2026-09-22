@@ -131,7 +131,7 @@ They check the rule on fixtures, never Orin's Tiers.
 
 **Status:** ready-for-agent
 
-- [ ] On today's fixtures and the repo catalog, the refresh proposes these changes:
+- [x] On today's fixtures and the repo catalog, the refresh proposes these changes:
   - new: `sol6-*@codex` (low…ultra), `luna6-*@codex` (low…max), `opus55-*@claude`
     (low…max), `grok47-high@grok`, `grok47fast-high@grok`, `pro31-high@agy` and
     `pro31-low@agy`;
@@ -140,20 +140,20 @@ They check the rule on fixtures, never Orin's Tiers.
     `grok-4.5`, agy's other-vendor models, and the hidden codex models;
   - unchanged: `astra-*`, `terra-*`, `flash-*@agy`, `fable-*`, `sonnet-*` and
     `haiku-high`.
-- [ ] Each successor Lane has its predecessor's `enabled`, `tier`, `order`, meter,
+- [x] Each successor Lane has its predecessor's `enabled`, `tier`, `order`, meter,
   weight and timeout. Every new Lane has a `null` price with an `UNPRICED` note, and
   `ultra` is off.
-- [ ] The saved catalog passes `scripts/catalog.py check`. The saved agent files for
+- [x] The saved catalog passes `scripts/catalog.py check`. The saved agent files for
   new claude Lanes match the existing form, and the superseded ones are gone. A second
   refresh on the saved catalog proposes nothing.
-- [ ] `bench.collect` gives the fetched `Claude Opus 5.5` rows to the `opus55-*`
+- [x] `bench.collect` gives the fetched `Claude Opus 5.5` rows to the `opus55-*`
   Lanes and the `Grok 4.7` high row to `grok47-high@grok`.
-- [ ] The fetch is skipped when the cache is less than 24 hours old. A failed fetch
+- [x] The fetch is skipped when the cache is less than 24 hours old. A failed fetch
   falls back to the repo rows, and the start page says why.
-- [ ] A project file that names a removed Lane gives a warning, not an error, and
+- [x] A project file that names a removed Lane gives a warning, not an error, and
   `rank.py` still ranks in that project.
-- [ ] `--plain` prints the same change lines as the start page.
-- [ ] All 13 suites under `tests/` pass.
+- [x] `--plain` prints the same change lines as the start page.
+- [x] All 13 suites under `tests/` pass.
 
 ## Settled facts this ticket rests on
 
@@ -171,3 +171,49 @@ Read on 2026-09-22 from the fixtures above:
   rows yet.
 - Claude Opus 5.5 (`claude-opus-5-5`) costs $4 in / $20 out per 1M tokens, and $0.20
   for cache reads. Opus 5 costs $5 / $25.
+
+## Landed
+
+The refresh runs at the start of `make delegate-wizard`, in memory, and writes
+nothing until the confirm.
+
+- `scripts/discover.py`: `model_level`, `mark_generation`, `lane_stem`,
+  `claude_generation`, `refresh_catalog` and `map_lanes`. Every model entry
+  carries `level`, `version` and `superseded`, so `discover.py --json` shows the
+  generation too.
+- `scripts/setup.py`: `refresh_effort_rows` (the in-process Artificial Analysis
+  fetch, its 24-hour cache and its fallback), `published_model_names`,
+  `native_agent_text`, `native_agents_dir` and `save_native_agents`. The fetch
+  runs in a thread beside the harness probes.
+- `scripts/setup_tui.py`: `refresh_lines`, and the start page's rows note.
+- `scripts/effort.py`: `run_aa`/`check_files` take `quiet`, for a caller that
+  prints its own line.
+- `scripts/catalog.py`: `warn_stale_lane`; a project `project_order` or
+  `.delegate/lanes.json` entry naming a lane the catalog lost warns and is
+  ignored rather than raising.
+- Root `Makefile`: `delegate-wizard` restows `~/.claude/agents` after the wizard.
+- Fixtures: `tests/fixtures/refresh-2026-09-22/`, trimmed from the captures named
+  above, with the catalog of 2026-09-22 frozen beside them — the refresh's own
+  first run changes the live one, so the tests never read it.
+
+Decisions this session made where the ticket left the code a choice; Orin may
+overrule any of them:
+
+- A variant level is named from the level it extends, and only a
+  current-generation level counts. codex still lists `gpt-5.5`, whose level is
+  the bare `gpt`, and that must not make `gpt-6-sol` read `gpt6sol`; with it
+  superseded, `grok-4.7-build-fast` still reads `grok47fast` beside `grok47`.
+- Where a generated name would collide with a lane on another model, a counter
+  follows the stem (`sol62-high@codex`). Nothing on today's fixtures collides.
+- A new lane with no predecessor copies its meter, weight and timeout from a
+  lane the refresh keeps, and failing that from one it adds, so the note never
+  names a lane that is leaving.
+- `basis` on a new lane states what it replaces, or that the model is new on the
+  harness; an `ultra` lane keeps the existing ultra basis.
+- The agent files are written only when the catalog being written is this
+  checkout's own; any other catalog gets a note saying so. That is what keeps a
+  test from writing into `agents/agents/`.
+- `--no-discover` skips the row fetch as well, since it means acquire nothing.
+- Prices: `.scratch/delegate-redesign/research/2026-09-22-new-model-prices.md`
+  holds the figures for the lanes this refresh adds. Filling them in is the
+  session's, after Orin's run.

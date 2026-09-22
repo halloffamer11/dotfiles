@@ -45,6 +45,21 @@ write nothing and focused writes preserve stow links. `--screen start` keeps the
 full wizard. On a focused Tier screen, unmarking moves a Lane down one Tier;
 use Carry to turn a Tier 1 Lane off. Use the surgical CLI for non-TTY edits.
 
+`make delegate-wizard` is the one command for a new model (ticket 33). At start
+the wizard fetches the Artificial Analysis rows itself, into
+`~/.cache/delegate/bench/aa/`, skipping a fetch under 24 hours old and falling
+back to the repo's rows with the reason on the start page; the harness probes
+run beside it. It then proposes, in memory, the current generation: a Lane for
+every effort of every current-generation model of every harness, each new Lane
+with a predecessor in that Lane's place and carrying its `enabled`, Tier, Order,
+Meter, weight and timeout, an `UNMEASURED` note naming where those came from, a
+`null` price and an `UNPRICED` note; a superseded model's Lanes leave. The start
+page states each change, one line per model. Nothing is written until the
+confirm, and quitting writes nothing. The save also writes the agent file of
+each new native claude Lane and removes each superseded one, and the make target
+restows `~/.claude/agents` after it. Prices are the one thing the refresh never
+proposes: read them off the vendor's page.
+
 ## Model evidence
 
 Use `scripts/bench.py model MODEL --effort-rows FILE` for a read-only inspection;

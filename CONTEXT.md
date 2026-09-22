@@ -19,6 +19,17 @@ One vendor model, such as `gpt-5.6-luna` or `claude-opus-5`.
 **Effort**:
 How hard a model reasons on one job: low, medium, high, xhigh, or max. Not every model accepts every level.
 
+**Level**:
+A model's slug with its version taken out: `gpt-6-sol` and `gpt-5.6-sol` are both level `gpt-sol`. One level is one line of models, at one version each.
+_Avoid_: family (when you mean the level), tier
+
+**Superseded**:
+Said of a model that its harness replaces — codex names the replacement — or that another model of the same level, at a higher version, replaces. Its lanes leave the catalog at the next setup save.
+_Avoid_: retired (which is a model the harness no longer lists at all), deprecated
+
+**Generation**:
+The models of a harness that are not superseded. Setup shows every current-generation model of every harness on the carry page, at every effort.
+
 **Lane**:
 One model at one effort on one harness, named `<model-effort>@<harness>`. It is the unit that gets a tier and that ranking picks.
 _Avoid_: route, worker, model (when you mean the lane)
