@@ -2274,4 +2274,42 @@ try:
 except Exception as e:
     record("62 the review page names a Tier one Meter serves", False, repr(e))
 
+
+try:
+    # Ticket 33: the start page states the refresh, one line per model, and
+    # where the benchmark rows came from.
+    REFRESH_DIR = os.path.join(FIXTURES, "refresh-2026-09-22")
+    frozen = catalog.load_json(os.path.join(REFRESH_DIR, "lanes.json"))
+    rows = catalog.load_json(os.path.join(REFRESH_DIR, "aa-accepted.json"))
+    found = discover.discover(frozen, fixture_dir=REFRESH_DIR)
+    refreshed, plan = discover.refresh_catalog(
+        frozen, found,
+        published_models=sorted({r["model"] for r in rows if r.get("source") == "aa"}),
+    )
+    lines = setup_tui.refresh_lines(plan, 10_000)
+    record("63 the refresh reads one line per model, old to new",
+           lines[0] == "gpt-5.6-sol → gpt-6-sol: sol6-*@codex replace sol-*@codex (6 Lanes)"
+           and "new gemini-3.1-pro: pro31-*@agy (2 Lanes)" in lines
+           and "grok-4.6 → grok-4.7: grok47-*@grok replace grok46-*@grok (1 Lane)" in lines,
+           repr(lines))
+
+    record("63b a refresh that did not run states no change of its own",
+           setup_tui.refresh_lines(None, 80) == []
+           and setup_tui.refresh_lines({"models": [], "new": [], "removed": []}, 80)
+           == ["Catalog refresh: every model is the current generation"],
+           repr(setup_tui.refresh_lines({"models": [], "new": [], "removed": []}, 80)))
+
+    w = Wizard(copy.deepcopy(refreshed), copy.deepcopy(ROUTING), None, DISCOVERED,
+               "/tmp/lanes.json", "/tmp/routing.json", "",
+               discovery=discover.map_lanes(found, refreshed), refresh=plan,
+               rows_note="Benchmark rows: Artificial Analysis fetched just now")
+    body = w.view(10_000)["body"]
+    record("63c the start page carries the change lines and the rows note",
+           w.screen == "start"
+           and "Benchmark rows: Artificial Analysis fetched just now" in body
+           and all(line in body for line in lines),
+           repr(body))
+except Exception as e:
+    record("63 the start page states the refresh", False, repr(e))
+
 sys.exit(1 if fails else 0)

@@ -3,9 +3,11 @@
 import copy
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -328,24 +330,31 @@ def case_effort_rows_from_several_files_combine():
 
 def case_plain_prints_the_start_facts():
     """--plain prints what the TUI's start page shows, from the same function:
-    both output paths, the benchmark page line and the discovery notices, before
-    the first prompt, and no definition of a term (ticket 25)."""
+    both output paths, the benchmark page line, where the benchmark rows came
+    from, what the refresh proposes and the discovery notices, before the first
+    prompt, and no definition of a term (tickets 25 and 33)."""
+    import discover
+    import setup
     import setup_tui
     fixture_dir = os.path.join(HERE, "fixtures", "discover")
     with tempfile.TemporaryDirectory() as td:
         cfg = os.path.join(td, "config")
         discover_path = os.path.join(td, "discover.json")
-        import discover
         saved = discover.discover(sample_proposal(catalog.HARNESSES), fixture_dir=fixture_dir)
         catalog.write_json(discover_path, saved)
+        # the same refresh the wizard runs, so the facts are the same facts
+        refreshed, refresh = discover.refresh_catalog(
+            sample_proposal(catalog.HARNESSES), saved
+        )
+        _paths, rows_note = setup.refresh_effort_rows(None, fixture_dir=fixture_dir)
         result = subprocess.run(
             [sys.executable, SETUP_PY, "--config-dir", cfg, "--discover-json", discover_path,
              "--fixture-dir", fixture_dir, "--no-bench", "--plain"],
-            input=default_answers(len(lanes_sample["lanes"])), capture_output=True, text=True,
+            input=default_answers(len(refreshed["lanes"])), capture_output=True, text=True,
             cwd=DELEGATE_DIR)
-        import discover
         facts = setup_tui.start_facts(os.path.join(cfg, "lanes.json"), os.path.join(cfg, "routing.json"),
-                                      None, saved, width=10_000)
+                                      None, discover.map_lanes(saved, refreshed), width=10_000,
+                                      refresh=refresh, rows_note=rows_note)
         first_prompt = result.stdout.find("tier [")
         positions = [result.stdout.find(line) for line in facts]
         ok = (result.returncode == 0 and len(facts) >= 4
@@ -486,17 +495,24 @@ def case_harness_error_keeps_existing_lanes():
                     text = f.read()
                 with open(dst, "w", encoding="utf-8") as f:
                     f.write(text)
+        import discover
+        saved = discover.discover(existing, fixture_dir=broken)
+        refreshed, _refresh = discover.refresh_catalog(existing, saved)
         result = subprocess.run(
             [sys.executable, SETUP_PY, "--config-dir", cfg, "--fixture-dir", broken,
              "--no-bench", "--plain"],
-            input=default_answers(len(lanes_sample["lanes"])),
+            input=default_answers(len(refreshed["lanes"])),
             capture_output=True, text=True, cwd=DELEGATE_DIR,
         )
         lanes, _routing = load_written(cfg)
         notice = "discovery error" in result.stdout or "Harness codex: error" in result.stdout
         ok = (
             result.returncode == 0
-            and set(lanes["lanes"]) == set(lanes_sample["lanes"])
+            # the failing harness keeps every lane it has; the refresh may add
+            # lanes on the harnesses that answered, never take one away here
+            and set(lanes_sample["lanes"]) <= set(lanes["lanes"])
+            and {name for name in lanes["lanes"] if name.endswith("@codex")}
+            == {name for name in lanes_sample["lanes"] if name.endswith("@codex")}
             and notice
         )
         return ok, (
@@ -595,11 +611,228 @@ def case_saved_discovery_never_probes():
     return True, "both saved formats supplied facts without a live acquisition"
 
 
+# --- ticket 33: the wizard refreshes to the current generation --------------
+
+REFRESH_DIR = os.path.join(HERE, "fixtures", "refresh-2026-09-22")
+REPO_AGENTS = os.path.abspath(os.path.join(HERE, "..", "..", "..", "agents"))
+
+
+def refresh_fixture():
+    """(the frozen catalog, the refreshed catalog, the plan) on the 2026-09-22
+    fixtures. The catalog is the frozen copy beside them, never the live one,
+    which the refresh's own first run changes."""
+    import discover
+    import setup
+    frozen = catalog.load_json(os.path.join(REFRESH_DIR, "lanes.json"))
+    rows = catalog.load_json(os.path.join(REFRESH_DIR, "aa-accepted.json"))
+    saved = discover.discover(frozen, fixture_dir=REFRESH_DIR)
+    refreshed, plan = discover.refresh_catalog(
+        frozen, saved, published_models=setup.published_model_names(rows)
+    )
+    return frozen, refreshed, plan
+
+
+def write_rows(path, source, model):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump([{"source": source, "model": model, "benchmark": "b", "score": 1}], f)
+    return path
+
+
+def case_a_fresh_fetch_is_not_fetched_again():
+    """A fetch from the last 24 hours stands in for a new one, and the rows it
+    holds replace the repo's Artificial Analysis rows (ticket 33)."""
+    import setup
+    with tempfile.TemporaryDirectory() as td:
+        cache = os.path.join(td, "aa")
+        os.makedirs(cache)
+        accepted = write_rows(os.path.join(cache, "accepted.json"), "aa", "Grok 4.7")
+        repo_aa = write_rows(os.path.join(td, "repo-aa.json"), "aa", "Grok 4.6")
+        tbench = write_rows(os.path.join(td, "repo-tbench.json"), "tbench", "Grok 4.6")
+        calls = []
+        paths, note = setup.refresh_effort_rows(
+            [repo_aa, tbench], cache_dir=cache, fetch=lambda *a, **k: calls.append(a)
+        )
+        ok = paths == [accepted, tbench] and calls == [] and "0h ago" in note
+        return ok, f"paths={paths} calls={calls} note={note!r}"
+
+
+def case_a_stale_fetch_is_fetched_again():
+    """A cache older than 24 hours is fetched again, into the same directory."""
+    import setup
+    with tempfile.TemporaryDirectory() as td:
+        cache = os.path.join(td, "aa")
+        os.makedirs(cache)
+        accepted = write_rows(os.path.join(cache, "accepted.json"), "aa", "Grok 4.6")
+        old = time.time() - 48 * 60 * 60
+        os.utime(accepted, (old, old))
+        repo_aa = write_rows(os.path.join(td, "repo-aa.json"), "aa", "Grok 4.6")
+        calls = []
+
+        def fetch(out_dir, **kwargs):
+            calls.append(out_dir)
+            write_rows(os.path.join(out_dir, "accepted.json"), "aa", "Grok 4.7")
+
+        paths, note = setup.refresh_effort_rows([repo_aa], cache_dir=cache, fetch=fetch)
+        rows, _message = setup.load_effort_rows(paths)
+        ok = (calls == [cache] and paths == [accepted]
+              and rows == [{"source": "aa", "model": "Grok 4.7", "benchmark": "b", "score": 1}]
+              and "fetched just now" in note)
+        return ok, f"paths={paths} calls={calls} note={note!r}"
+
+
+def case_a_failed_fetch_keeps_the_repo_rows():
+    """A leaderboard that is down never stops a catalog edit: the repo's rows
+    stand, and the start page carries the reason."""
+    import setup
+    with tempfile.TemporaryDirectory() as td:
+        cache = os.path.join(td, "aa")
+        repo_aa = write_rows(os.path.join(td, "repo-aa.json"), "aa", "Grok 4.6")
+
+        def fetch(out_dir, **kwargs):
+            raise RuntimeError("the page could not be read")
+
+        paths, note = setup.refresh_effort_rows([repo_aa], cache_dir=cache, fetch=fetch)
+        ok = (paths == [repo_aa] and "repo rows" in note
+              and "the page could not be read" in note)
+        return ok, f"paths={paths} note={note!r}"
+
+
+def case_native_agent_files_follow_the_claude_lanes():
+    """The save writes an agent file for each new claude lane, in the form the
+    files beside it take, and removes each superseded one (ticket 33)."""
+    import setup
+    _frozen, refreshed, plan = refresh_fixture()
+    shape_path = os.path.join(REPO_AGENTS, "lane-opus-high.md")
+    with open(shape_path, encoding="utf-8") as f:
+        shape = f.read()
+    with tempfile.TemporaryDirectory() as td:
+        agents = os.path.join(td, "agents")
+        os.makedirs(agents)
+        for effort in ("low", "medium", "high", "xhigh", "max"):
+            with open(os.path.join(agents, f"lane-opus-{effort}.md"), "w") as f:
+                f.write("superseded\n")
+        lines = setup.save_native_agents(plan, refreshed, agents)
+        written = sorted(os.listdir(agents))
+        with open(os.path.join(agents, "lane-opus55-high.md"), encoding="utf-8") as f:
+            text = f.read()
+        expected = (shape.replace("lane-opus-high", "lane-opus55-high")
+                         .replace("opus-high@claude", "opus55-high@claude")
+                         .replace("model: claude-opus-5\n", "model: claude-opus-5-5\n"))
+        ok = (written == sorted(f"lane-opus55-{e}.md"
+                                for e in ("low", "medium", "high", "xhigh", "max"))
+              and text == expected
+              and os.path.realpath(setup.NATIVE_AGENTS_DIR) == os.path.realpath(REPO_AGENTS)
+              and len(lines) == 10)
+        return ok, f"written={written} lines={lines} text={text!r}"
+
+
+def case_a_catalog_elsewhere_gets_no_agent_file():
+    """The agent files belong to this checkout's catalog, so a catalog somewhere
+    else gets none, and the run says so rather than writing into the repo."""
+    import setup
+    _frozen, refreshed, plan = refresh_fixture()
+    with tempfile.TemporaryDirectory() as td:
+        lines = setup.save_native_agents(plan, refreshed, setup.native_agents_dir(td))
+        ok = (setup.native_agents_dir(td) is None
+              and setup.native_agents_dir(
+                  os.path.join(os.path.dirname(setup.NATIVE_AGENTS_DIR),
+                               "stow", "delegate", ".config", "delegate"))
+              == setup.NATIVE_AGENTS_DIR
+              and len(lines) == 1 and "agent file" in lines[0])
+        return ok, f"lines={lines}"
+
+
+def case_the_refreshed_rows_reach_the_new_lanes():
+    """The rows the refresh brings in are attributed to the lanes it adds:
+    Claude Opus 5.5 to the opus55 lanes and Grok 4.7 high to grok47-high@grok,
+    each at its own effort. A lane no source scored keeps no figures, which is
+    what the carry page reports as no rows (ticket 33)."""
+    import bench
+    _frozen, refreshed, _plan = refresh_fixture()
+    rows = catalog.load_json(os.path.join(REFRESH_DIR, "aa-accepted.json"))
+    data = bench.collect(refreshed, effort_rows=rows)
+    lanes = data["lanes"]
+
+    def columns(name):
+        return sorted((lanes[name].get("aa") or {}).get("cols", {}))
+
+    ok = (columns("opus55-high@claude") and columns("opus55-max@claude")
+          and columns("grok47-high@grok")
+          and lanes["opus55-high@claude"]["aa"]["effort"] == "high"
+          and lanes["grok47-high@grok"]["aa"]["effort"] == "high"
+          # no source scores these yet, and none of the predecessor's rows leak
+          and not columns("sol6-high@codex") and not columns("pro31-high@agy")
+          and not columns("grok47fast-high@grok"))
+    return ok, f"opus55={columns('opus55-high@claude')} grok47={columns('grok47-high@grok')}"
+
+
+def case_no_discover_fetches_no_rows():
+    """--no-discover skips every live acquisition, the benchmark-row fetch
+    included: a run with it says nothing about where rows came from, because it
+    went nowhere for them (ticket 33)."""
+    with tempfile.TemporaryDirectory() as td:
+        cfg = os.path.join(td, "config")
+        discover_path = os.path.join(td, "discover.json")
+        write_discover(discover_path, catalog.HARNESSES)
+        result = run_setup(cfg, discover_path,
+                           default_answers(len(lanes_sample["lanes"])), "--no-bench")
+        ok = (result.returncode == 0
+              and "Benchmark rows:" not in result.stdout
+              and "Catalog refresh" not in result.stdout)
+        return ok, f"code={result.returncode} stdout={result.stdout[:300]!r}"
+
+
+def case_plain_prints_the_refresh_change_lines():
+    """--plain states the refresh, one line per model, and the catalog it then
+    writes passes catalog.py check (ticket 33)."""
+    import setup_tui
+    _frozen, refreshed, plan = refresh_fixture()
+    with tempfile.TemporaryDirectory() as td:
+        cfg = os.path.join(td, "config")
+        os.makedirs(cfg)
+        shutil.copy(os.path.join(REFRESH_DIR, "lanes.json"), os.path.join(cfg, "lanes.json"))
+        catalog.write_json(os.path.join(cfg, "routing.json"), routing_sample)
+        result = subprocess.run(
+            [sys.executable, SETUP_PY, "--config-dir", cfg, "--fixture-dir", REFRESH_DIR,
+             "--effort-rows", os.path.join(REFRESH_DIR, "aa-accepted.json"),
+             "--no-bench", "--plain"],
+            input=default_answers(len(refreshed["lanes"])),
+            capture_output=True, text=True, cwd=DELEGATE_DIR,
+        )
+        expected = setup_tui.refresh_lines(plan, 10_000)
+        check = subprocess.run(
+            [sys.executable, os.path.join(DELEGATE_DIR, "catalog.py"), "check",
+             os.path.join(cfg, "lanes.json")],
+            capture_output=True, text=True,
+        )
+        written = catalog.load_json(os.path.join(cfg, "lanes.json"))
+        ok = (result.returncode == 0
+              and all(line in result.stdout for line in expected)
+              and "gpt-5.6-sol → gpt-6-sol: sol6-*@codex replace sol-*@codex (6 Lanes)"
+              in result.stdout
+              and check.returncode == 0
+              and "sol6-high@codex" in written["lanes"]
+              and "sol-high@codex" not in written["lanes"]
+              # the temp catalog is not this checkout's, so no agent file moved
+              and "agent file" in result.stdout)
+        return ok, (f"code={result.returncode} check={check.returncode} "
+                    f"expected={expected} stdout={result.stdout[:600]!r}")
+
+
 for name, case in (
     ("saved discovery never probes", case_saved_discovery_never_probes),
     ("tiers-from applies the page lines", case_tiers_from_applies_the_page_lines),
     ("tiers-from with an unreadable file writes nothing", case_tiers_from_unreadable_file_writes_nothing),
     ("plain prints the start facts", case_plain_prints_the_start_facts),
+    ("a fresh fetch is not fetched again", case_a_fresh_fetch_is_not_fetched_again),
+    ("a stale fetch is fetched again", case_a_stale_fetch_is_fetched_again),
+    ("a failed fetch keeps the repo rows", case_a_failed_fetch_keeps_the_repo_rows),
+    ("native agent files follow the claude lanes",
+     case_native_agent_files_follow_the_claude_lanes),
+    ("a catalog elsewhere gets no agent file", case_a_catalog_elsewhere_gets_no_agent_file),
+    ("the refreshed rows reach the new lanes", case_the_refreshed_rows_reach_the_new_lanes),
+    ("no-discover fetches no rows", case_no_discover_fetches_no_rows),
+    ("plain prints the refresh change lines", case_plain_prints_the_refresh_change_lines),
     ("effort rows from several files combine", case_effort_rows_from_several_files_combine),
     ("all harnesses write canonical samples", case_all_harnesses_write_canonical_samples),
     ("subset filters lanes and meters", case_subset_filters_lanes_and_meters),

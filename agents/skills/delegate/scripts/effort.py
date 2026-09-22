@@ -1087,8 +1087,11 @@ def load_packet(path):
         raise EffortError(f"{path}: cannot read: {e}")
 
 
-def check_files(rows_path, packet_path, out_dir=None):
-    """Write accepted.json and rejected.json. Returns (checked, accepted, rejected)."""
+def check_files(rows_path, packet_path, out_dir=None, quiet=False):
+    """Write accepted.json and rejected.json. Returns (checked, accepted, rejected).
+
+    `quiet` is for a caller that prints its own line: the wizard refreshes the
+    rows itself and says so on its start page (ticket 33)."""
     if out_dir is None:
         out_dir = os.getcwd()
     os.makedirs(out_dir, exist_ok=True)
@@ -1102,10 +1105,11 @@ def check_files(rows_path, packet_path, out_dir=None):
     checked = len(rows)
     verified = sum(1 for r in accepted if r.get("provenance") == "verified")
     self_reported = sum(1 for r in accepted if r.get("provenance") == "self-reported")
-    print(
-        f"checked={checked} accepted={len(accepted)} rejected={len(rejected)} "
-        f"verified={verified} self-reported={self_reported}"
-    )
+    if not quiet:
+        print(
+            f"checked={checked} accepted={len(accepted)} rejected={len(rejected)} "
+            f"verified={verified} self-reported={self_reported}"
+        )
     return checked, accepted, rejected
 
 
@@ -1324,10 +1328,11 @@ def fetch_page(url):
         raise EffortError(f"{url}: cannot fetch: {e}")
 
 
-def run_aa(out_dir, url=None, html_file=None):
+def run_aa(out_dir, url=None, html_file=None, quiet=False):
     """Read one Artificial Analysis model page, write packet.txt and rows.json,
     then check them. `html_file` reads a saved page instead of fetching; its
-    `url` is then only what the rows record."""
+    `url` is then only what the rows record. `quiet` leaves the lines to a
+    caller that prints its own, as the wizard's refresh does (ticket 33)."""
     if html_file:
         try:
             with open(html_file, "rb") as f:
@@ -1345,8 +1350,9 @@ def run_aa(out_dir, url=None, html_file=None):
         f.write(packet_text)
     with open(rows_path, "w", encoding="utf-8", newline="\n") as f:
         f.write(format_json(rows))
-    print(f"aa: {len({r['variant'] for r in rows})} variants with an effort, {len(rows)} rows")
-    return check_files(rows_path, packet_path, out_dir=out_dir)
+    if not quiet:
+        print(f"aa: {len({r['variant'] for r in rows})} variants with an effort, {len(rows)} rows")
+    return check_files(rows_path, packet_path, out_dir=out_dir, quiet=quiet)
 
 
 def main(argv=None):

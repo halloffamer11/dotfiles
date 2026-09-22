@@ -6,13 +6,37 @@ import json
 import os
 import sys
 import tempfile
+import threading
+import time
 
 import bench
 import bench_page
 import catalog
 import discover
+import effort
 import setup_tui
 from catalog import CatalogError, CLASSES, HARNESSES, load_json, validate_lanes, validate_routing, write_json
+
+# The wizard refreshes the Artificial Analysis rows itself, so that one command
+# is one command (ticket 33). The fetch goes where `effort.py aa` would put it.
+AA_CACHE_DIR = os.path.expanduser("~/.cache/delegate/bench/aa")
+AA_MAX_AGE = 24 * 60 * 60
+# The rows a fixture run reads instead of fetching, beside the harness fixtures.
+AA_FIXTURE = "aa-accepted.json"
+
+# A claude lane runs as a subagent, so the lane is not live until the agent file
+# beside it is (ticket 22). Those files are `agents/agents/` in the checkout this
+# skill is part of, and `make delegate-wizard` relinks them into ~/.claude/agents
+# after the wizard exits. realpath, because the skill is reached by a stow link.
+NATIVE_AGENTS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.realpath(__file__))))),
+    "agents",
+)
+NATIVE_AGENT_BODY = (
+    "You are a delegate worker. Read the prompt file named in your task and follow it "
+    "exactly. Your final message is the return block that the prompt asks for."
+)
 
 
 class SetupAbort(Exception):
@@ -158,7 +182,9 @@ def note_undiscovered_lanes(lanes_doc, discovery_data):
             print(f"{name}: {lane['harness']} discovery error ({err}); the lane stays")
 
 
-def show_bench(args, lanes_doc, routing_doc):
+def show_bench(args, lanes_doc, routing_doc, rows=None):
+    """`rows` is the `(rows, message)` pair `load_effort_rows` gives, already
+    read from the refreshed list; without one this reads the list on `args`."""
     if args.no_bench:
         return
     if args.bench_report:
@@ -169,7 +195,7 @@ def show_bench(args, lanes_doc, routing_doc):
             print(f"bench: {e}")
         return
 
-    effort_rows, effort_message = load_effort_rows(args.effort_rows)
+    effort_rows, effort_message = rows if rows is not None else load_effort_rows(args.effort_rows)
     if effort_message:
         print(effort_message)
         return
@@ -265,6 +291,148 @@ def ask_routing(routing_doc):
             routing_doc["meters"] = True
 
 
+def aa_rows_path(paths):
+    """The `--effort-rows` file that holds Artificial Analysis rows, or None."""
+    for path in paths or ():
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(data, list) and any(
+            isinstance(row, dict) and row.get("source") == effort.AA_SOURCE for row in data
+        ):
+            return path
+    return None
+
+
+def _with_aa_rows(paths, refreshed):
+    """`paths` with the Artificial Analysis file replaced by `refreshed`."""
+    here = aa_rows_path(paths)
+    if here is None:
+        return list(paths) + [refreshed]
+    return [refreshed if path == here else path for path in paths]
+
+
+def refresh_effort_rows(paths, cache_dir=None, fixture_dir=None, now=None,
+                        max_age=AA_MAX_AGE, fetch=None):
+    """(the `--effort-rows` list with the Artificial Analysis rows refreshed,
+    one line saying where they came from).
+
+    `make delegate-wizard` is the one command (ticket 33), so the wizard reads
+    the rows itself rather than asking for `effort.py aa` first. A fetch from
+    the last 24 hours is reused, and a fetch that fails keeps the repo's rows
+    and says why: a leaderboard that is down must never stop a catalog edit.
+    Terminal-Bench rows stay as they are, because extracting them needs a
+    worker. `fixture_dir` reads a saved rows file beside the harness fixtures,
+    so a test and a fixture run touch no network and no cache.
+    """
+    paths = list(paths or [])
+    if fixture_dir is not None:
+        fixture = os.path.join(fixture_dir, AA_FIXTURE)
+        if not os.path.isfile(fixture):
+            return paths, f"Benchmark rows: repo rows; no {AA_FIXTURE} in {fixture_dir}"
+        return _with_aa_rows(paths, fixture), f"Benchmark rows: Artificial Analysis from {fixture}"
+    cache_dir = cache_dir or AA_CACHE_DIR
+    accepted = os.path.join(cache_dir, "accepted.json")
+    now = time.time() if now is None else now
+    if os.path.isfile(accepted):
+        age = now - os.path.getmtime(accepted)
+        if 0 <= age < max_age:
+            return (_with_aa_rows(paths, accepted),
+                    f"Benchmark rows: Artificial Analysis fetched {int(age // 3600)}h ago, "
+                    "still fresh")
+    try:
+        (fetch or effort.run_aa)(cache_dir, quiet=True)
+    except Exception as e:
+        # Every failure here is the same failure to the operator: the rows are
+        # the repo's, and the reason is on the start page.
+        return paths, f"Benchmark rows: repo rows; the Artificial Analysis fetch failed: {e}"
+    return _with_aa_rows(paths, accepted), "Benchmark rows: Artificial Analysis fetched just now"
+
+
+def published_model_names(rows):
+    """The model names the Artificial Analysis rows print.
+
+    Claude Code lists no model, so these are the only list of claude models
+    there is; the refresh reads a newer version of a level the catalog already
+    runs out of them (ticket 33).
+    """
+    return sorted({
+        row["model"] for row in rows or ()
+        if isinstance(row, dict) and row.get("source") == effort.AA_SOURCE
+        and isinstance(row.get("model"), str)
+    })
+
+
+def native_agent_text(lane_name, lane):
+    """The agent file for one native claude lane, in the form the files beside
+    it take. A model that takes no effort level carries no `effort` line."""
+    lines = [
+        "---",
+        f"name: lane-{lane_name.split('@', 1)[0]}",
+        f'description: "Delegate native lane {lane_name}. Use only when /delegate prints a '
+        'native line that names this agent, or when Orin names this lane."',
+        f"model: {lane['model']}",
+    ]
+    if discover.model_takes_effort("claude", lane["model"]):
+        lines.append(f"effort: {lane['effort']}")
+    lines += ["---", "", NATIVE_AGENT_BODY, ""]
+    return "\n".join(lines)
+
+
+def native_agents_dir(config_dir):
+    """Where a native claude lane's agent file goes, or None.
+
+    The agent files and the catalog have to stay in step, so they are written
+    only when the catalog being written is this checkout's own, which is how
+    `make delegate-wizard` runs the wizard. A catalog somewhere else — a test,
+    a throwaway copy — gets none, because the files beside this script are not
+    that catalog's.
+    """
+    root = os.path.dirname(NATIVE_AGENTS_DIR)
+    here = os.path.abspath(os.path.expanduser(config_dir or ""))
+    return NATIVE_AGENTS_DIR if here.startswith(root + os.sep) else None
+
+
+def save_native_agents(refresh, lanes_doc, agents_dir):
+    """Write the agent file of each new claude lane, remove each superseded
+    one, and return the lines to print.
+
+    A claude lane runs as a subagent, so a new lane is not live until its file
+    is; `make delegate-wizard` relinks them after the wizard exits, so the one
+    command stays one command (ticket 33).
+    """
+    if not refresh:
+        return []
+    lanes = lanes_doc.get("lanes") or {}
+    if agents_dir is None:
+        waiting = [name for name in refresh.get("new") or ()
+                   if (lanes.get(name) or {}).get("harness") == "claude"]
+        if not waiting:
+            return []
+        return [f"note: {len(waiting)} new claude lanes need an agent file; this catalog is "
+                "not the checkout's own, so none was written"]
+    lines = []
+    for name in refresh.get("new") or ():
+        lane = lanes.get(name)
+        if not isinstance(lane, dict) or lane.get("harness") != "claude":
+            continue
+        os.makedirs(agents_dir, exist_ok=True)
+        path = os.path.join(agents_dir, f"lane-{name.split('@', 1)[0]}.md")
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(native_agent_text(name, lane))
+        lines.append(f"wrote {path}")
+    for name in refresh.get("removed") or ():
+        if not name.endswith("@claude") or name in lanes:
+            continue
+        path = os.path.join(agents_dir, f"lane-{name.split('@', 1)[0]}.md")
+        if os.path.isfile(path):
+            os.remove(path)
+            lines.append(f"removed {path}")
+    return lines
+
+
 def load_effort_rows(paths):
     """Every row from one file or several, in order. The pre-screen judges each
     source on its own rows, so files from different sources combine safely."""
@@ -298,7 +466,8 @@ def read_tier_lines(path):
         raise CatalogError(f"tiers-from: {e}") from e
 
 
-def confirm_and_write(lanes_doc, routing_doc, lanes_path, routing_path):
+def confirm_and_write(lanes_doc, routing_doc, lanes_path, routing_path, refresh=None,
+                      agents_dir=None):
     print(lanes_path)
     print(routing_path)
     for name, lane in lanes_doc["lanes"].items():
@@ -315,6 +484,8 @@ def confirm_and_write(lanes_doc, routing_doc, lanes_path, routing_path):
     write_json(routing_path, routing_doc)
     print(f"wrote {lanes_path}")
     print(f"wrote {routing_path}")
+    for line in save_native_agents(refresh, lanes_doc, agents_dir):
+        print(line)
 
 
 def write_focused(config_dir, revision, original_lanes, original_routing,
@@ -379,13 +550,43 @@ def main(argv=None):
         lanes_doc, routing_doc, lanes_path, routing_path = load_or_propose(
             config_dir, set(HARNESSES)
         )
+        # The rows come off a web page and the models come off three CLIs;
+        # neither waits on the other (ticket 33).
+        rows_box = {}
+
+        def fetch_rows():
+            # --no-discover skips every live acquisition, the benchmark rows
+            # included; a fixture run reads them beside the harness fixtures
+            try:
+                rows_box["value"] = (
+                    (list(args.effort_rows or []), "") if args.no_discover
+                    else refresh_effort_rows(args.effort_rows, fixture_dir=args.fixture_dir)
+                )
+            except Exception as e:
+                # a thread that raises would print a traceback over the wizard
+                rows_box["value"] = (args.effort_rows,
+                                     f"Benchmark rows: repo rows; the refresh failed: {e}")
+
+        fetcher = threading.Thread(target=fetch_rows, daemon=True)
+        fetcher.start()
         discovered, discovery_data = acquire_discovery(lanes_doc, args)
+        fetcher.join()
+        effort_row_paths, rows_note = rows_box.get("value", (args.effort_rows, ""))
+        rows = load_effort_rows(effort_row_paths)
         if not existing:
             lanes_doc, routing_doc, lanes_path, routing_path = load_or_propose(
                 config_dir, discovered
             )
         else:
             note_undiscovered_lanes(lanes_doc, discovery_data)
+        # The current generation, proposed in memory. Nothing is written until
+        # the confirm, and quitting writes nothing.
+        refresh = None
+        if isinstance(discovery_data, dict) and discovery_data.get("models"):
+            lanes_doc, refresh = discover.refresh_catalog(
+                lanes_doc, discovery_data, published_models=published_model_names(rows[0])
+            )
+            discovery_data = discover.map_lanes(discovery_data, lanes_doc)
         # Discovery reports drift at the moment the human is already deciding
         # tiers, and it must never be able to stop them getting there: any
         # failure becomes the reason string the start facts print. Both
@@ -394,7 +595,8 @@ def main(argv=None):
             # the prompt-driven interface writes no benchmark page; it prints
             # the report instead, so the page line says (not written)
             for line in setup_tui.start_facts(lanes_path, routing_path, None, discovery_data,
-                                              width=10_000):
+                                              width=10_000, refresh=refresh,
+                                              rows_note=rows_note):
                 print(line)
             if tier_lines is not None:
                 # the same parser and summary as the review page's `v`; the
@@ -402,7 +604,7 @@ def main(argv=None):
                 parsed = setup_tui.parse_tier_lines(tier_lines, lanes_doc)
                 dropped = setup_tui.apply_tier_lines_to_doc(lanes_doc, parsed)
                 print(setup_tui.tier_lines_summary(parsed, dropped))
-            if args.effort_rows:
+            if effort_row_paths:
                 # The pre-screen is a selectable screen; there is no prompt-driven
                 # form of it yet. Saying so is the point: the instruction a human
                 # is given names --effort-rows, and a flag that reads as accepted
@@ -410,20 +612,21 @@ def main(argv=None):
                 print("note: --effort-rows drives the pre-screen, which the prompt-driven "
                       "interface does not have; no lane will be proposed off. Run on a "
                       "terminal without --plain to use it.")
-            show_bench(args, lanes_doc, routing_doc)
+            show_bench(args, lanes_doc, routing_doc, rows=rows)
             ask_lanes(lanes_doc)
             if tier_lines is not None:
                 # no review page here: the lines' order inside each tier is the
                 # order written (ticket 28)
                 setup_tui.write_order_from_lines(lanes_doc, parsed)
             ask_routing(routing_doc)
-            confirm_and_write(lanes_doc, routing_doc, lanes_path, routing_path)
+            confirm_and_write(lanes_doc, routing_doc, lanes_path, routing_path,
+                              refresh=refresh, agents_dir=native_agents_dir(config_dir))
         else:
             if args.bench_report:
                 print("note: --bench-report is ignored in TUI mode")
             bench_data = None
             initial_message = ""
-            effort_rows, effort_message = load_effort_rows(args.effort_rows)
+            effort_rows, effort_message = rows
             if not args.no_bench:
                 try:
                     bench_data = bench.collect(
@@ -450,6 +653,8 @@ def main(argv=None):
                 effort_rows=effort_rows,
                 discovery=discovery_data,
                 focus=None if args.screen == "start" else args.screen,
+                refresh=refresh,
+                rows_note=rows_note,
             )
             if tier_lines is not None:
                 summary = wizard.apply_tier_lines(tier_lines)
@@ -469,6 +674,9 @@ def main(argv=None):
                     write_json(routing_path, result_routing)
                     print(f"wrote {lanes_path}")
                     print(f"wrote {routing_path}")
+                    for line in save_native_agents(refresh, result_lanes,
+                                                   native_agents_dir(config_dir)):
+                        print(line)
     except SetupAbort:
         return 130
     except CatalogError as e:

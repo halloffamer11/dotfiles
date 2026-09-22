@@ -188,15 +188,57 @@ def discovery_notices(discovery, width=80):
     return notices
 
 
-def start_facts(lanes_path, routing_path, page_path, discovery, width=80):
+def plural(count, word):
+    """`1 Lane`, `6 Lanes`."""
+    return f"{count} {word}" if count == 1 else f"{count} {word}s"
+
+
+def refresh_lines(refresh, width=80):
+    """What the catalog refresh proposes, one line per model (ticket 33).
+
+    A model that takes another's place reads
+    `gpt-5.6-sol → gpt-6-sol: sol6-*@codex replace sol-*@codex (6 Lanes)`, and
+    one that takes nobody's reads `new gemini-3.1-pro: pro31-*@agy (2 Lanes)`.
+    A refresh that did not run says so rather than reading as no change.
+    """
+    if refresh is None:
+        return []
+    lines = []
+    for item in refresh.get("models") or []:
+        family = f"{item['stem']}-*@{item['harness']}"
+        count = plural(len(item["new"]), "Lane")
+        if item.get("predecessor"):
+            replaced = len(set(item["replaced"]))
+            tail = count if replaced == len(item["new"]) else f"{count} for {replaced}"
+            lines.append(fit_line(
+                f"{item['predecessor']} → {item['model']}: {family} replace "
+                f"{item['predecessor_stem']}-*@{item['harness']} ({tail})", width))
+        else:
+            lines.append(fit_line(f"new {item['model']}: {family} ({count})", width))
+    # a superseded lane with no successor at its effort leaves with no line of
+    # its own above, so it is named here
+    covered = {name for item in refresh.get("models") or [] for name in item["replaced"]}
+    orphans = [name for name in refresh.get("removed") or [] if name not in covered]
+    if orphans:
+        lines.append(list_line("Superseded Lanes removed", orphans, width))
+    if not lines:
+        return [fit_line("Catalog refresh: every model is the current generation", width)]
+    return lines
+
+
+def start_facts(lanes_path, routing_path, page_path, discovery, width=80,
+                refresh=None, rows_note=""):
     """What the start page says, and what `--plain` prints first: the two files
-    it will write, the benchmark page, and the discovery notices. Facts only —
-    the terms are defined in CONTEXT.md, and the people who run this know them
-    (Orin, 2026-09-11; ticket 25)."""
+    it will write, the benchmark page, where the benchmark rows came from, what
+    the refresh proposes, and the discovery notices. Facts only — the terms are
+    defined in CONTEXT.md, and the people who run this know them (Orin,
+    2026-09-11; tickets 25 and 33)."""
     return [
         fit_line(f"Will write {lanes_path}", width),
         fit_line(f"Will write {routing_path}", width),
         fit_line(f"Benchmark page: {page_path or '(not written)'}", width),
+        *([fit_line(rows_note, width)] if rows_note else []),
+        *refresh_lines(refresh, width),
         *discovery_notices(discovery, width),
     ]
 
@@ -223,7 +265,7 @@ class Wizard:
     def __init__(self, lanes_doc, routing_doc, bench, discovered,
                  lanes_path, routing_path, initial_message="",
                  bench_page_path=None, effort_rows=None, discovery=None, clipboard=None,
-                 focus=None):
+                 focus=None, refresh=None, rows_note=""):
         # read only when `v` is pressed on the review page (ticket 27)
         self._clipboard = clipboard or read_clipboard
         self._original_lanes = copy.deepcopy(lanes_doc)
@@ -237,6 +279,10 @@ class Wizard:
         self.lanes_path = lanes_path
         self.routing_path = routing_path
         self.bench_page_path = bench_page_path
+        # what the refresh proposed before the first screen, and where the
+        # benchmark rows came from; both are start-page facts (ticket 33)
+        self.refresh = refresh
+        self.rows_note = rows_note
         self.focus = None if focus in (None, "start") else focus
         self.screen = "start"
         self.tier = None
@@ -1054,7 +1100,8 @@ class Wizard:
         if self.screen == "start":
             body = [
                 *start_facts(self.lanes_path, self.routing_path, self.bench_page_path,
-                             self.discovery, self._width),
+                             self.discovery, self._width, refresh=self.refresh,
+                             rows_note=self.rows_note),
                 "",
                 "Nothing is written until the confirm screen; q leaves without writing.",
             ]
