@@ -168,8 +168,11 @@ Read on 2026-09-22 from the fixtures above:
 - agy lists Gemini 3.8, 3.7 and 3.6 Flash, Gemini 3.1 Pro (high, low), and three
   other-vendor models.
 - The Artificial Analysis rows added since 2026-09-13 include `Claude Opus 5.5`
-  (low…max) and `Grok 4.7` (high, xhigh). They have no `GPT-6 Sol` or `GPT-6 Luna`
-  rows yet.
+  (low…max) and `Grok 4.7` (high, xhigh). The 17:47 capture in
+  `_work/fixtures-2026-09-22/` has no `GPT-6 Sol` or `GPT-6 Luna` rows; the 18:28
+  fetch in `~/.cache/delegate/bench/aa/` has both, 36 rows each, so the wizard's
+  own refresh gives the new `sol6-*` and `luna6-*` Lanes their figures. The tests
+  read the capture, which is why they expect those Lanes to have none.
 - Claude Opus 5.5 (`claude-opus-5-5`) costs $4 in / $20 out per 1M tokens, and $0.20
   for cache reads. Opus 5 costs $5 / $25.
 
@@ -218,3 +221,19 @@ overrule any of them:
 - Prices: `.scratch/delegate-redesign/research/2026-09-22-new-model-prices.md`
   holds the figures for the lanes this refresh adds. Filling them in is the
   session's, after Orin's run.
+
+Review fixes, from the session's read of the first pass:
+
+- `native_agents_dir` took the checkout to be `<checkout>/agents`, one directory
+  too deep, so the one config dir that should match — the
+  `<checkout>/stow/delegate/.config/delegate` that `make delegate-wizard` passes
+  — did not, and a real run wrote no agent file. The test that should have caught
+  it built the config path with the same wrong layout; it now builds it as the
+  Makefile does, and a second test copies the layout into a temp directory and
+  saves through it.
+- The start page's `Models with no lane` line named the superseded, other-vendor
+  and hidden models, which are the ones the ticket says are not shown.
+  `map_lanes` keeps the line to current-generation models of the harness's own
+  vendor, so on a normal run it is empty and the line goes.
+- One `catalog.py order --scope project` said the stale-lane warning three
+  times, once per validation pass. Each (file, lane) is now said once.
