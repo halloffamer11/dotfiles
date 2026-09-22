@@ -33,7 +33,8 @@ haiku). A level keeps its catalog model unless a newer version is named.
 **Current generation.** Each harness shows its own vendor's models only: `gpt-*` on
 codex, `gemini-*` on agy, `grok-*` on grok and `claude-*` on claude. Other vendors'
 models that agy serves (`claude-sonnet-4-6`, `claude-opus-4-6-thinking`,
-`gpt-oss-120b`) are not shown. A model hidden by its harness (codex
+`gpt-oss-120b`) are not shown; Orin, 2026-09-22, on the unused `agy-claude-gpt`
+usage pool they would drain: "ignore the Gemini Claude pool". A model hidden by its harness (codex
 `"visibility": "hide"`) is not shown. A model's **level** is its slug with the version
 number removed, after the agy effort suffix is stripped (`catalog.agy_family`). For
 example, `gpt-6-sol` and `gpt-5.6-sol` are both level `gpt-sol`, and `gemini-3.8-flash`
