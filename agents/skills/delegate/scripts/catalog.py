@@ -498,6 +498,12 @@ def validate_lanes(doc, source="lanes.json"):
     return doc
 
 
+# Each (file, lane) said once in a process: one edit validates its sources
+# several times over — the load, the plan, and the recheck before the write —
+# and three copies of one warning read like three problems.
+_WARNED_STALE_LANES = set()
+
+
 def warn_stale_lane(source, lane_name, lanes_source):
     """Say once, on stderr, that a project file names a lane the catalog lost.
 
@@ -506,6 +512,9 @@ def warn_stale_lane(source, lane_name, lanes_source):
     that project must not stop over a stale name, so the entry is ignored and
     the next project save drops it (ticket 33).
     """
+    if (source, lane_name) in _WARNED_STALE_LANES:
+        return
+    _WARNED_STALE_LANES.add((source, lane_name))
     sys.stderr.write(
         f"warning: {source}: lane '{lane_name}' is not in {lanes_source} any more; "
         "ignoring it. The next project save drops it.\n"

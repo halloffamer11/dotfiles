@@ -2748,6 +2748,26 @@ with tempfile.TemporaryDirectory() as td:
         bool(rows) and rows[0].get("pick") and rows[0]["lane"] in cat_stale["lanes"],
         repr(rows[:1]),
     )
+    env = isolated_cli_env(td)
+    res_stale = catalog_cli(
+        ["order", "terra-high@codex", "1", "--scope", "project",
+         "--cwd", repo, "--config-dir", cfg],
+        env,
+    )
+    planned = json.loads(res_stale.stdout) if res_stale.returncode == 0 else {}
+    # one edit validates its sources several times over; each stale entry is
+    # still said once, and the two here are two entries in two files
+    warnings = [line for line in res_stale.stderr.splitlines() if "gone-high@codex" in line]
+    record(
+        "16.4 one edit says each stale entry once, and plans it away",
+        res_stale.returncode == 0
+        and len(warnings) == len(set(warnings)) == 2
+        and sum(".delegate/routing.json" in line for line in warnings) == 1
+        and sum(".delegate/lanes.json" in line for line in warnings) == 1
+        and "gone-high@codex" not in planned["values"]["sequence"]["resulting"],
+        f"rc={res_stale.returncode} warnings={warnings}",
+    )
+
     record(
         "16.3 the project settings that name live lanes still apply",
         cat_stale["lanes"]["flash-high@agy"]["tier"] == 2
