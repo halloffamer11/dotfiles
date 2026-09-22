@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """test_discover.py — unit and CLI tests for discover.py. Run: python3 tests/test_discover.py"""
+import copy
 import json
 import os
 import shutil
@@ -328,7 +329,8 @@ with tempfile.TemporaryDirectory() as td:
 
     data = json.loads(res_json.stdout)
     top_keys = {"harnesses", "models", "unmapped", "retired"}
-    model_keys = {"harness", "slug", "display_name", "lane", "lanes", "efforts", "reason"}
+    model_keys = {"harness", "slug", "display_name", "lane", "lanes", "efforts", "reason",
+                  "level", "version", "superseded", "members"}
     json_ok = (
         res_json.returncode == 0
         and set(data.keys()) == top_keys
@@ -709,5 +711,175 @@ with tempfile.TemporaryDirectory() as td:
         rc == 0 and check.returncode == 0 and set(stanzas) == {"flash-low@agy", "flash-medium@agy", "flash-high@agy"},
         f"rc={check.returncode} err={check.stderr} stanzas={sorted(stanzas)}",
     )
+
+
+# -------------------------------------------------------------
+# The refresh to the current generation (ticket 33). Every figure below comes
+# from the fixtures captured on 2026-09-22 and from the catalog frozen beside
+# them, never from the live catalog, which the refresh's own first run changes.
+
+REFRESH_DIR = os.path.join(HERE, "fixtures", "refresh-2026-09-22")
+with open(os.path.join(REFRESH_DIR, "lanes.json"), encoding="utf-8") as f:
+    frozen_lanes = json.load(f)
+with open(os.path.join(REFRESH_DIR, "aa-accepted.json"), encoding="utf-8") as f:
+    frozen_rows = json.load(f)
+published = sorted({r["model"] for r in frozen_rows if r.get("source") == "aa"})
+
+levels = {slug: discover.model_level(slug) for slug in (
+    "gpt-6-sol", "gpt-5.6-sol", "claude-opus-5-5", "claude-opus-5", "grok-4.7",
+    "grok-4.7-build-fast", "gemini-3.8-flash-high", "gemini-3.1-pro-low",
+)}
+record(
+    "a model's level is its slug without the version",
+    levels["gpt-6-sol"] == ("gpt-sol", (6,))
+    and levels["gpt-5.6-sol"] == ("gpt-sol", (5, 6))
+    and levels["claude-opus-5-5"] == ("claude-opus", (5, 5))
+    and levels["claude-opus-5"] == ("claude-opus", (5,))
+    and levels["grok-4.7"] == ("grok", (4, 7))
+    and levels["grok-4.7-build-fast"] == ("grok-build-fast", (4, 7))
+    # the agy effort suffix comes off first, so one family has one level
+    and levels["gemini-3.8-flash-high"] == ("gemini-flash", (3, 8))
+    and levels["gemini-3.1-pro-low"] == ("gemini-pro", (3, 1)),
+    repr(levels),
+)
+
+with open(os.path.join(REFRESH_DIR, "codex-debug-models.json"), encoding="utf-8") as f:
+    codex_generation = discover.mark_generation(discover.parse_codex_output(f.read()), "codex")
+by_slug = {m["slug"]: m for m in codex_generation}
+record(
+    "superseded is the harness's own word or a higher version of the level",
+    bool(by_slug["gpt-5.5"]["superseded"]) and "gpt-5.6-sol" in by_slug["gpt-5.5"]["superseded"]
+    and by_slug["gpt-5.6-sol"]["superseded"] == "gpt-6-sol is newer"
+    and by_slug["gpt-5.6-luna"]["superseded"] == "gpt-6-luna is newer"
+    and by_slug["gpt-6-sol"]["superseded"] is None
+    and by_slug["gpt-6-astra"]["superseded"] is None
+    # nothing newer is listed for terra, so it is the current generation
+    and by_slug["gpt-5.6-terra"]["superseded"] is None,
+    repr({s: m["superseded"] for s, m in by_slug.items()}),
+)
+
+stems = {
+    "sol6": discover.lane_stem("gpt-sol", (6,), {"gpt-sol", "gpt-luna", "gpt-astra"}),
+    "luna6": discover.lane_stem("gpt-luna", (6,), {"gpt-sol", "gpt-luna"}),
+    "opus55": discover.lane_stem("claude-opus", (5, 5), {"claude-opus", "claude-sonnet"}),
+    "grok47": discover.lane_stem("grok", (4, 7), {"grok", "grok-build-fast"}),
+    "grok47fast": discover.lane_stem("grok-build-fast", (4, 7), {"grok", "grok-build-fast"}),
+    "pro31": discover.lane_stem("gemini-pro", (3, 1), {"gemini-flash", "gemini-pro"}),
+}
+record(
+    "a new lane's name is the level's word and the version's digits",
+    all(expected == found for expected, found in stems.items()),
+    repr(stems),
+)
+
+refresh_discovery = discover.discover(frozen_lanes, fixture_dir=REFRESH_DIR)
+refreshed, plan = discover.refresh_catalog(
+    frozen_lanes, refresh_discovery, published_models=published
+)
+expected_new = [
+    "sol6-low@codex", "sol6-medium@codex", "sol6-high@codex", "sol6-xhigh@codex",
+    "sol6-max@codex", "sol6-ultra@codex",
+    "luna6-low@codex", "luna6-medium@codex", "luna6-high@codex", "luna6-xhigh@codex",
+    "luna6-max@codex",
+    "pro31-low@agy", "pro31-high@agy",
+    "grok47-high@grok", "grok47fast-high@grok",
+    "opus55-low@claude", "opus55-medium@claude", "opus55-high@claude",
+    "opus55-xhigh@claude", "opus55-max@claude",
+]
+expected_removed = sorted(
+    [f"sol-{e}@codex" for e in ("low", "medium", "high", "xhigh", "max", "ultra")]
+    + [f"luna-{e}@codex" for e in ("low", "medium", "high", "xhigh", "max")]
+    + [f"opus-{e}@claude" for e in ("low", "medium", "high", "xhigh", "max")]
+    + ["grok46-high@grok"]
+)
+record(
+    "the refresh proposes the current generation of every harness",
+    sorted(plan["new"]) == sorted(expected_new) and plan["removed"] == expected_removed,
+    f"new={sorted(plan['new'])} removed={plan['removed']}",
+)
+
+untouched = ([f"astra-{e}@codex" for e in ("low", "medium", "high", "xhigh", "max", "ultra")]
+             + [f"terra-{e}@codex" for e in ("low", "medium", "high", "xhigh", "max", "ultra")]
+             + ["flash-low@agy", "flash-medium@agy", "flash-high@agy", "haiku-high@claude"]
+             + [f"fable-{e}@claude" for e in ("low", "medium", "high", "xhigh", "max")]
+             + [f"sonnet-{e}@claude" for e in ("low", "medium", "high", "xhigh", "max")])
+record(
+    "a current-generation lane the catalog already has keeps every field",
+    all(refreshed["lanes"].get(name) == frozen_lanes["lanes"][name] for name in untouched),
+    repr([name for name in untouched
+          if refreshed["lanes"].get(name) != frozen_lanes["lanes"][name]]),
+)
+
+not_shown = ("gpt-5.5", "gemini-3.7-flash", "gemini-3.6-flash", "grok-4.6", "grok-4.5",
+             "claude-sonnet-4-6", "claude-opus-4-6-thinking", "gpt-oss-120b",
+             "gpt-reserve", "codex-auto-review")
+proposed_models = {refreshed["lanes"][name]["model"] for name in plan["new"]}
+record(
+    "a superseded, other-vendor or hidden model gets no lane",
+    not any(model.startswith(slug) for slug in not_shown for model in proposed_models),
+    repr(sorted(proposed_models)),
+)
+
+inherited = []
+for successor, predecessor in (("sol6-high@codex", "sol-high@codex"),
+                               ("sol6-ultra@codex", "sol-ultra@codex"),
+                               ("luna6-max@codex", "luna-max@codex"),
+                               ("opus55-low@claude", "opus-low@claude"),
+                               ("grok47-high@grok", "grok46-high@grok")):
+    new, old = refreshed["lanes"][successor], frozen_lanes["lanes"][predecessor]
+    inherited.append(
+        new["tier"] == old["tier"]
+        and new.get("order") == old.get("order")
+        and new.get("enabled", True) == old.get("enabled", True)
+        and (new["meter"], new["meter_weight"], new["timeout"])
+        == (old["meter"], old["meter_weight"], old["timeout"])
+        and predecessor in new["note"] and "UNMEASURED" in new["note"]
+    )
+record(
+    "a successor takes its predecessor's place and says what it copied",
+    all(inherited),
+    repr(inherited),
+)
+
+new_records = [refreshed["lanes"][name] for name in plan["new"]]
+record(
+    "every new lane is unpriced, and an ultra lane is generated off",
+    all(lane["price"] == {"in": None, "cache_read": None, "cache_write": None, "out": None}
+        and "UNPRICED" in lane["note"] for lane in new_records)
+    and all(lane.get("enabled") is False
+            for lane in new_records if lane["effort"] == "ultra"),
+    repr([lane for lane in new_records if lane["effort"] == "ultra"]),
+)
+
+record(
+    "a lane with no predecessor starts carried on tier 1 and copies its harness",
+    refreshed["lanes"]["pro31-high@agy"]["tier"] == 1
+    and "enabled" not in refreshed["lanes"]["pro31-high@agy"]
+    and refreshed["lanes"]["pro31-high@agy"]["meter"] == "agy-gemini"
+    and "flash-high@agy" in refreshed["lanes"]["pro31-high@agy"]["note"]
+    and refreshed["lanes"]["grok47fast-high@grok"]["tier"] == 1,
+    repr(refreshed["lanes"]["pro31-high@agy"]),
+)
+
+catalog.validate_lanes(copy.deepcopy(refreshed), "refreshed")
+again_discovery = discover.discover(refreshed, fixture_dir=REFRESH_DIR)
+again, again_plan = discover.refresh_catalog(
+    refreshed, again_discovery, published_models=published
+)
+record(
+    "a second refresh on the saved catalog proposes nothing",
+    again_plan["new"] == [] and again_plan["removed"] == [] and again == refreshed,
+    repr(again_plan),
+)
+
+remapped = discover.map_lanes(refresh_discovery, refreshed)
+adopted = {m["slug"] for m in remapped["models"] if m["lanes"]}
+record(
+    "the drift notices read the refreshed catalog, not the one on disk",
+    {"gpt-6-sol", "gpt-6-luna", "grok-4.7", "gemini-3.1-pro"} <= adopted
+    and not any(u["slug"] in ("gpt-6-sol", "grok-4.7") for u in remapped["unmapped"])
+    and remapped["retired"] == [],
+    repr(sorted(adopted)),
+)
 
 sys.exit(1 if fails else 0)

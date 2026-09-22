@@ -45,6 +45,15 @@ Lane generation (--efforts <model>):
     for the model, with shared price block above.
   - Generates ultra with enabled: false and documented basis.
 
+Generation (ticket 33):
+  - Every model carries its `level` (the slug with the version removed) and its
+    `version`, and says whether it is `superseded`: by the harness itself
+    (codex sets `upgrade` on a model it is retiring) or by another model of the
+    same level at a higher version. The rest are the current generation.
+  - `refresh_catalog` proposes, in memory, the catalog that holds a lane for
+    every effort of every current-generation model, with the superseded models'
+    lanes gone and each successor in its predecessor's place.
+
 Exit status:
   Always exits 0. This script is a reporting tool, never a pipeline gate.
   Missing harness binaries or failing commands are reported inline.
@@ -66,7 +75,11 @@ Exit status:
         "lane": "<lane_name>" | "none",
         "lanes": ["<lane_name>"],
         "efforts": ["<effort>"],
-        "reason": "<string>" | null
+        "reason": "<string>" | null,
+        "level": "<slug with the version removed>",
+        "version": [<int>],
+        "superseded": "<why>" | null,
+        "members": {"<effort>": "<slug>"}
       }
     ],
     "unmapped": [
@@ -92,6 +105,7 @@ Test seams:
     (codex-debug-models.json, agy-models.txt, grok-models.txt, claude-help.txt).
 """
 import argparse
+import copy
 import json
 import os
 import re
@@ -122,6 +136,30 @@ HARNESS_COMMANDS = {
     "grok": ["grok", "models"],
     "claude": ["claude", "--help"],
 }
+
+# Each harness runs its own vendor's models. agy also serves other vendors'
+# models (`claude-sonnet-4-6`, `gpt-oss-120b-medium`); they stay in the report,
+# and the refresh leaves them alone — a lane on somebody else's model through
+# agy is not what this catalog is for (ticket 33).
+HARNESS_VENDOR = {"codex": "gpt", "claude": "claude", "agy": "gemini", "grok": "grok"}
+
+# A slug component that is a version: `6`, `5.6`, and the `5` `5` of
+# `claude-opus-5-5`.
+VERSION_PART = re.compile(r"^\d+(?:\.\d+)*$")
+
+# The words that name a whole family rather than one model. A new lane is named
+# after the model, so `gpt-6-sol` gives `sol6`; where the family word is the
+# model's own name, as grok's is, the name keeps it and gives `grok47`.
+VENDOR_WORDS = ("gpt", "claude", "gemini", "grok")
+
+# An ultra lane is generated off and says why: no source scores it, and its
+# automatic task delegation contradicts the worker preamble (ticket 15).
+ULTRA_BASIS = (
+    "unscoreable: no published source reports ultra on any benchmark for any model; "
+    "ultra is maximum reasoning with automatic task delegation, which contradicts worker preamble "
+    "('Do not delegate, spawn subagents, or call other agents'); "
+    "meter_weight is a property of the plan, not the model (no benchmark can supply it)"
+)
 
 # Claude models that take no effort level at all. The Claude Code docs
 # (https://code.claude.com/docs/en/model-config, checked 2026-09-12) list the models that take effort and say "Models not
@@ -161,6 +199,9 @@ def parse_codex_output(text):
             "display_name": item.get("display_name"),
             "efforts": efforts,
             "supported_reasoning_levels": item.get("supported_reasoning_levels", []),
+            # codex names the replacement of a model it is retiring; that is the
+            # harness saying the model is superseded (ticket 33)
+            "upgrade": item.get("upgrade"),
         })
     return models
 
@@ -339,6 +380,73 @@ def group_agy_models(raw_models):
     return out
 
 
+def model_level(slug):
+    """(level, version) for a model slug: the slug with its version taken out,
+    and that version as a tuple of whole numbers.
+
+    `gpt-6-sol` and `gpt-5.6-sol` are both level `gpt-sol`, at (6,) and (5, 6);
+    `claude-opus-5-5` is `claude-opus` at (5, 5); a slug with no version is its
+    own level, at (). The agy effort suffix comes off first, so one slug family
+    has one level (`catalog.agy_family`).
+    """
+    base, _effort = catalog.agy_family(slug or "")
+    words, version = [], []
+    for part in base.split("-"):
+        if VERSION_PART.match(part):
+            version.extend(int(number) for number in part.split("."))
+        else:
+            words.append(part)
+    return "-".join(words), tuple(version)
+
+
+def mark_generation(models, harness):
+    """Give each model its `level`, `version` and `superseded`, in place.
+
+    A model is superseded when the harness says so — codex names the model that
+    replaces one it is retiring — or when another model on the same harness has
+    the same level at a higher version. The rest are the current generation.
+    """
+    newest = {}
+    for item in models:
+        level, version = model_level(item["slug"])
+        item["level"], item["version"] = level, list(version)
+        item["superseded"] = None
+        best = newest.get(level)
+        if best is None or version > tuple(best["version"]):
+            newest[level] = item
+    for item in models:
+        upgrade = item.get("upgrade")
+        replacement = upgrade.get("model") if isinstance(upgrade, dict) else None
+        if replacement:
+            item["superseded"] = f"{harness} replaces it with {replacement}"
+            continue
+        best = newest[item["level"]]
+        if best is not item:
+            item["superseded"] = f"{best['slug']} is newer"
+    return models
+
+
+def lane_stem(level, version, levels=()):
+    """The word a new lane's name starts with: the level's own word and the
+    version's digits, so `gpt-sol` at (6,) gives `sol6`, `claude-opus` at (5, 5)
+    gives `opus55` and `grok` at (4, 7) gives `grok47`.
+
+    `levels` is the harness's current-generation levels. A level that extends
+    one of them — `grok-build-fast` extends `grok` — takes that level's stem and
+    the word that tells it apart, so `grok-4.7-build-fast` reads `grok47fast`
+    beside `grok47`. A superseded level shapes no name: codex still lists
+    `gpt-5.5`, whose level is the bare `gpt`, and `gpt-6-sol` is `sol6` all the
+    same.
+    """
+    for other in sorted(levels, key=len, reverse=True):
+        if other != level and level.startswith(other + "-"):
+            tail = level[len(other) + 1:].split("-")[-1]
+            return lane_stem(other, version) + tail
+    digits = "".join(str(number) for number in version)
+    words = [word for word in level.split("-") if word not in VENDOR_WORDS]
+    return (words or level.split("-"))[-1] + digits
+
+
 def query_harness(harness, fixture_dir=None, runner=None):
     """Queries a single harness for its available models.
 
@@ -423,8 +531,8 @@ def discover(cat, present=None, fixture_dir=None, runner=None):
                 "error": None,
                 "discovered_count": len(claude_models),
             }
-            for slug, lane_names in claude_models.items():
-                models_doc.append({
+            claude_doc = [
+                {
                     "harness": "claude",
                     "slug": slug,
                     "display_name": None,
@@ -432,7 +540,11 @@ def discover(cat, present=None, fixture_dir=None, runner=None):
                     "lanes": lane_names,
                     "efforts": list(efforts) if model_takes_effort("claude", slug) else [],
                     "reason": "hand-named, undiscoverable",
-                })
+                    "members": {},
+                }
+                for slug, lane_names in claude_models.items()
+            ]
+            models_doc.extend(mark_generation(claude_doc, "claude"))
             continue
 
         raw_models, err = query_harness(harness, fixture_dir=fixture_dir, runner=runner)
@@ -451,6 +563,7 @@ def discover(cat, present=None, fixture_dir=None, runner=None):
         }
 
         discovered_slugs = set()
+        mark_generation(raw_models, harness)
         for item in raw_models:
             slug = item["slug"]
             display_name = item.get("display_name")
@@ -472,6 +585,12 @@ def discover(cat, present=None, fixture_dir=None, runner=None):
                 "lanes": matched_lanes,
                 "efforts": list(item.get("efforts") or []),
                 "reason": None,
+                "level": item["level"],
+                "version": item["version"],
+                "superseded": item["superseded"],
+                # agy names the effort in the slug, so a family says which slug
+                # each effort takes; a family of one has no effort and no entry
+                "members": {e: m for e, m in (item.get("members") or {}).items() if e},
             })
 
             if not matched_lanes:
@@ -498,6 +617,298 @@ def discover(cat, present=None, fixture_dir=None, runner=None):
         "unmapped": unmapped,
         "retired": retired,
     }
+
+
+# --- the refresh: bring the catalog to the current generation (ticket 33) ----
+
+# A price is local knowledge read off a vendor's page, so a new lane starts with
+# none rather than with its predecessor's, which would be a wrong number that
+# reads like a measured one.
+UNPRICED_NOTE = (
+    "UNPRICED: the price keys stay null until the vendor's page is read; a price is "
+    "never copied from another model."
+)
+
+# One published name for one claude model: `Claude Opus 5.5`. Claude Code names
+# no model, so the benchmark rows are the only list of them there is.
+PUBLISHED_CLAUDE = re.compile(r"claude\s+([A-Za-z]+)\s+([0-9]+(?:\.[0-9]+)*)", re.I)
+
+
+def lane_model(harness, model, effort):
+    """The model string a lane on this model at this effort carries. agy names
+    the effort in the slug, so the family says which slug an effort takes."""
+    if harness == "agy":
+        return (model.get("members") or {}).get(effort, model["slug"])
+    return model["slug"]
+
+
+def model_slugs(model):
+    """Every slug a model answers for: an agy family answers for each member."""
+    return set((model.get("members") or {}).values()) or {model["slug"]}
+
+
+def claude_generation(models, published_models):
+    """The claude models the refresh works from, newest version per level.
+
+    Claude Code lists no model, so the benchmark rows name them: a published
+    `Claude <Level> <version>` denotes `claude-<level>-<major>[-<minor>]`, and
+    only for a level the catalog already runs on the claude harness. A level
+    keeps its catalog model until a newer version of it is named (ticket 33).
+    """
+    out = [copy.deepcopy(item) for item in models]
+    current = {}
+    for item in out:
+        best = current.get(item["level"])
+        if best is None or tuple(item["version"]) > tuple(best["version"]):
+            current[item["level"]] = item
+    newer = {}
+    for name in published_models or ():
+        found = PUBLISHED_CLAUDE.fullmatch(str(name).strip())
+        if not found:
+            continue
+        level = f"claude-{found.group(1).lower()}"
+        version = tuple(int(number) for number in found.group(2).split("."))
+        base = current.get(level)
+        if base is None or version <= tuple(base["version"]):
+            continue
+        if level not in newer or version > newer[level][0]:
+            newer[level] = (version, found.group(2))
+    for level, (version, text) in newer.items():
+        base = current[level]
+        slug = "-".join([*level.split("-"), *text.split(".")])
+        base["superseded"] = f"{slug} is newer"
+        out.append({
+            "harness": "claude",
+            "slug": slug,
+            "display_name": None,
+            "lane": "none",
+            "lanes": [],
+            # the level's efforts: one model of a level takes what the level takes
+            "efforts": list(base["efforts"]) if model_takes_effort("claude", slug) else [],
+            "reason": "named by the benchmark rows",
+            "level": level,
+            "version": list(version),
+            "superseded": None,
+            "members": {},
+        })
+    return out
+
+
+def _predecessor(model, models, lanes):
+    """The superseded model whose lanes this model takes over: the same level on
+    the same harness, at the highest version the catalog still runs."""
+    best = None
+    for item in models:
+        if item is model or item["harness"] != model["harness"] or item["level"] != model["level"]:
+            continue
+        if not item.get("superseded"):
+            continue
+        slugs = model_slugs(item)
+        if not any(lane.get("harness") == item["harness"] and lane.get("model") in slugs
+                   for lane in lanes.values()):
+            continue
+        if best is None or tuple(item["version"]) > tuple(best["version"]):
+            best = item
+    return best
+
+
+def _free_name(stem, effort, harness, *taken):
+    """`<stem>-<effort>@<harness>`, kept clear of a lane another model runs.
+
+    Two models of one harness deriving the same stem is the one way this name
+    can collide; a counter after the stem is the smallest thing that separates
+    them and stays the same on every run.
+    """
+    name = f"{stem}-{effort}@{harness}"
+    counter = 1
+    while any(name in names for names in taken):
+        counter += 1
+        name = f"{stem}{counter}-{effort}@{harness}"
+    return name
+
+
+def _donor(harness, effort, lanes, new_lanes, leaving):
+    """The lane a new lane copies its meter, weight and timeout from: the same
+    harness's lane at the same effort.
+
+    A lane this refresh removes is no use as the note's reference, so a lane it
+    adds stands in; failing both, the harness's first lane at any effort does,
+    because a figure from the same harness beats no figure at all.
+    """
+    candidates = [(name, lane) for name, lane in lanes.items()
+                  if lane.get("harness") == harness and name not in leaving]
+    candidates += [(name, lane) for name, lane in new_lanes.items() if lane["harness"] == harness]
+    for name, lane in candidates:
+        if lane.get("effort") == effort:
+            return name, lane
+    return candidates[0] if candidates else (None, None)
+
+
+def _lane_stem_of(lane_name):
+    """`sol` from `sol-high@codex`: what the start page prints as `sol-*@codex`."""
+    return lane_name.rsplit("@", 1)[0].rsplit("-", 1)[0]
+
+
+def refresh_catalog(lanes_doc, discovery, published_models=()):
+    """(refreshed lanes document, the changes it proposes).
+
+    The catalog the wizard then edits: a lane for every effort of every
+    current-generation model of every harness, the superseded models' lanes
+    gone, and every new lane with a predecessor in that predecessor's place.
+    Each harness offers its own vendor's models only, and a model its harness
+    hides never reaches here.
+
+    Nothing is written: the wizard's confirm writes, and quitting writes
+    nothing (ticket 33).
+    """
+    doc = copy.deepcopy(lanes_doc)
+    lanes = doc.get("lanes") or {}
+    models = [item for item in (discovery.get("models") or []) if isinstance(item, dict)]
+    models = ([item for item in models if item.get("harness") != "claude"]
+              + claude_generation([item for item in models if item.get("harness") == "claude"],
+                                  published_models))
+    own = [item for item in models
+           if item.get("level")
+           and item["slug"].split("-")[0] == HARNESS_VENDOR.get(item.get("harness"))]
+
+    levels = {}
+    for item in own:
+        if not item.get("superseded"):
+            levels.setdefault(item["harness"], set()).add(item["level"])
+
+    by_key = {(lane.get("harness"), lane.get("model"), lane.get("effort")): name
+              for name, lane in lanes.items()}
+    leaving = {}
+    for item in own:
+        if not item.get("superseded"):
+            continue
+        slugs = model_slugs(item)
+        for name, lane in lanes.items():
+            if lane.get("harness") == item["harness"] and lane.get("model") in slugs:
+                leaving[name] = item
+
+    plan_models, new_lanes, successors = [], {}, {}
+    for item in own:
+        if item.get("superseded"):
+            continue
+        harness = item["harness"]
+        stem = lane_stem(item["level"], tuple(item["version"]), levels[harness])
+        predecessor = _predecessor(item, own, lanes)
+        added, replaced = [], []
+        for effort in item.get("efforts") or []:
+            model_text = lane_model(harness, item, effort)
+            if (harness, model_text, effort) in by_key:
+                continue
+            name = _free_name(stem, effort, harness, lanes, new_lanes)
+            pred_name = None
+            if predecessor is not None:
+                pred_name = by_key.get(
+                    (harness, lane_model(harness, predecessor, effort), effort)
+                )
+            if pred_name:
+                source_name, source = pred_name, lanes[pred_name]
+                basis = (f"{item['slug']} supersedes {predecessor['slug']} on {harness}; "
+                         f"takes the place of {pred_name}")
+            else:
+                source_name, source = _donor(harness, effort, lanes, new_lanes, set(leaving))
+                basis = f"{item['slug']} is new on {harness} at effort '{effort}'"
+            if source is None:
+                # nothing on this harness to copy a weight or a timeout from
+                continue
+            record = {
+                "harness": harness,
+                "model": model_text,
+                "effort": effort,
+                "meter": source["meter"],
+                "meter_weight": source["meter_weight"],
+                "timeout": source["timeout"],
+                "price": {"in": None, "cache_read": None, "cache_write": None, "out": None},
+                # a lane with no predecessor is marked on no tier page, so it
+                # lands on tier 1 unless Orin marks it higher
+                "tier": source["tier"] if pred_name else 1,
+                "basis": ULTRA_BASIS if effort == "ultra" else basis,
+                "note": (f"UNMEASURED: meter_weight and timeout copied from {source_name}. "
+                         f"{UNPRICED_NOTE}"),
+            }
+            if pred_name and "order" in source:
+                record["order"] = source["order"]
+            if effort == "ultra" or (pred_name and source.get("enabled") is False):
+                record["enabled"] = False
+            new_lanes[name] = record
+            added.append(name)
+            if pred_name:
+                successors.setdefault(pred_name, []).append(name)
+                replaced.append(pred_name)
+        if added:
+            plan_models.append({
+                "harness": harness,
+                "model": item["slug"],
+                "predecessor": predecessor["slug"] if predecessor else None,
+                "stem": stem,
+                "predecessor_stem": _lane_stem_of(replaced[0]) if replaced else None,
+                "new": added,
+                "replaced": replaced,
+            })
+
+    ordered = {}
+    for name, lane in lanes.items():
+        if name in leaving:
+            for successor in successors.get(name, []):
+                ordered[successor] = new_lanes[successor]
+            continue
+        ordered[name] = lane
+    for name, record in new_lanes.items():
+        ordered.setdefault(name, record)
+    doc["lanes"] = ordered
+    return doc, {
+        "models": plan_models,
+        "new": list(new_lanes),
+        "removed": sorted(leaving),
+    }
+
+
+def map_lanes(discovery, lanes_doc):
+    """A discovery result whose lane mapping reads the given catalog.
+
+    The refresh changes the catalog in memory, so the drift the start page
+    states has to be drift against the catalog the wizard is about to write and
+    not against the one it read (ticket 33).
+    """
+    result = copy.deepcopy(discovery)
+    lane_map = {}
+    for lane_name, lane in (lanes_doc.get("lanes") or {}).items():
+        if isinstance(lane, dict) and lane.get("harness") and lane.get("model"):
+            lane_map.setdefault((lane["harness"], lane["model"]), []).append(lane_name)
+    # a harness that answered is a harness whose listing is the whole list, so a
+    # lane of its that is not on it is a lane on a retired model
+    slugs = {
+        name: set() for name, info in (result.get("harnesses") or {}).items()
+        if isinstance(info, dict) and info.get("status") == "ok" and name != "claude"
+    }
+    unmapped = []
+    for item in result.get("models") or []:
+        harness = item.get("harness")
+        members = model_slugs(item)
+        if harness in slugs:
+            slugs[harness].update(members)
+        matched = [name for slug in sorted(members) for name in lane_map.get((harness, slug), [])]
+        item["lane"] = ", ".join(matched) if matched else "none"
+        item["lanes"] = matched
+        if not matched and harness != "claude":
+            unmapped.append({
+                "harness": harness,
+                "slug": item.get("slug"),
+                "display_name": item.get("display_name"),
+            })
+    retired = []
+    for lane_name, lane in (lanes_doc.get("lanes") or {}).items():
+        harness = lane.get("harness")
+        if harness == "claude" or harness not in slugs:
+            continue
+        if lane.get("model") not in slugs[harness]:
+            retired.append({"lane": lane_name, "harness": harness, "model": lane.get("model")})
+    result["unmapped"], result["retired"] = unmapped, retired
+    return result
 
 
 def format_report(result):
@@ -590,12 +1001,7 @@ def generate_efforts_stanzas(harness, slug, efforts):
             "tier": "TODO: tier (1-4)",
         }
         if effort == "ultra":
-            stanza["basis"] = (
-                "unscoreable: no published source reports ultra on any benchmark for any model; "
-                "ultra is maximum reasoning with automatic task delegation, which contradicts worker preamble "
-                "('Do not delegate, spawn subagents, or call other agents'); "
-                "meter_weight is a property of the plan, not the model (no benchmark can supply it)"
-            )
+            stanza["basis"] = ULTRA_BASIS
             stanza["enabled"] = False
         else:
             stanza["basis"] = "meter_weight is a property of the plan, not the model (no benchmark can supply it)"
