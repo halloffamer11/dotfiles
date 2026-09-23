@@ -22,6 +22,7 @@ DISCOVER_PY = os.path.join(DELEGATE_DIR, "discover.py")
 CATALOG_PY = os.path.join(DELEGATE_DIR, "catalog.py")
 
 sys.path.insert(0, DELEGATE_DIR)
+import bench
 import catalog
 import discover
 import setup_tui
@@ -831,7 +832,6 @@ for successor, predecessor in (("sol6-high@codex", "sol-high@codex"),
     inherited.append(
         new["tier"] == old["tier"]
         and new.get("order") == old.get("order")
-        and new.get("enabled", True) == old.get("enabled", True)
         and (new["meter"], new["meter_weight"], new["timeout"])
         == (old["meter"], old["meter_weight"], old["timeout"])
         and predecessor in new["note"] and "UNMEASURED" in new["note"]
@@ -850,6 +850,37 @@ record(
     and all(lane.get("enabled") is False
             for lane in new_records if lane["effort"] == "ultra"),
     repr([lane for lane in new_records if lane["effort"] == "ultra"]),
+)
+
+# A predecessor switched off at an effort is a verdict on that model, not on the
+# one replacing it: every effort of a new model reaches the screening page, and
+# only ultra starts off (ticket 35).
+off_predecessors = [name for name in ("opus-low@claude", "opus-medium@claude",
+                                      "sol-low@codex", "luna-low@codex")
+                    if frozen_lanes["lanes"][name].get("enabled") is False]
+started_off = [name for name in plan["new"] if refreshed["lanes"][name].get("enabled") is False]
+record(
+    "every new lane starts carried but ultra, keeping its predecessor's tier and order",
+    len(off_predecessors) == 4
+    and started_off == ["sol6-ultra@codex"]
+    and all("enabled" not in refreshed["lanes"][name]
+            for name in plan["new"] if refreshed["lanes"][name]["effort"] != "ultra")
+    and refreshed["lanes"]["opus55-medium@claude"]["tier"]
+    == frozen_lanes["lanes"]["opus-medium@claude"]["tier"],
+    repr(started_off),
+)
+
+# The carry page's "off in the catalog" is a claim about the file, so no new
+# lane may make it: a new lane records no `enabled` at all, and ultra reads as
+# ultra (ticket 35).
+new_reasons = {name: bench.carry_reason(decision)
+               for name, decision in bench.propose_enabled(refreshed, frozen_rows).items()
+               if name in set(plan["new"])}
+record(
+    "no new lane's carry reason claims catalog state the file does not hold",
+    not any("in the catalog" in reason for reason in new_reasons.values())
+    and new_reasons["sol6-ultra@codex"] == bench.ULTRA_REASON,
+    repr(sorted(set(new_reasons.values()))),
 )
 
 record(

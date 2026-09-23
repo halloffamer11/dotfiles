@@ -769,6 +769,10 @@ def refresh_catalog(lanes_doc, discovery, published_models=()):
     Each harness offers its own vendor's models only, and a model its harness
     hides never reaches here.
 
+    A new lane starts carried, `ultra` apart, so every effort of every current
+    model reaches the screening page (ticket 35). It takes its predecessor's
+    Tier, Order, Meter, weight and timeout, and not its `enabled`.
+
     Nothing is written: the wizard's confirm writes, and quitting writes
     nothing (ticket 33).
     """
@@ -841,7 +845,12 @@ def refresh_catalog(lanes_doc, discovery, published_models=()):
             }
             if pred_name and "order" in source:
                 record["order"] = source["order"]
-            if effort == "ultra" or (pred_name and source.get("enabled") is False):
+            if effort == "ultra":
+                # A new lane starts carried, so every effort of a new model is on
+                # the screening page: `enabled` is the one field a successor does
+                # not inherit, because a predecessor switched off at an effort is
+                # a verdict on that model, not on this one (ticket 35). `ultra`
+                # is never carried (ticket 15).
                 record["enabled"] = False
             new_lanes[name] = record
             added.append(name)
