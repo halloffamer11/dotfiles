@@ -299,6 +299,17 @@ def rank(cls, cat, meters, present, tier=None):
         ceiling=ceiling,
         reason_label=cls,
     )
+    # What the Pick is, and what it is not (Orin, 2026-09-22; ticket 36). A Lane
+    # is one model at one effort, so the effort is fixed by the Lane the catalog
+    # holds: this returns a Lane, never an effort, and nothing here chooses one.
+    # If an orchestrator is ever trusted to choose an effort, one path already
+    # exists and needs no new rule:
+    #   delegate.py dispatch --lane sol6-high@codex --effort xhigh --class impl
+    # overrides the effort for that one named job. An effort the harness does not
+    # offer is refused, and agy ignores the override, because agy carries the
+    # effort in the model name. A standing Class-to-effort rule, were one ever
+    # wanted, belongs in `assets/classes.md` beside the Class judgment, not here:
+    # ranking would still pick the Lane.
     if rows and rows[0]["pick"]:
         return rows
     if ceiling is None or not catalog.overflow_enabled(routing):
