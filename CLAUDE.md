@@ -28,15 +28,17 @@ shows the current generation of every harness, at every effort, on the carry pag
 - The benchmark page places any Lane that has rows, and `o` rebuilds the page from the
   wizard's current state (ticket 35).
 - New claude Lanes get their agent files, and `make delegate-wizard` relinks them.
+- The benchmark page has "Reset every tier" and a "Price per model" chart, and a project
+  file that names an off or removed Lane warns and never stops routing (ticket 36).
 
 The terms are in `CONTEXT.md` (**Level**, **Superseded**, **Generation**). agy shows only
 its Gemini models; Orin: "ignore the Gemini Claude pool".
 
-Orin's steps: `make -C ~/dotfiles configs`, then one `delegate global` run. The session's
-steps after that run:
-- prices for the new Lanes, from
-  `.scratch/delegate-redesign/research/2026-09-22-new-model-prices.md`;
-- this checkout's `.delegate/routing.json` `project_order`, moved from `luna-*` to `luna6-*`.
+Orin ran the first refreshed `delegate global` on 2026-09-22 (`776df1a`). The new Lanes are
+priced from `.scratch/delegate-redesign/research/2026-09-22-new-model-prices.md`, except
+`grok47fast-high` (no published price). This checkout's own `project_order` is
+`["luna6-max@codex"]`. Orin's open question, not yet a ticket: how to order Lanes inside
+a Tier (capability against cost).
 
 **Dashboard: `deck` is production and on main** (merged 2026-09-20, `0ffffea`). Orin
 accepted the layout `deck` (ticket 11) and said "lock in the deck layout as the production

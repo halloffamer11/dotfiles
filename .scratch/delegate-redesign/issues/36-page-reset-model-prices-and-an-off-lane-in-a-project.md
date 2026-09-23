@@ -85,7 +85,7 @@ Paths are relative to `agents/skills/delegate/`:
 
 ## Acceptance
 
-**Status:** ready-for-agent
+**Status:** implemented 2026-09-22 (`47439fb`, `c3acf00`, `53261d4`, `bc18235`, `7b9c0b4`) on `worktree/delegate-redesign`, rebased onto Orin's `776df1a`; all boxes ticked. The merge is Orin's, and he may overrule the session decisions under Landed. Polish queued: the luna row's input label overlaps its link, and the value labels mix `$10.0` with `$2`.
 
 - [x] "Reset every tier" asks once. After yes, the page holds no Tier, off, manual
   mark or moved line for this catalog key, and it shows the catalog's own state.
@@ -101,7 +101,7 @@ Paths are relative to `agents/skills/delegate/`:
   ranks there. A project save drops the entry.
 - [x] All 14 suites pass.
 
-## Landed
+## Landed, 2026-09-22
 
 One commit per item.
 
