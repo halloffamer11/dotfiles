@@ -15,7 +15,7 @@ Machine configuration and agent tooling managed as one Git repository.
 
 ## Active work
 
-**Current generation and the `delegate` command** (redesign tickets 33-34, 2026-09-22).
+**Current generation and the `delegate` command** (redesign tickets 33-35, 2026-09-22).
 `delegate global` runs the wizard, and `delegate project` opens the dashboard for the Git
 project of the current directory. `make configs` links the command into `~/.local/bin`.
 
@@ -23,7 +23,10 @@ Ticket 33 changed what the wizard does at start. It refreshes the Artificial Ana
 rows (cached 24 h in `~/.cache/delegate/bench/aa/`) and each harness's model list, then
 shows the current generation of every harness, at every effort, on the carry page.
 - A superseded model's Lanes leave the catalog on save.
-- A successor Lane takes its predecessor's Tier, Order and carried state.
+- A new Lane starts carried, except `ultra`, and a successor takes its predecessor's Tier
+  and Order (ticket 35).
+- The benchmark page places any Lane that has rows, and `o` rebuilds the page from the
+  wizard's current state (ticket 35).
 - New claude Lanes get their agent files, and `make delegate-wizard` relinks them.
 
 The terms are in `CONTEXT.md` (**Level**, **Superseded**, **Generation**). agy shows only

@@ -57,7 +57,7 @@ Paths are relative to `agents/skills/delegate/`:
 
 ## Acceptance
 
-**Status:** ready-for-agent
+**Status:** implemented 2026-09-22 (`0c2f800`, `bda124b`, `7c02a7e`, `61a6c07`) on `worktree/delegate-redesign`; all boxes ticked. The merge and the rerun of `delegate global` are Orin's, and he may overrule the session decisions under Landed.
 
 - [x] On the 2026-09-22 fixtures, every new non-`ultra` Lane starts carried, with its
   predecessor's Tier and Order. Every `ultra` Lane starts off.
@@ -73,7 +73,7 @@ Paths are relative to `agents/skills/delegate/`:
   hold.
 - [x] All 14 suites pass.
 
-## Landed
+## Landed, 2026-09-22
 
 One commit per cause.
 
