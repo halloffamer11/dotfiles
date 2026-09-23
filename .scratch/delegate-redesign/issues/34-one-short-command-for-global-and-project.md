@@ -42,7 +42,7 @@ The session decisions below are Orin's to overrule.
 
 ## Acceptance
 
-**Status:** implemented 2026-09-22 (`44b21b5`) on `worktree/delegate-redesign`; all boxes ticked. The merge and `make configs`, which links `~/.local/bin/delegate`, are Orin's, and he may overrule the session decisions under Landed.
+**Status:** landed 2026-09-22 (`44b21b5`); merged and pushed by Orin (`71c6661`), and `make configs` has linked `~/.local/bin/delegate`. All boxes ticked. Orin may overrule the session decisions under Landed.
 
 - [x] `delegate global` runs the wizard target in the command's own checkout, from any
   directory.

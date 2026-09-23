@@ -120,7 +120,7 @@ Out of scope:
 - the carry rule;
 - `discover.py --efforts`, which stays as it is.
 
-Fixtures captured 2026-09-22 are in `.scratch/delegate-redesign/_work/fixtures-2026-09-22/`:
+Fixtures captured 2026-09-22 were in the worktree's git-ignored `_work/`, gone with it; the trimmed copies the tests use are `agents/skills/delegate/tests/fixtures/refresh-2026-09-22/`:
 - `codex-debug-models.json`
 - `agy-models.txt`
 - `grok-models.txt`
@@ -132,7 +132,7 @@ They check the rule on fixtures, never Orin's Tiers.
 
 ## Acceptance
 
-**Status:** implemented 2026-09-22 (`3d90491`, `0af3650`, `f9a2aa0`, `33158fa`, `967462f`, review fixes `f861916`, `01de19d`, `eb9f335`) on `worktree/delegate-redesign`; all boxes ticked. The merge and the first `delegate global` run are Orin's, and he may overrule the session decisions under Landed.
+**Status:** landed 2026-09-22 (`3d90491`, `0af3650`, `f9a2aa0`, `33158fa`, `967462f`, review fixes `f861916`, `01de19d`, `eb9f335`); merged and pushed by Orin (`71c6661`), and his first refreshed `delegate global` run is `776df1a`. All boxes ticked. Ticket 35 changed the inheritance rule below: a new Lane no longer inherits `enabled`. Orin may overrule the session decisions under Landed.
 
 - [x] On today's fixtures and the repo catalog, the refresh proposes these changes:
   - new: `sol6-*@codex` (low…ultra), `luna6-*@codex` (low…max), `opus55-*@claude`

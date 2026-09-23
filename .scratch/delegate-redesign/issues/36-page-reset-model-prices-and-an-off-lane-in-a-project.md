@@ -85,7 +85,7 @@ Paths are relative to `agents/skills/delegate/`:
 
 ## Acceptance
 
-**Status:** implemented 2026-09-22 (`47439fb`, `c3acf00`, `53261d4`, `bc18235`, `7b9c0b4`, label polish `d51816b`, and `a20fb0b`, which repairs five tests that read the stowed catalog by the names Orin's `776df1a` retired) on `worktree/delegate-redesign`, rebased onto `776df1a`; all boxes ticked. The merge is Orin's, and he may overrule the session decisions under Landed.
+**Status:** landed 2026-09-22 (`47439fb`, `c3acf00`, `53261d4`, `bc18235`, `7b9c0b4`, label polish `d51816b`, and `a20fb0b`, which repairs five tests that read the stowed catalog by the names Orin's `776df1a` retired); merged and pushed by Orin (`71c6661`). All boxes ticked. Orin may overrule the session decisions under Landed.
 
 - [x] "Reset every tier" asks once. After yes, the page holds no Tier, off, manual
   mark or moved line for this catalog key, and it shows the catalog's own state.

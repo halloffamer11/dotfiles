@@ -15,121 +15,88 @@ Machine configuration and agent tooling managed as one Git repository.
 
 ## Active work
 
-**Current generation and the `delegate` command** (redesign tickets 33-35, 2026-09-22).
-`delegate global` runs the wizard, and `delegate project` opens the dashboard for the Git
-project of the current directory. `make configs` links the command into `~/.local/bin`.
+**Delegate entry points** (redesign tickets 33-36, landed and pushed 2026-09-22, `71c6661`):
+- `delegate global` runs the setup wizard from any directory.
+- `delegate project` opens the dashboard for the Git project of the current directory.
+- `make configs` links the command into `~/.local/bin`.
 
-Ticket 33 changed what the wizard does at start. It refreshes the Artificial Analysis
-rows (cached 24 h in `~/.cache/delegate/bench/aa/`) and each harness's model list, then
-shows the current generation of every harness, at every effort, on the carry page.
-- A superseded model's Lanes leave the catalog on save.
-- A new Lane starts carried, except `ultra`, and a successor takes its predecessor's Tier
-  and Order (ticket 35).
-- The benchmark page places any Lane that has rows, and `o` rebuilds the page from the
-  wizard's current state (ticket 35).
-- New claude Lanes get their agent files, and `make delegate-wizard` relinks them.
-- The benchmark page has "Reset every tier" and a "Price per model" chart, and a project
-  file that names an off or removed Lane warns and never stops routing (ticket 36).
+At start the wizard refreshes the Artificial Analysis rows (cached 24 h in
+`~/.cache/delegate/bench/aa/`, falling back to `.scratch/delegate-redesign/_data/`) and
+each harness's model list, then screens the current generation. The rules are in
+tickets 33 and 35 and in the skill `CLAUDE.md`. Orin's first refreshed run is `776df1a`.
+- The new Lanes are priced from
+  `.scratch/delegate-redesign/research/2026-09-22-new-model-prices.md`. The exception is
+  `grok47fast-high`, which has no published price.
+- This checkout's git-ignored `.delegate/routing.json` holds
+  `project_order: ["luna6-max@codex"]`.
 
-The terms are in `CONTEXT.md` (**Level**, **Superseded**, **Generation**). agy shows only
-its Gemini models; Orin: "ignore the Gemini Claude pool".
+**Dashboard `deck`** (production since 2026-09-20). Its spec is
+`docs/superpowers/specs/2026-09-13-delegate-dashboard-plugin.md`, whose branch-only rule
+Orin replaced on 2026-09-20. Its tickets are 10-14 of
+`.scratch/delegate-dashboard-plugin/issues/`, and `tools/delegate-dashboard/CLAUDE.md`
+owns the keys, the model boundary and the save rules. A project's `.delegate/` policy
+never goes to main. Open, all Orin's:
+- his confirmations in tickets 12 and 13 (`v` does nothing; staging, undo and save
+  driven once);
+- the worker decisions that ticket 13 lists;
+- ticket 10's one decision (project saves keep the canonical `catalog.edit_catalog`
+  document shape).
 
-Orin ran the first refreshed `delegate global` on 2026-09-22 (`776df1a`). The new Lanes are
-priced from `.scratch/delegate-redesign/research/2026-09-22-new-model-prices.md`, except
-`grok47fast-high` (no published price). This checkout's own `project_order` is
-`["luna6-max@codex"]`. Orin's open question, not yet a ticket: how to order Lanes inside
-a Tier (capability against cost).
+**Delegate redesign:** spec `docs/superpowers/specs/2026-09-08-delegate-redesign.md`, and
+tickets in `.scratch/delegate-redesign/issues/`, each with its decisions and a Landed
+note. Tickets 01-19 and 22-36 are landed. A box left unticked there is Orin's own
+confirmation, and the ticket's Status line names it. Skill context:
+`agents/skills/delegate/CLAUDE.md`. Project policy (tickets 02-04 of the dashboard effort,
+32, 33, 36): `project_order` reorders carried Lanes inside their effective Tiers, and a
+project `lanes.json` may set a Lane's Tier. An entry that names a removed or off Lane
+gives a warning and never stops routing.
 
-**Dashboard: `deck` is production and on main** (merged 2026-09-20, `0ffffea`). Orin
-accepted the layout `deck` (ticket 11) and said "lock in the deck layout as the production
-version". Tickets 12-14 of `.scratch/delegate-dashboard-plugin/issues/` carry the record:
-the one view `deck.py` (12), staged edits with one save, `w` saves and `u`/`U` drop (13),
-and `catalog.plan_edits`, the one public in-memory planning path (14). Open it with
-`delegate project` from any project directory, or `make delegate-dashboard` for a Herdr
-split; the Herdr plugin link points at this checkout. `tools/delegate-dashboard/CLAUDE.md` owns the keys, the model boundary and
-the save rules. Open, all Orin's: his confirmations in tickets 12 and 13 (`v` does nothing;
-staging, undo and save driven once), the worker decisions ticket 13 lists that he may
-overrule, and ticket 10's one decision (project saves keep the canonical
-`catalog.edit_catalog` document shape). A project's `.delegate/` policy never goes to main; this checkout's own `.delegate/` is
-git-ignored. Every dashboard worktree and branch is removed, the remote one included
-(checked 2026-09-22). The Rust monitor `tools/delegate-mon/` stays separate.
+**Other efforts:**
+- `.scratch/delegate-modular/` (complete 2026-09-16; its `CLAUDE.md` holds the record).
+  The root `prompt.md` is its original research brief, kept as scope history.
+- `.scratch/delegate-browser/issues/` 01-07: browser setup and parity. Read the browser
+  section of the skill `CLAUDE.md` and
+  `.scratch/delegate-browser/research/2026-09-10-browser-routes.md` before changing
+  browser dispatch.
+- `.scratch/dotfiles-bootstrap/issues/` 01-05: bootstrap and maintenance, not started.
+  01 and 02 can start now.
 
-**Delegate modular batch complete** (2026-09-16): tickets 01–13 landed, all 13
-script suites and full/focused terminal checks passed, and independent review
-findings were fixed. Orin accepted the Class guide; its humanizer redraft landed
-at `a24d20e`. Read `.scratch/delegate-modular/CLAUDE.md` for the implementation
-record and qualified research pointers. Multi-domain scope and the remaining
-consultation steps are still proposals.
-
-**Retained work** (2026-09-16): `.scratch/dotfiles-bootstrap/issues/` holds five
-unimplemented bootstrap and maintenance tickets, separate from the monitor work.
-`prompt.md` is the original modular-research brief, retained as scope history.
-Orin set the global Gate to 5% on 2026-09-18 (`5be0848`).
-
-**Project routing backend** (tickets 02-04 of the dashboard effort, and ticket 32): a
-project's `.delegate/routing.json` may carry `project_order`, which reorders carried Lanes
-inside their effective Tiers, and its `.delegate/lanes.json` may set a Lane's Tier for that
-project and nothing else (`catalog.load_catalog()`, `catalog.validate_project_routing()`).
-`rank.tier_leaders()` gives one leader per Tier; `rank.meter_observations()` owns Meter
-cache validity. Spec `docs/superpowers/specs/2026-09-13-delegate-dashboard-plugin.md`,
-whose branch-only rule for the UI Orin's word of 2026-09-20 replaced.
-
-**Delegate redesign follow-ups:** spec
-`docs/superpowers/specs/2026-09-08-delegate-redesign.md`; tickets in
-`.scratch/delegate-redesign/issues/`, each carrying its own decisions and a
-"Landed" note; skill context `agents/skills/delegate/CLAUDE.md`. Tickets 01-19 and
-22-28 are landed, and the boxes left unticked there are Orin's own confirmations,
-which each ticket's Status line names.
-
-**Delegate browser follow-ups:** the former `worktree/silver-river-1847` work is
-merged into `main`; that local branch is closed. Tickets 01–07 in
-`.scratch/delegate-browser/issues/` own remaining setup and parity work. Before
-changing browser dispatch, read the browser section of
-`agents/skills/delegate/CLAUDE.md` and
-`.scratch/delegate-browser/research/2026-09-10-browser-routes.md` for the proven
-Mac behavior and outstanding Grok, native Claude, and Omarchy work.
-
-**Live configuration:** `~/.config/delegate/{lanes,routing}.json` are stow links
-into this repo since 2026-09-13. The replaced plain files in
-`~/.config/delegate/_pre-stow-2026-09-13/` are unused. Orin's Tier and Order choices
-are recorded in ticket 28; current values belong to the catalog. `delegate global` edits
-that catalog from any directory. The long form `make -C <checkout> delegate-wizard` still
-works, and `WIZARD_ARGS` adds setup flags. For historical implementation and validation,
-read the redesign tickets rather than reconstructing deleted worker branches.
+**Live configuration:** `~/.config/delegate/{lanes,routing}.json` are stow links into
+this repo. The plain files in `~/.config/delegate/_pre-stow-2026-09-13/` are unused.
+Current Tier and Order values belong to the catalog. The long form
+`make -C <checkout> delegate-wizard` still works, and `WIZARD_ARGS` adds setup flags.
 
 **Open, in priority order:**
 
-1. **Tier 1-2 coverage**: every carried Tier 1-2 Lane drains `codex` (`catalog.py check`
-   warns). Since ticket 29 a Gate-only stop overflows one Tier up, so `scout` and
-   `mechanical` run on Tier 3 Lanes while codex is under the Gate. The coverage itself is
-   Orin's to set in the wizard, or per project since ticket 32.
-2. **Unmeasured figures**: `meter_weight` and `timeout` on the generated Lanes are still
-   copies; each Lane's note says `UNMEASURED` and from which Lane. Prices are sourced
-   since 2026-09-18 (OpenAI and Anthropic pricing pages, named in each note), except the
-   grok and agy cache-write prices. The Lanes that ticket 33 adds start with the note
-   `UNPRICED`; `grok-4.7-build-fast` has no published price.
-3. **The Claude Meter probe hangs inside this project**: `claude -p ... /usage` did not
-   return within 45 s from a dotfiles checkout and takes about 3 s from `~`. The probe
-   now runs from `~` (`fb845e3`); the cause is not known.
-
-Tickets 29-32 merged to `main` on 2026-09-19 (overflow and the one-Meter warning; the agy
-carry rule; agy Remaining and Pace, which reverses modular ticket 13; a project's
-`.delegate/lanes.json`). Each ticket names the session decisions Orin may overrule.
+1. **Tier 1 depends on codex alone.** It holds only `luna6-high@codex`, and
+   `catalog.py check` warns about that. When codex is under the Gate, `scout` and
+   `mechanical` overflow to Tier 3 (ticket 29). The coverage is Orin's to set, in the
+   wizard or per project.
+2. **Order inside a Tier:** Orin's open question (capability against cost), not yet a
+   ticket. The session's position (2026-09-22):
+   - capability belongs in the Tier boundaries, and inside a Tier the cheapest Lane
+     comes first;
+   - Pace and Margin then spread the load;
+   - the real cost is `meter_weight`, which is not measured; the page's "Price per
+     model" chart shows only list price, as a stand-in.
+3. **Unmeasured figures:** `meter_weight` and `timeout` on the generated Lanes are
+   copies, and each Lane's note says `UNMEASURED` and names the source Lane. The grok and
+   agy cache-write prices are not published.
+4. **The Claude Meter probe hangs inside this project.** `claude -p ... /usage` did not
+   return within 45 s from a dotfiles checkout, and takes about 3 s from `~`. The probe
+   runs from `~` (`fb845e3`), and the cause is not known.
 
 **Waiting on Orin** (nothing else blocks on these):
 
-- Ticket 23, delegate meter rows under the status line, is on `main` and live
-  in Orin's status line since 2026-09-11, with the
-  `report.py statusline off|on|toggle` switch and its ⌥⌘D Hammerspoon shortcut
-  (`~/.hammerspoon` is the Makefile's whole-directory symlink into the repo,
-  never a stow package). Ticket 23 holds the row format and the decisions; its
-  last open box is one press of ⌥⌘D in each direction.
-- Type each of the four `/delegate-*` wrappers once with a plain-language
-  constraint (ticket 11).
+- Ticket 23: press ⌥⌘D once in each direction (the status-line meter rows and
+  `report.py statusline off|on|toggle`). `~/.hammerspoon` is the Makefile's
+  whole-directory symlink, never a stow package.
+- Type each of the four `/delegate-*` wrappers once, with a plain-language constraint
+  (ticket 11).
 - Two one-liners in his own files, outside this repo (ticket 09):
-  `~/.claude/hooks/delegate-gate.py` names `{SKILL_DIR}/delegate.py`, which moved to
-  `scripts/delegate.py`, so the hook advises every session to run a path that does
-  not exist; and `export DELEGATE_BALANCE=1` is still line 1 of `~/.zshrc.local`.
+  - `~/.claude/hooks/delegate-gate.py` names `{SKILL_DIR}/delegate.py`, which moved to
+    `scripts/delegate.py`, so the hook still advises a path that does not exist.
+  - `export DELEGATE_BALANCE=1` is still line 1 of `~/.zshrc.local`.
 - Walk the eight spec §9 acceptance items and sign each off. §9.2 is signed; §9.6 is
   down to the hook above; §9.7 is the `.zshrc.local` line.
 
@@ -144,24 +111,17 @@ provenance research behind that choice:
 `.scratch/delegate-redesign/research/2026-09-09-effort-data-sources.md`. Accepted
 rows and their packets are kept as evidence in `.scratch/delegate-redesign/_data/`.
 
-Coverage is uneven and the three sources are not interchangeable: swerb reaches only
-`gpt-5.6-sol` and `gpt-5.6-luna` but publishes slugs; Artificial Analysis and
-Terminal-Bench are wider but publish display names (ticket 16). Cost is per-task on
-swerb and on Artificial Analysis, but Terminal-Bench's `display_cost` is a whole-run
-figure. Even the two per-task numbers measure different task sets, so never compare
-costs across sources. Where a note says AA covers a model, it means the
-`/models/<slug>` page payload that `effort.py aa` reads. AA's cost per task is the
-Intelligence Index's, one figure per variant, repeated on each component row. AA does
-not measure Haiku at a lane's effort (`sources.json` says why).
+Coverage is uneven and the three sources are not interchangeable:
+- swerb reaches only `gpt-5.6-sol` and `gpt-5.6-luna`, but publishes slugs.
+- Artificial Analysis and Terminal-Bench are wider, but publish display names
+  (ticket 16).
 
-Since ticket 19 the report, the tier pages and the benchmark page read AA only from
-those accepted rows (`bench.py --effort-rows`, `setup.py --effort-rows`), one figure
-per lane at the lane's own effort. The free API, `AA_URL`, `load_key` and the
-key-file argument are gone, and nothing reads `~/.config/delegate/aa-key` any more;
-if the file is still there it is unused, and it must still never be stowed or
-committed, since this repo is public. Ticket 18's Landed note carries the
-measurements; llm-cost-frontier's `update.py` (catalystneuro, BSD-3) was the
-reference for where the dataset sits in the page.
+Cost is per task on swerb and on Artificial Analysis, but Terminal-Bench's
+`display_cost` is a whole-run figure. Even the two per-task numbers measure different
+task sets, so never compare costs across sources. AA's cost per task is the
+Intelligence Index's, one figure per variant. AA does not measure Haiku at a Lane's
+effort (`sources.json` says why). Nothing reads `~/.config/delegate/aa-key`. If the file
+still exists it must never be stowed or committed, because this repo is public.
 
 ## Settled, do not re-raise
 
@@ -194,6 +154,12 @@ reference for where the dataset sits in the page.
   18).
 - The benchmark page's frontier is a display aid, not a rule: nothing reads it, and
   the carry rule above is the only thing that proposes a lane off (ticket 24).
+- A new generation supersedes the old one, and every current-generation model shows
+  for screening, at every effort (Orin, 2026-09-22; tickets 33 and 35). agy shows only
+  its Gemini models. Orin: "ignore the Gemini Claude pool".
+- Effort is fixed per Lane, and ranking picks a Lane, never an effort. The one path
+  for a different effort is a named `dispatch --effort` (Orin, 2026-09-22; the comment at
+  the Pick in `rank.py`).
 
 Preserve unrelated working-tree changes. Validate the smallest affected surface
 before committing.

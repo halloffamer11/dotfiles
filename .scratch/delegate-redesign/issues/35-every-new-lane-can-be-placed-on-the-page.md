@@ -57,7 +57,7 @@ Paths are relative to `agents/skills/delegate/`:
 
 ## Acceptance
 
-**Status:** implemented 2026-09-22 (`0c2f800`, `bda124b`, `7c02a7e`, `61a6c07`) on `worktree/delegate-redesign`; all boxes ticked. The merge and the rerun of `delegate global` are Orin's, and he may overrule the session decisions under Landed.
+**Status:** landed 2026-09-22 (`0c2f800`, `bda124b`, `7c02a7e`, `61a6c07`); merged and pushed by Orin (`71c6661`). All boxes ticked. Orin may overrule the session decisions under Landed.
 
 - [x] On the 2026-09-22 fixtures, every new non-`ultra` Lane starts carried, with its
   predecessor's Tier and Order. Every `ultra` Lane starts off.
