@@ -504,9 +504,14 @@ try:
     t_incoming = next(line for line in legend if line.startswith(f"tier {incoming_sol} "))
     prefixes = [line.split(" (", 1)[0] for line in legend if line.startswith("tier ")]
     panels = {}
-    for index in range(len(w.view()["rows"])):
-        setting = w.view()["rows"][w.cursor]["cells"][0]
-        panels[setting] = w.view()["panel"]
+    landings = []
+    for index in range(len(w._routing_settings())):
+        view = w.view()
+        row = next(r for r in view["rows"] if r["cursor"])
+        # the cursor lands on a setting, indented under its group, never on
+        # a group heading; the panel is headed by the setting's full name
+        landings.append(row["cells"][0].startswith("  ") and not row.get("styles"))
+        panels[view["panel"][0].split(":")[0]] = view["panel"]
         w.handle("down")
     record("13 routing legend maps this session's assignments, and a panel explains the setting",
            w.screen == "routing"
@@ -514,6 +519,7 @@ try:
            and "sol-high@codex" in t4
            and "sol-high@codex" not in t_incoming
            and prefixes == ["tier 1", "tier 2", "tier 3", "tier 4"]
+           and all(landings) and len(landings) == 13
            # the explanation moved beside the table: one per setting, headed by it
            and set(panels) == {f"{c} {k}" for c in catalog.CLASSES for k in ("floor", "ceiling")} | {"margin", "gate", "meters"}
            and panels["scout floor"][0] == "scout floor: 2"
@@ -527,15 +533,17 @@ try:
            and panels["meters"][0] == "meters: on" and any("Tier, Order" in p for p in panels["meters"]),
            repr(panels))
     w.handle("enter")
-    confirm_legend = w.view().get("legend") or []
+    confirm_defs = {d["term"]: d for d in w.view().get("defs") or []}
     record("14 confirm legend explains classes, margin and gate",
            w.screen == "confirm"
-           and any("classes:" in line for line in confirm_legend)
-           and any(line.startswith("margin 0.2 ") for line in confirm_legend)
-           and any(line.startswith("gate 0.1 ") for line in confirm_legend)
-           and any(line.startswith("meters on") for line in confirm_legend)
-           and any("10% remaining" in line for line in confirm_legend)
-           and all(len(line) <= 79 for line in confirm_legend))
+           and list(confirm_defs) == ["classes", "margin", "gate", "meters", "off"]
+           and confirm_defs["margin"]["value"] == "0.2"
+           and confirm_defs["gate"]["value"] == "0.1"
+           and confirm_defs["meters"]["value"] == "on"
+           and "10%" in confirm_defs["gate"]["text"]
+           and not w.view()["legend"]
+           # the longest term, two spaces, the longest value, two spaces, the text
+           and all(7 + 2 + 3 + 2 + len(d["text"]) <= 79 for d in confirm_defs.values()))
     w.handle("y")
     lanes, routing = w.result()
     record("15 key sequence write path is unchanged",
@@ -546,7 +554,7 @@ except Exception as e:
 
 
 VIEW_KEYS = {"screen", "title", "tier", "columns", "rows", "footer", "message", "body",
-              "legend", "steps", "elastic", "panel"}
+              "legend", "steps", "elastic", "panel", "defs", "warnings"}
 
 
 def row_for(view, lane):
@@ -761,8 +769,8 @@ try:
            and lanes["lanes"]["flash-high@agy"]["tier"] == LANES["lanes"]["flash-high@agy"]["tier"]
            and "order" not in lanes["lanes"]["flash-high@agy"]
            and orders_are_places(lanes)
-           and any("flash-high@agy" in line for line in v["legend"]),
-           repr((layout, after)))
+           and "1 lane not carried keeps its catalog tier." in v["legend"],
+           repr((layout, after, v["legend"])))
     w2 = wizard()
     start(w2)
     for _ in range(4):
@@ -790,7 +798,7 @@ try:
            and off_rows[0]["tag"] == ""
            # `value` is elastic so a path is not cut to 24 places
            and confirm["elastic"] == "value" and paths == ["/tmp/lanes.json", "/tmp/routing.json"]
-           and any("enabled: false" in line for line in (confirm.get("legend") or [])))
+           and any("enabled: false" in d["text"] for d in (confirm.get("defs") or [])))
     w.handle("y")
     lanes, _ = w.result()
     on_lanes = [name for name in LANES["lanes"] if name != "flash-high@agy"]
@@ -848,15 +856,15 @@ try:
     w.handle("enter")
     w.handle("enter")
     ultra = row_for(w.view(), "sol-ultra@codex")
-    legend = w.view()["legend"]
+    defs = w.view()["defs"]
     record("23 ultra is proposed off with both reasons",
            w.screen == "prescreen"
            and carry_of(ultra) == "off" and ultra["tag"] == ""
            and why_of(ultra) == "ultra, never carried"
-           # the phrase fits the column; the sentence it stands for is the legend
-           # line that only an ultra lane on screen earns
-           and any("no source scores it" in line and "worker preamble" in line
-                   for line in legend))
+           # the phrase fits the column; the sentence it stands for is the
+           # definition that only an ultra lane on screen earns
+           and any(d["term"] == "ultra" and "no source scores it" in d["text"]
+                   and "worker preamble" in d["text"] for d in defs))
 except Exception as e:
     record("23 ultra is proposed off with both reasons", False, repr(e))
 
@@ -883,8 +891,8 @@ try:
            carry_of(luna) == "off" and "wins on" in why_of(luna)
            and carry_of(sol) == "on" and why_of(sol) == "not dominated"
            and carry_of(flash) == "on" and why_of(flash) == "no rows for this lane"
-           and any("Absence of data is not evidence against" in line
-                   for line in v["legend"]))
+           and any(d["term"] == "no rows" and "not evidence against" in d["text"]
+                   for d in v["defs"]))
 except Exception as e:
     record("24 dominated lane proposed off; unscored proposed on", False, repr(e))
 
@@ -931,7 +939,8 @@ try:
            carry_of(flash) == "off" and why_of(flash) == "off in the catalog"
            # luna would be dominated by medium, but the human said on
            and carry_of(luna) == "on" and why_of(luna) == "on in the catalog"
-           and any("the pre-screen leaves it" in line for line in v["legend"]))
+           and any(d["term"] == "in the catalog" and "the pre-screen leaves it" in d["text"]
+                   for d in v["defs"]))
 except Exception as e:
     record("24c an explicit enabled is respected, not overwritten", False, repr(e))
 
@@ -1068,8 +1077,8 @@ try:
            and why_of(flash) == "not dominated"
            # Terminal-Bench prints "Fable 5.1"; no published_as says that is ours
            and why_of(fable) == "no rows for this lane"
-           and any("Absence of data is not evidence against" in line
-                   for line in v["legend"]),
+           and any(d["term"] == "no rows" and "not evidence against" in d["text"]
+                   for d in v["defs"]),
            str([grok["cells"], flash["cells"], fable["cells"]]))
 except Exception as e:
     record("28b a matched lane with one row is not dominated; an unmatched one keeps absence",
@@ -1114,8 +1123,7 @@ try:
     record("30 every catalog variant on the AA page resolves; only the strangers go unmatched",
            {lane for _name, lane in resolved if lane} == lane_models
            and sorted(unmatched) == ["GPT-5.5", "Grok 4.3"]
-           and any("no lane runs these, ignored: " in line and "GPT-5.5" in line
-                   for line in v["legend"]),
+           and "2 benchmarked models have no lane" in v["legend"],
            f"resolved={sorted(resolved, key=str)} unmatched={unmatched}")
     record("30b the AA rows switch off one dominated effort, and the reason names the source",
            off == {"astra-xhigh@codex": "high wins on aa"},
@@ -1132,15 +1140,18 @@ try:
     # a note about the data, so it reads as a legend line and not as an error
     # in the message slot, where `every lane needs a tier` goes
     v = w.view()
+    # Listing them by name ran thirty names off the line on the live page and
+    # was noise; the count says what matters, and the names stay in
+    # `_unmatched` for a `published_as` still owed to us.
     ignored = next((line for line in v["legend"]
-                    if line.startswith("no lane runs these, ignored: ")), "")
-    record("28d models that are nobody's lane are listed once, not warned per lane",
-           ignored
-           and "GLM-5.3" in ignored and "+4 more" in ignored
-           and "gpt-6-astra" not in ignored and len(ignored) <= 79
+                    if line.endswith("benchmarked models have no lane")), "")
+    record("28d models that are nobody's lane are counted once, not warned per lane",
+           ignored == f"{len(w._unmatched)} benchmarked models have no lane"
+           and len(w._unmatched) >= 5 and "GLM-5.3" in w._unmatched
+           and "gpt-6-astra" not in w._unmatched
            and v["message"] == ""
            and all("no lane" not in why_of(row) for row in v["rows"]),
-           repr(ignored))
+           repr((ignored, w._unmatched)))
 except Exception as e:
     record("28d models that are nobody's lane are listed once, not warned per lane",
            False, repr(e))
@@ -1258,8 +1269,9 @@ def pty_smoke():
         deadline = time.monotonic() + 30
         try:
             os.set_blocking(master, False)
-            # start, harnesses, carry, T4, T3, T2, T1, review, routing, then y
-            for key in [b"\n"] * 9 + [b"y"]:
+            # start, then r on the harnesses page (the scrub again, from the
+            # fixtures), harnesses, carry, T4, T3, T2, T1, review, routing, then y
+            for key in [b"\n", b"r"] + [b"\n"] * 8 + [b"y"]:
                 try:
                     while chunk := os.read(master, 65536):
                         output.extend(chunk)
@@ -1378,7 +1390,7 @@ try:
     reasons = [why_of(row) for row in w.view()["rows"]]
     body = "\n".join(grid)
     record("29 every pre-screen reason is whole at 80 columns",
-           "why" in grid[2]
+           "why" in grid[setup_tui.TOP]
            and all(reason in body for reason in reasons)
            and "high wins on tbench" in body
            and "…" not in body,
@@ -1430,10 +1442,10 @@ try:
     shown = [line for line in grid if line.startswith("[x]") or line.startswith("[ ]")]
     w2, tall = prescreen_at(80, 40)
     record("32 a clipped list says which rows are on screen",
-           grid[0].rstrip().endswith(f"1-{len(shown)} of {len(w.view()['rows'])}")
+           grid[2].rstrip().endswith(f"1-{len(shown)} of {len(w.view()['rows'])}")
            and len(shown) >= ROW_FLOOR
-           and "of" not in tall[0].split("Lanes to carry")[1],
-           repr(grid[0]) + repr(tall[0]))
+           and "of" not in tall[2].split("Lanes to carry")[1],
+           repr(grid[2]) + repr(tall[2]))
 except Exception as e:
     record("32 a clipped list says which rows are on screen", False, repr(e))
 
@@ -1531,8 +1543,8 @@ try:
            visible and visible == benchmarks[:len(visible)]
            and "Epoch mean rank" in names
            and "model" not in names and "effort" not in names
-           and "90.0" in grid[3] and "1.0 (n=5)" in grid[3],
-           repr(names) + "\n" + repr(grid[2:4]))
+           and "90.0" in grid[setup_tui.TOP + 1] and "1.0 (n=5)" in grid[setup_tui.TOP + 1],
+           repr(names) + "\n" + repr(grid[setup_tui.TOP:setup_tui.TOP + 2]))
 except Exception as e:
     record("37 at 80 places the tier screen shows scores, not the lane name twice",
            False, repr(e))
@@ -1590,12 +1602,13 @@ try:
             view = page.view(width)
             entries = layout_lines(view, width, height)
             grid = overlay(entries, width, height)
-            too_long = [text for _y, text, _r in entries if len(text) > width - 1]
-            cursor = [text for _y, text, role in entries if role.startswith("row-cursor")]
+            too_long = [text for _y, text, _r, _s in entries if len(text) > width - 1]
+            cursor = [text for _y, text, role, _s in entries if role.startswith("row-cursor")]
             if too_long:
                 faults.append((name, width, "wider than the terminal", too_long[:1]))
-            if not grid[0].startswith(view["title"]) or grid[height - 3] != view["footer"][: width - 1].rstrip():
-                faults.append((name, width, "title or footer out of place"))
+            if (grid[0] != view["steps"] or not grid[2].startswith(view["title"])
+                    or grid[height - 3] != view["footer"][: width - 1].rstrip()):
+                faults.append((name, width, "trail, title or footer out of place"))
             if view["rows"] and any(r["cursor"] for r in view["rows"]) and not cursor:
                 faults.append((name, width, "cursor row off screen"))
             if view["legend"] and not all(line[: width - 1].rstrip() in grid for line in view["legend"][:1]):
@@ -1618,9 +1631,11 @@ try:
     checks = []
     for width, height in ((80, 24), (200, 50)):
         grid = screen(w.view(width), width, height)
-        row = next(line for line in grid if line.startswith("scout floor"))
-        head = grid.index(row) - 1
-        checks.append("│ scout floor: 2" in grid[head] or "│ scout floor: 2" in row)
+        # the class heading, then its floor indented under it; the panel's
+        # head shares the header row
+        group = next(line for line in grid if line.startswith("scout "))
+        head = grid.index(group) - 1
+        checks.append("│ scout floor: 2" in grid[head] and grid[head + 2].startswith("  floor"))
         checks.append(any("lowest tier" in line and "│" in line for line in grid))
         checks.append(all(len(line) <= width - 1 for line in grid))
     for _ in range(11):
@@ -1628,7 +1643,7 @@ try:
     gate = screen(w.view(80), 80, 24)
     # the panel follows the cursor down to gate, and the gate row stays on screen
     checks.append(any("│ gate: 0.1" in line for line in gate)
-                  and any(line.startswith("gate ") for line in gate)
+                  and any(line.startswith("  gate") for line in gate)
                   and not any("│ scout floor" in line for line in gate))
     wide = screen(w.view(200), 200, 50)
     panel_width = max(len(line.split("│ ", 1)[1]) for line in wide if "│ " in line)
@@ -1885,8 +1900,7 @@ try:
            and cursor == "terra-high@codex"
            and view["message"] == "Lines: 2 took a tier; 1 went off; 3 not named, so off; unknown, ignored: nobody@x."
            and view["message"] in grid
-           and any(line.startswith("Not carried, keeps its catalog tier (") and "sol-high@codex" in line
-                   and "luna-low@codex" in line for line in grid)
+           and "4 lanes not carried keep their catalog tier." in grid
            and "v: paste" in view["footer"]
            and lanes["lanes"]["fable-xhigh@claude"]["tier"] == 4 and "enabled" not in lanes["lanes"]["fable-xhigh@claude"]
            and lanes["lanes"]["fable-xhigh@claude"]["order"] == 1
@@ -2105,8 +2119,8 @@ try:
         view = w.view(width)
         entries = layout_lines(view, width, height)
         grid = overlay(entries, width, height)
-        sections = [text for _y, text, role in entries if role == "section"]
-        cursor = [text for _y, text, role in entries if role == "row-cursor"]
+        sections = [text for _y, text, role, _s in entries if role == "section"]
+        cursor = [text for _y, text, role, _s in entries if role == "row-cursor"]
         if sections != ["Tier 4 (no lanes)", "Tier 3 (no lanes)", "Tier 2 (3 lanes)", "Tier 1 (1 lane)"]:
             faults.append((width, "sections", sections))
         if not (len(cursor) == 1 and cursor[0].startswith(" 2  terra-high@codex")):
@@ -2115,10 +2129,13 @@ try:
             faults.append((width, "too wide"))
         if not any(line.startswith(" 1  sol-high@codex") for line in grid):
             faults.append((width, "numbering"))
-        if setup_tui.REVIEW_MOVE_LEGEND not in grid or setup_tui.REVIEW_ORDER_LEGEND not in grid:
-            faults.append((width, "legend"))
+        keys_spelled = [line for line in grid
+                        if line.startswith(("J/K, shift-↑/↓", "1-4"))
+                        and ("inside its tier" in line or "end of that tier" in line)]
+        if len(keys_spelled) != 2 or setup_tui.REVIEW_ORDER_LEGEND not in grid:
+            faults.append((width, "legend", keys_spelled))
     record("54 the review page renders a section per tier, numbered, with the moved lane under the cursor",
-           not faults and grid[0].startswith("Order each tier"), repr(faults))
+           not faults and grid[2].startswith("Order each tier"), repr(faults))
 except Exception as e:
     record("54 the review page renders a section per tier", False, repr(e))
 
@@ -2264,13 +2281,14 @@ try:
     not_carried(w, "grok46-high@grok")
     mark_as(w, {"fable-xhigh@claude": 4, "sol-high@codex": 3,
                 "terra-high@codex": 2, "luna-low@codex": 1, "flash-high@agy": 1})
-    legend = w.view()["legend"]
+    warnings = w.view()["warnings"]
     record("62 the review page names a Tier one Meter serves, and only such a Tier",
            w.screen == "review"
-           and any(line.startswith("Tier 2 depends on Meter codex") for line in legend)
-           and not any(line.startswith("Tier 1 depends") for line in legend)
-           and all(len(line) <= 79 for line in legend),
-           repr(legend))
+           and any(line.startswith("Tier 2 depends on Meter codex") for line in warnings)
+           and not any(line.startswith("Tier 1 depends") for line in warnings)
+           and not any("depends on Meter" in line for line in w.view()["legend"])
+           and all(len(line) <= 79 for line in warnings),
+           repr(warnings))
 except Exception as e:
     record("62 the review page names a Tier one Meter serves", False, repr(e))
 
@@ -2367,5 +2385,416 @@ try:
                repr(w.rewrite_bench_page()))
 except Exception as e:
     record("64 o writes the page again from this session's carry decisions", False, repr(e))
+
+
+# --- the trail on top, the bottom in zones, and the styles that carry meaning ---
+# The bottom of a page ran the legend, the trail and the keys together with
+# nothing between them, and the trail is where you are in the run, which is
+# read first, not last. Every fault below is read off the grid and the spans.
+try:
+    faults = []
+    for name, page in every_page(effort_rows=TBENCH, lanes=astra_lanes()):
+        view = page.view(80)
+        entries = layout_lines(view, 80, 24)
+        grid = overlay(entries, 80, 24)
+        y, text, _role, spans = next(e for e in entries if e[2] == "steps")
+        labels = view["steps"].split(" · ")
+        current = next(i for i, label in enumerate(labels) if label.startswith("["))
+        here = [text[s:e] for s, e, style in spans if style == "step-here"]
+        done = [text[s:e] for s, e, style in spans if style == "step-done"]
+        if ((y, grid[0], grid[1], grid[3]) != (0, view["steps"], "", "")
+                or not grid[2].startswith(view["title"])):
+            faults.append((name, "rows", grid[:4]))
+        if here != [labels[current]] or done != labels[:current]:
+            faults.append((name, "spans", here, done))
+    record("65 the trail is the top row of every page: the step this page is stands out, "
+           "the steps behind it are done, and a blank row parts it from the title",
+           not faults, repr(faults))
+except Exception as e:
+    record("65 the trail is the top row of every page", False, repr(e))
+
+
+try:
+    # the bottom is three zones: the rows, a blank row, the legend, a blank row,
+    # the keys. The counter says what the rows' budget leaves on screen, and a
+    # long list still scrolls the cursor into view.
+    faults = []
+    for width, height in ((80, 24), (80, 20)):
+        w, grid = prescreen_at(width, height)
+        view = w.view(width)
+        zone = setup_tui._legend_zone(view)
+        shown = [line for line in grid if line.startswith("[x]") or line.startswith("[ ]")]
+        budget = height - 3 - 1 - len(zone) - 1 - (setup_tui.TOP + 1)
+        first_legend = grid.index(zone[0][0])
+        if len(shown) != min(budget, len(view["rows"])):
+            faults.append((width, height, "budget", len(shown), budget))
+        if (grid[first_legend - 1] != "" or grid[first_legend + len(zone)] != ""
+                or grid[height - 3] != view["footer"]):
+            faults.append((width, height, "zones", grid[first_legend - 1:height - 2]))
+        if (len(shown) < len(view["rows"])
+                and not grid[2].endswith(f"1-{len(shown)} of {len(view['rows'])}")):
+            faults.append((width, height, "counter", grid[2]))
+    w, _grid = prescreen_at(80, 20)
+    rows = w.view()["rows"]
+    for _ in range(len(rows) - 1):
+        w.handle("down")
+    entries = layout_lines(w.view(80), 80, 20)
+    grid = overlay(entries, 80, 20)
+    cursor = [text for _y, text, role, _s in entries if role.startswith("row-cursor")]
+    shown = [line for line in grid if line.startswith("[x]") or line.startswith("[ ]")]
+    if not (len(cursor) == 1 and rows[-1]["cells"][1] in cursor[0] and len(shown) < len(rows)
+            and grid[2].endswith(f"{len(rows) - len(shown) + 1}-{len(rows)} of {len(rows)}")):
+        faults.append(("scroll", cursor, grid[2]))
+    record("66 the rows, the legend and the keys are three zones with a blank row between, "
+           "and the counter follows the rows' budget and the cursor",
+           not faults, repr(faults))
+except Exception as e:
+    record("66 the rows, the legend and the keys are three zones", False, repr(e))
+
+
+try:
+    w, _grid = prescreen_at(80, 24)
+    view = w.view(80)
+    entries = layout_lines(view, 80, 24)
+
+    def styled(lane):
+        _y, text, role, spans = next(e for e in entries
+                                     if e[2].startswith("row") and f" {lane} " in e[1])
+        return role, [(text[s:e], style) for s, e, style in spans]
+
+    _y, footer, _role, spans = next(e for e in entries if e[2] == "footer")
+    keys = [footer[s:e] for s, e, style in spans if style == "key"]
+    _y, title, _role, spans = next(e for e in layout_lines(view, 80, 16) if e[2] == "title")
+    note = [title[s:e] for s, e, style in spans if style == "title-note"]
+    record("67 a ticked box, a reason the data gave, a key and the counter are drawn in their "
+           "own style, and the cursor row is one bar",
+           styled("astra-high@codex") == ("row", [("[x]", "mark-on")])
+           and styled("astra-xhigh@codex") == ("row-dim", [("high wins on tbench", "why-data")])
+           and styled("fable-xhigh@claude") == ("row-cursor", [])
+           and keys == ["↑/↓ or j/k", "space/x", "enter", "b", "q"]
+           and note == ["1-7 of 11"],
+           repr((styled("astra-high@codex"), styled("astra-xhigh@codex"),
+                 styled("fable-xhigh@claude"), keys, note)))
+except Exception as e:
+    record("67 a ticked box, a reason the data gave, a key and the counter are drawn in their own style",
+           False, repr(e))
+
+
+try:
+    # every role and style a page emits is in the one table, and the table
+    # resolves with and without colour: without, each style keeps its weight;
+    # with, the three colours sit on the terminal's own background
+    class FakeCurses:
+        A_BOLD, A_DIM, A_REVERSE, A_UNDERLINE = 1, 2, 4, 8
+        COLOR_GREEN, COLOR_CYAN, COLOR_YELLOW = 2, 6, 3
+
+        class error(Exception):
+            pass
+
+        def __init__(self, colours, refuse=False):
+            self.colours, self.refuse, self.pairs = colours, refuse, {}
+            self.COLORS = 256 if colours else 0
+
+        def has_colors(self):
+            return self.colours
+
+        def use_default_colors(self):
+            if self.refuse:
+                raise self.error("no default colours")
+
+        def init_pair(self, n, fg, bg):
+            self.pairs[n] = (fg, bg)
+
+        def color_pair(self, n):
+            return n << 8
+
+    used = set()
+    for _name, page in every_page(effort_rows=TBENCH, lanes=astra_lanes()):
+        for _y, _text, role, spans in layout_lines(page.view(80), 80, 24):
+            used.add(role)
+            used.update(style for _s, _e, style in spans)
+    mono = setup_tui._palette(FakeCurses(False))
+    rich = FakeCurses(True)
+    colour = setup_tui._palette(rich)
+    refused = setup_tui._palette(FakeCurses(True, refuse=True))
+
+    def pair_of(style):
+        return rich.pairs.get(colour[style] >> 8)
+
+    record("68 every role a page emits is in the style table, which resolves without colour "
+           "and with the three colours on the terminal's own background",
+           used <= set(setup_tui.STYLES) and set(mono) == set(setup_tui.STYLES)
+           and mono["key"] == 1 and mono["mark-on"] == 1 and mono["header"] == 1 | 8
+           and mono["step-here"] == 1 | 4 and mono["step-done"] == 0 and mono["steps"] == 2
+           and mono["legend"] == 2 and mono["row-cursor"] == 4 and mono["row-cursor-dim"] == 4
+           and mono["why-data"] == 0
+           and refused == mono
+           and pair_of("key") == (6, -1) and pair_of("mark-on") == (2, -1)
+           and pair_of("step-done") == (2, -1) and pair_of("why-data") == (3, -1)
+           # round 2: a warning is bold and, in colour, attention-yellow; a
+           # value is settled-green; a term is bold; a description is dim
+           and mono["warning"] == 1 and pair_of("warning") == (3, -1)
+           and mono["value"] == 1 and pair_of("value") == (2, -1)
+           and mono["term"] == 1 and mono["desc"] == 2 and colour["desc"] == 2
+           and colour["key"] & 0xff == 1 and colour["title"] == mono["title"]
+           and len(rich.pairs) == 3,
+           repr((sorted(used - set(setup_tui.STYLES)), mono, rich.pairs)))
+except Exception as e:
+    record("68 every role a page emits is in the style table", False, repr(e))
+
+
+# --- round 2: the harnesses page says what the scrub found, and r runs it again ---
+def scanned_wizard(rescan=None, tier_lines=None):
+    """A wizard on the refresh fixture, as launch builds one: the refreshed
+    catalog, the plan, the discovery mapped against it, and the rows note."""
+    frozen = catalog.load_json(os.path.join(REFRESH_DIR, "lanes.json"))
+    rows = catalog.load_json(os.path.join(REFRESH_DIR, "aa-accepted.json"))
+    found = discover.discover(frozen, fixture_dir=REFRESH_DIR)
+    refreshed, plan = discover.refresh_catalog(
+        frozen, found, published_models=sorted({r["model"] for r in rows if r.get("source") == "aa"}))
+    w = Wizard(copy.deepcopy(refreshed), copy.deepcopy(ROUTING), None, DISCOVERED,
+               "/tmp/lanes.json", "/tmp/routing.json", "",
+               discovery=discover.map_lanes(found, refreshed), refresh=plan, effort_rows=rows,
+               rows_note="Benchmark rows: Artificial Analysis fetched 3h ago, still fresh",
+               rescan=rescan, tier_lines=tier_lines, clock=lambda: "14:07")
+    return w, refreshed, plan
+
+
+try:
+    w, refreshed, plan = scanned_wizard()
+    w.handle("enter")
+    v = w.view(80)
+    by_name = {row["cells"][0]: row["cells"] for row in v["rows"]}
+    per_harness = lambda names: {h: sum(1 for n in names if n.endswith("@" + h)) for h in catalog.HARNESSES}
+    new, removed = per_harness(plan["new"]), per_harness(plan["removed"])
+    grid = screen(v, 80, 24)
+    # a wizard built without a scrub result: the harnesses only, no counts
+    bare = wizard(discovery="subprocess timed out")
+    bare.handle("enter")
+    bare_rows = {row["cells"][0]: row["cells"] for row in bare.view()["rows"]}
+    record("69 the harnesses page says what the launch scrub found: per harness its status, the "
+           "models it listed and the Lanes the refresh adds and removes, plus the rows note",
+           v["screen"] == "discovery"
+           and v["columns"] == ["harness", "status", "models", "new lanes", "removed lanes"]
+           and by_name["codex"] == ["codex", "found", "7", str(new["codex"]), str(removed["codex"])]
+           and by_name["agy"] == ["agy", "found", "7", str(new["agy"]), str(removed["agy"])]
+           and by_name["grok"] == ["grok", "found", "4", str(new["grok"]), str(removed["grok"])]
+           and by_name["claude"][2] == "4" and new["codex"] == 11 and removed["codex"] == 11
+           and v["body"][0].startswith("Scanned at launch: ")
+           and v["body"][1] == "Benchmark rows: Artificial Analysis fetched 3h ago, still fresh"
+           and v["legend"] == [setup_tui.CLAUDE_COUNT_LEGEND]
+           # r is offered only when there is a scrub to run
+           and v["footer"] == setup_tui.DISCOVERY_FOOTER and "r: rescan" not in v["footer"]
+           and grid[setup_tui.TOP].startswith("Scanned at launch")
+           and all(len(line) <= 79 for line in grid)
+           and bare_rows["codex"] == ["codex", "found", "—", "—", "—"]
+           and bare.view()["legend"] == [],
+           repr((by_name, v["body"], v["footer"], bare_rows)))
+except Exception as e:
+    record("69 the harnesses page says what the launch scrub found", False, repr(e))
+
+
+try:
+    # r: the scrub again, and every later page starts over from what it found;
+    # the page comes before any decision, so nothing is thrown away
+    calls = []
+    frozen = catalog.load_json(os.path.join(REFRESH_DIR, "lanes.json"))
+
+    def again():
+        calls.append(1)
+        doc = copy.deepcopy(frozen)
+        doc["lanes"]["extra-high@grok"] = copy.deepcopy(doc["lanes"]["grok46-high@grok"])
+        return {"lanes_doc": doc, "discovered": {"grok"}, "discovery": "probe failed",
+                "refresh": {"models": [], "new": ["extra-high@grok"], "removed": []},
+                "rows_note": "Benchmark rows: Artificial Analysis fetched just now",
+                "effort_rows": None, "bench": None, "message": "bench: no rows"}
+
+    w, refreshed, _plan = scanned_wizard(rescan=again, tier_lines="extra-high@grok 4\n")
+    w.handle("enter")
+    before = w.view(100)
+    w.handle("r")
+    after = w.view(100)
+    ready_after = w.rescan_ready()
+    rows = {row["cells"][0]: row["cells"] for row in after["rows"]}
+    w.handle("enter")
+    carry = w.view()
+    carried = [r["cells"][1] for r in carry["rows"] if r["marked"]]
+    w.handle("enter")
+    tier4 = [r["cells"][1] for r in w.view()["rows"] if r["marked"]]
+    # a scrub that fails is a message and changes nothing
+    def broken():
+        raise RuntimeError("codex would not answer")
+    w2, refreshed2, _plan2 = scanned_wizard(rescan=broken)
+    w2.handle("enter")
+    w2.handle("r")
+    unchanged = w2.lanes_doc == refreshed2 and w2.scanned == "at launch" and w2.screen == "discovery"
+    # without a scrub to run, r is any key and continues; on a later page it is nothing
+    w3, _r, _p = scanned_wizard()
+    w3.handle("enter"); w3.handle("r")
+    w4, _r, _p = scanned_wizard(rescan=again)
+    w4.handle("enter"); w4.handle("enter")
+    calls_before = len(calls)
+    w4.handle("r")
+    record("70 r on the harnesses page runs the scrub again, restarts the later pages from its "
+           "result, applies the tiers-from lines again, and a failure is a message",
+           before["footer"] == setup_tui.DISCOVERY_RESCAN_FOOTER
+           and len(calls) == 1 and after["screen"] == "discovery"
+           and after["body"][0].startswith("Scanned at 14:07: ")
+           and after["body"][1] == "Benchmark rows: Artificial Analysis fetched just now"
+           and rows["grok"] == ["grok", "found", "—", "1", "0"]
+           and rows["codex"] == ["codex", "missing", "—", "0", "0"]
+           and after["legend"] == []
+           and after["message"].startswith("Rescanned at 14:07: 1 new Lane, 0 removed; bench: no rows; "
+                                           "Lines: 1 took a tier;")
+           and "not named, so off" in after["message"]
+           # still the harnesses page, so r is still on offer
+           and w.scanned == "at 14:07" and ready_after is True
+           and "extra-high@grok" in w.lanes_doc["lanes"] and carried == ["extra-high@grok"]
+           and tier4 == ["extra-high@grok"] and w.tier == 4
+           and w2.message == "rescan failed: codex would not answer" and unchanged
+           and w3.screen == "prescreen"
+           and w4.screen == "prescreen" and len(calls) == calls_before,
+           repr((calls, after["message"], rows, carried, tier4, w2.message, w3.screen)))
+except Exception as e:
+    record("70 r on the harnesses page runs the scrub again", False, repr(e))
+
+
+try:
+    # the carry legend defines only the reasons on the page, as a definition
+    # list whose one coloured term is the one coloured cell, and counts the
+    # benchmarked models no lane runs instead of naming them
+    w = wizard(lanes=astra_lanes(), effort_rows=TBENCH)
+    w.handle("enter"); w.handle("enter")
+    v = w.view(80)
+    entries = layout_lines(v, 80, 24)
+    def_lines = [(text, [(text[s:e], st) for s, e, st in spans])
+                 for _y, text, role, spans in entries
+                 if role == "legend" and spans]
+    plain = wizard()
+    plain.handle("enter"); plain.handle("enter")
+    record("71 the carry page defines the reasons on it, the dominated term in the data's colour, "
+           "and counts the benchmarked models that are nobody's lane",
+           [d["term"] for d in v["defs"]] == ["X wins on S", "not dominated", "no rows"]
+           and v["defs"][0] == setup_tui.DOMINATED_DEF and v["defs"][0]["style"] == "why-data"
+           and v["legend"] == [f"{len(w._unmatched)} benchmarked models have no lane"]
+           and def_lines[0][1] == [("X wins on S", "why-data")]
+           and def_lines[1][1] == [("not dominated", "term")]
+           and def_lines[0][0].startswith("X wins on S    effort X scores")
+           and all(len(text) <= 79 for text, _s in def_lines)
+           # no rows at all: the one definition that case earns, and no count
+           and plain.view()["defs"] == [setup_tui.ABSENCE_DEF] and plain.view()["legend"] == [],
+           repr((v["defs"], v["legend"], def_lines)))
+except Exception as e:
+    record("71 the carry page defines the reasons on it", False, repr(e))
+
+
+try:
+    # the review page's bottom: the keys spelled out, the rule, the count, then
+    # the warning in its own style, last in the zone and above the keys' blank row
+    w = wizard()
+    not_carried(w, "grok46-high@grok")
+    mark_as(w, {"fable-xhigh@claude": 4, "sol-high@codex": 3,
+                "terra-high@codex": 2, "luna-low@codex": 1, "flash-high@agy": 1})
+    v = w.view(80)
+    entries = layout_lines(v, 80, 24)
+    grid = overlay(entries, 80, 24)
+    zone = [(y, text, role) for y, text, role, _s in sorted(entries) if role in ("legend", "warning")]
+    warning_rows = [y for y, _t, role in zone if role == "warning"]
+    key_spans = [text[s:e] for _y, text, role, spans in entries if role == "legend"
+                 for s, e, st in spans if st == "key"]
+    # Tiers 4, 3 and 2 each hold one lane here, so each drains one Meter
+    record("72 the review page separates the key help, the rule and the warning, and the "
+           "warning is drawn as one",
+           v["defs"] == list(setup_tui.REVIEW_MOVE_DEFS)
+           and v["legend"] == [setup_tui.REVIEW_ORDER_LEGEND, "1 lane not carried keeps its catalog tier."]
+           and v["warnings"] == ["Tier 2 depends on Meter codex; a Gate stop there stops the Tier.",
+                                 "Tier 3 depends on Meter codex; a Gate stop there stops the Tier.",
+                                 "Tier 4 depends on Meter claude-fable; a Gate stop there stops the Tier."]
+           and key_spans == ["J/K, shift-↑/↓", "1-4"]
+           and [role for _y, _t, role in zone] == ["legend"] * 4 + ["warning"] * 3
+           # the warnings are the last of the zone, above the keys' blank row
+           and warning_rows == [24 - 3 - 4, 24 - 3 - 3, 24 - 3 - 2] and grid[24 - 3 - 1] == ""
+           and grid[warning_rows[0]].startswith("Tier 2 depends on Meter codex"),
+           repr((v["defs"], v["legend"], v["warnings"], zone)))
+except Exception as e:
+    record("72 the review page separates the key help, the rule and the warning", False, repr(e))
+
+
+try:
+    # the routing page groups each class under its heading and its sentence
+    # from the Class guide, then ranking; the cursor never lands on a heading
+    guide = setup_tui.class_descriptions()
+    w = wizard()
+    start(w)
+    to_confirm(w)
+    w.handle("b")
+    assert w.screen == "routing", w.screen
+    v = w.view(80)
+    headings = [(r["cells"][0], r["cells"][1]) for r in v["rows"] if r.get("styles")]
+    settings = [r["cells"][0] for r in v["rows"] if not r.get("styles")]
+    landed = []
+    for _ in range(len(w._routing_settings()) + 1):
+        landed.append(next(r["cells"][0] for r in w.view()["rows"] if r["cursor"]))
+        w.handle("down")
+    entries = layout_lines(w.view(80), 80, 24)
+    heading_spans = [[(text[s:e], st) for s, e, st in spans]
+                     for _y, text, role, spans in entries if role == "row" and spans
+                     and any(st == "section" for _s, _e, st in spans)]
+    narrow = screen(w.view(80), 80, 24)
+    wide = screen(w.view(120), 120, 30)
+    lost = setup_tui.class_descriptions("/no/such/guide.md")
+    record("73 the routing page groups each class with its sentence from the Class guide and "
+           "ranking with the pick's settings; only a setting takes the cursor",
+           guide["scout"] == "Find and explain facts about the software"
+           and guide["impl"] == "Turn a supplied specification into code changes with executable checks"
+           and [name for name, _d in headings] == [*catalog.CLASSES, "ranking"]
+           and all(desc == setup_tui._clip(guide[name], len(desc)) for name, desc in headings[:5])
+           and settings == ["  floor", "  ceiling"] * 5 + ["  margin", "  gate", "  meters"]
+           and all(name.startswith("  ") for name in landed) and landed[0] == "  floor"
+           and landed[13] == "  floor" and v["elastic"] == "value"
+           and heading_spans and heading_spans[0][0] == ("scout", "section")
+           and heading_spans[0][1][1] == "desc"
+           # at 80 the sentence gives way to the panel; at 120 it is whole
+           and any("│ scout floor" in line or "│ " in line for line in narrow)
+           and any(line.startswith("scout       Find and explain facts about the") for line in narrow)
+           and any("impl        Turn a supplied specification into code changes with executable checks"
+                   in line for line in wide)
+           and all(len(line) <= 79 for line in narrow)
+           and lost == {name: "" for name in catalog.CLASSES},
+           repr((headings, landed, heading_spans[:1], [l for l in narrow if l.startswith("scout")])))
+except Exception as e:
+    record("73 the routing page groups each class with its sentence from the Class guide", False, repr(e))
+
+
+try:
+    # the confirm page's definition list: each term bold, its value in the
+    # value style, the meaning beside; metering off changes the three texts
+    w = wizard()
+    start(w)
+    to_confirm(w)
+    assert w.screen == "confirm", w.screen
+    entries = layout_lines(w.view(80), 80, 24)
+    styled = [(text, [(text[s:e], st) for s, e, st in spans])
+              for _y, text, role, spans in sorted(entries) if role == "legend" and spans]
+    w.routing_doc["meters"] = False
+    off = {d["term"]: d for d in w.view()["defs"]}
+    focused = wizard(focus="routing")
+    focused.handle("enter")
+    record("74 the confirm page's definitions align term, value and meaning, and say what "
+           "metering off leaves stored",
+           [text.split("  ")[0] for text, _s in styled] == ["classes", "margin", "gate", "meters", "off"]
+           and styled[1][1] == [("margin", "term"), ("0.2", "value")]
+           and styled[2][1] == [("gate", "term"), ("0.1", "value")]
+           and styled[3][1] == [("meters", "term"), ("on", "value")]
+           and styled[0][1] == [("classes", "term")] and styled[4][1] == [("off", "term")]
+           and styled[1][0].startswith("margin   0.2  the pace lead")
+           and all(len(text) <= 79 for text, _s in styled)
+           and off["meters"]["value"] == "off" and "stay stored" in off["meters"]["text"]
+           and off["margin"]["text"] == "stored; metering is off"
+           and focused.screen == "confirm" and focused.view()["defs"] == []
+           and focused.view()["legend"] == ["Only the listed changes will be written."],
+           repr((styled, off)))
+except Exception as e:
+    record("74 the confirm page's definitions align term, value and meaning", False, repr(e))
 
 sys.exit(1 if fails else 0)

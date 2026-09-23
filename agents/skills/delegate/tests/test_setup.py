@@ -697,6 +697,56 @@ def case_a_failed_fetch_keeps_the_repo_rows():
         return ok, f"paths={paths} note={note!r}"
 
 
+def case_a_forced_fetch_passes_a_fresh_cache():
+    """The harnesses page's `r` asks for the rows as they are now: `force`
+    fetches even when the cache is under 24 hours old, into the same
+    directory, and the note says so."""
+    import setup
+    with tempfile.TemporaryDirectory() as td:
+        cache = os.path.join(td, "aa")
+        os.makedirs(cache)
+        accepted = write_rows(os.path.join(cache, "accepted.json"), "aa", "Grok 4.6")
+        repo_aa = write_rows(os.path.join(td, "repo-aa.json"), "aa", "Grok 4.6")
+        calls = []
+
+        def fetch(out_dir, **kwargs):
+            calls.append(out_dir)
+            write_rows(os.path.join(out_dir, "accepted.json"), "aa", "Grok 4.7")
+
+        paths, note = setup.refresh_effort_rows([repo_aa], cache_dir=cache, fetch=fetch, force=True)
+        rows, _message = setup.load_effort_rows(paths)
+        ok = (calls == [cache] and paths == [accepted]
+              and rows == [{"source": "aa", "model": "Grok 4.7", "benchmark": "b", "score": 1}]
+              and "fetched just now" in note)
+        return ok, f"paths={paths} calls={calls} note={note!r}"
+
+
+def case_scan_and_propose_are_the_launch_steps():
+    """`r` runs the same steps launch ran, through the same functions: `scan`
+    acquires the rows and the harnesses' models, `propose_generation`
+    proposes the current generation, and the result is what
+    `refresh_catalog` gives directly, with the discovery mapped against it."""
+    import discover
+    import setup
+    from types import SimpleNamespace
+    frozen, refreshed, plan = refresh_fixture()
+    args = SimpleNamespace(discover_json=None, no_discover=False, fixture_dir=REFRESH_DIR,
+                           effort_rows=[os.path.join(REFRESH_DIR, "aa-accepted.json")],
+                           no_bench=True, epoch_csv=None)
+    discovered, data, rows, note, paths = setup.scan(args, copy.deepcopy(frozen), force=True)
+    doc, plan_again, mapped = setup.propose_generation(copy.deepcopy(frozen), data, rows)
+    skipped = setup.propose_generation(copy.deepcopy(frozen), "probe failed", rows)
+    ok = (discovered == set(catalog.HARNESSES) and isinstance(data, dict)
+          and note.startswith("Benchmark rows: Artificial Analysis from ")
+          and paths == [os.path.join(REFRESH_DIR, "aa-accepted.json")]
+          and rows[1] == "" and len(rows[0]) > 0
+          and doc == refreshed and plan_again == plan
+          and mapped == discover.map_lanes(data, doc)
+          and skipped == (frozen, None, "probe failed")
+          and setup.collect_bench(args, doc, rows[0]) == (None, ""))
+    return ok, f"note={note!r} new={len(plan_again['new'])} removed={len(plan_again['removed'])}"
+
+
 def case_native_agent_files_follow_the_claude_lanes():
     """The save writes an agent file for each new claude lane, in the form the
     files beside it take, and removes each superseded one (ticket 33)."""
@@ -869,6 +919,8 @@ for name, case in (
     ("a fresh fetch is not fetched again", case_a_fresh_fetch_is_not_fetched_again),
     ("a stale fetch is fetched again", case_a_stale_fetch_is_fetched_again),
     ("a failed fetch keeps the repo rows", case_a_failed_fetch_keeps_the_repo_rows),
+    ("a forced fetch passes a fresh cache", case_a_forced_fetch_passes_a_fresh_cache),
+    ("scan and propose are the launch steps", case_scan_and_propose_are_the_launch_steps),
     ("native agent files follow the claude lanes",
      case_native_agent_files_follow_the_claude_lanes),
     ("a catalog elsewhere gets no agent file", case_a_catalog_elsewhere_gets_no_agent_file),

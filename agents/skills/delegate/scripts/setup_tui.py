@@ -4,12 +4,14 @@ import copy
 import os
 import subprocess
 import textwrap
+import time
 
 import bench_page
 from bench import (
     EPOCH_BENCHMARKS,
     KIND_DOMINATED,
     KIND_NO_ROWS,
+    KIND_NOT_DOMINATED,
     KIND_RECORDED,
     KIND_UNAVAILABLE,
     KIND_ULTRA,
@@ -48,12 +50,12 @@ from catalog import (
     unnamed_carried,
     write_order_from_lines,
 )
+from catalog import default_class_guide_path as catalog_guide_path
 
 # These render as single lines in an 80-column terminal, where anything past
 # column 79 is clipped. Keep each one under that; a legend cut mid-sentence
 # explains nothing.
 TIER_ONELINER = "Tier: capability 1-4; a class takes lanes from its floor up to its ceiling."
-CLASSES_LEGEND = "classes: each class has a floor and ceiling tier (1-4)."
 # One gesture flips the box, and it is the same gesture on the carry screen and
 # on the tier screens, so each footer names it the same way. The box means
 # something different on each screen — the column header says which — but the
@@ -61,24 +63,71 @@ CLASSES_LEGEND = "classes: each class has a floor and ceiling tier (1-4)."
 FLIP_KEYS = "space/x: flip"
 TIER_FOOTER = f"↑/↓/j/k: move  {FLIP_KEYS}  enter: next  b: back  o: bench  q: quit"
 # The review page orders lanes inside each tier (ticket 28). Its footer is 79
-# places, the most an 80-column line shows; the legend spells the keys out.
+# places, the most an 80-column line shows; the key help under the table
+# spells the keys out, apart from the explanation and the warning.
 REVIEW_FOOTER = "j/k: cursor  J/K: move lane  1-4: tier  v: paste  enter: next  b: back  q: quit"
-REVIEW_MOVE_LEGEND = "J/K or shift-↑/↓ moves a lane inside its tier; 1-4 moves it to that tier's end."
 REVIEW_ORDER_LEGEND = "Ranking tries 1 first; a lane lower down runs if its pace beats 1's by margin."
 ROUTING_FOOTER = "j/k: move  +/-: adjust  space/x: meters  enter: confirm  b: back  q: quit"
 PRESCREEN_FOOTER = f"↑/↓ or j/k: move  {FLIP_KEYS}  enter: continue  b: back  q: quit"
+DISCOVERY_FOOTER = "any key: continue  b: back  q: quit"
+DISCOVERY_RESCAN_FOOTER = "any key: continue  r: rescan  b: back  q: quit"
 NO_DATA_MESSAGE = "No per-effort data was supplied, so nothing else could be judged."
-CONFIRM_OFF_LEGEND = "off: written with enabled: false.  On lanes omit the key."
+
+
+def definition(term, text, value="", style="term"):
+    """One entry of a definition list under a table: the term, its value if it
+    has one, and what it means. `style` is the term's, so a term that names a
+    colour in the table above can be drawn in that colour and read as a key.
+    `layout_lines` aligns the entries of one page in two columns."""
+    return {"term": term, "value": value, "text": text, "style": style}
+
 
 # A reason has to fit the `why` column, and the column has to fit beside the
 # lane, the model and the effort in 80 places. So each reason is a phrase that
-# is whole at about twenty characters, and the sentence it used to be is a
-# legend line that appears only on the screens where that phrase appears. A
-# reason cut mid-word explains no more than a legend cut mid-sentence does.
-DOMINATED_LEGEND = "X wins on S: effort X scores ≥ at ≤ cost on most of source S's benchmarks."
-ABSENCE_LEGEND = "Absence of data is not evidence against a lane, so those stay on."
-RECORDED_LEGEND = '"in the catalog": you recorded that already; the pre-screen leaves it.'
-ULTRA_LEGEND = "ultra: no source scores it, and auto-delegation breaks the worker preamble."
+# is whole at about twenty characters, and the sentence it stands for is a
+# definition that appears only on the screens where that phrase appears. A
+# reason cut mid-word explains no more than a definition cut mid-sentence does,
+# so each text is under 63 places: the longest term, two spaces, then the text.
+DOMINATED_DEF = definition("X wins on S", "effort X scores ≥ at ≤ cost on most of source S's benchmarks",
+                           style="why-data")
+NOT_DOMINATED_DEF = definition("not dominated", "no other effort of the model wins over it, so it stays on")
+ABSENCE_DEF = definition("no rows", "absence of data is not evidence against a lane; it stays on")
+RECORDED_DEF = definition("in the catalog", "you recorded that already; the pre-screen leaves it")
+ULTRA_DEF = definition("ultra", "no source scores it; auto-delegation breaks the worker preamble")
+# The review page's keys, spelled out: J/K is the footer's, shift-↑/↓ is not.
+REVIEW_MOVE_DEFS = (
+    definition("J/K, shift-↑/↓", "move the lane inside its tier", style="key"),
+    definition("1-4", "move it to the end of that tier", style="key"),
+)
+CLASSES_DEF = definition("classes", "each class has a floor and a ceiling tier, 1 to 4")
+CONFIRM_OFF_DEF = definition("off", "written with enabled: false; on lanes omit the key")
+# The harness page counts claude's models, but Claude Code lists none: the
+# count is the catalog's own (`discover.discover`).
+CLAUDE_COUNT_LEGEND = "claude lists no model; its count is the catalog's own"
+
+
+def class_descriptions(path=None):
+    """{class: its first sentence} from the Class guide, `assets/classes.md`,
+    for the routing page's group rows. The guide is the one place a class is
+    described, so nothing here paraphrases it: the sentence is quoted, less its
+    full stop. A guide that cannot be read gives every class "" and the page
+    still draws; the guide is an aid to the routing page, not a gate."""
+    try:
+        with open(path or catalog_guide_path(), "r", encoding="utf-8") as f:
+            text = f.read()
+    except (OSError, UnicodeDecodeError):
+        return {name: "" for name in CLASSES}
+    out = {name: "" for name in CLASSES}
+    current = None
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("## "):
+            current = line[3:].strip()
+            continue
+        if current in out and line and not out[current]:
+            head = line.split(". ", 1)[0]
+            out[current] = head[:-1] if head.endswith(".") else head
+    return out
 
 
 def hidden_legend(taken, off):
@@ -244,8 +293,9 @@ def start_facts(lanes_path, routing_path, page_path, discovery, width=80,
     ]
 
 
-# The run in order, for the marker on every screen. Tier is four screens, counted
-# down from the best, so they are listed individually rather than as one step.
+# The run in order, for the trail on the top row of every screen. Tier is four
+# screens, counted down from the best, so they are listed individually rather
+# than as one step.
 STEPS = (
     ("start", "start"),
     ("discovery", "harnesses"),
@@ -266,36 +316,56 @@ class Wizard:
     def __init__(self, lanes_doc, routing_doc, bench, discovered,
                  lanes_path, routing_path, initial_message="",
                  bench_page_path=None, effort_rows=None, discovery=None, clipboard=None,
-                 focus=None, refresh=None, rows_note=""):
+                 focus=None, refresh=None, rows_note="", rescan=None, tier_lines=None,
+                 clock=None, class_guide=None):
         # read only when `v` is pressed on the review page (ticket 27)
         self._clipboard = clipboard or read_clipboard
-        self._original_lanes = copy.deepcopy(lanes_doc)
         self._original_routing = copy.deepcopy(routing_doc)
-        self.lanes_doc = copy.deepcopy(lanes_doc)
         self.routing_doc = copy.deepcopy(routing_doc)
+        self.lanes_path = lanes_path
+        self.routing_path = routing_path
+        self.bench_page_path = bench_page_path
+        # `r` on the harnesses page runs the launch scrub again through this,
+        # and gets back what `_load` takes; None is a wizard that cannot
+        self._rescan = rescan
+        # the `--tiers-from` lines, applied again after a rescan as at launch
+        self.tier_lines = tier_lines
+        self._clock = clock or (lambda: time.strftime("%H:%M"))
+        self.scanned = "at launch"
+        # the routing page's class descriptions, from the Class guide
+        self.class_guide = class_descriptions() if class_guide is None else class_guide
+        self.focus = None if focus in (None, "start") else focus
+        self.screen = "start"
+        self.tier = None
+        self._result = None
+        self._width = 80
+        self._load(lanes_doc, bench, discovered, effort_rows, discovery, refresh, rows_note)
+        self.message = initial_message or ("benchmark data unavailable" if bench is None else "")
+        if self.focus:
+            self._enter_focus()
+
+    def _load(self, lanes_doc, bench, discovered, effort_rows, discovery, refresh, rows_note):
+        """Start from what one scrub found: the catalog with the current
+        generation proposed, the benchmark data, the harnesses and their
+        models. Every decision the pages after the harnesses page hold is
+        derived here, so a rescan starts them over consistently."""
+        self._original_lanes = copy.deepcopy(lanes_doc)
+        self.lanes_doc = copy.deepcopy(lanes_doc)
         self.bench = bench
         self.effort_rows = effort_rows
         self.discovered = set(discovered)
         self.discovery = discovery
-        self.lanes_path = lanes_path
-        self.routing_path = routing_path
-        self.bench_page_path = bench_page_path
         # what the refresh proposed before the first screen, and where the
         # benchmark rows came from; both are start-page facts (ticket 33)
         self.refresh = refresh
         self.rows_note = rows_note
-        self.focus = None if focus in (None, "start") else focus
-        self.screen = "start"
-        self.tier = None
         self.cursor = 0
-        self.message = initial_message or ("benchmark data unavailable" if bench is None else "")
-        self._result = None
+        self.message = ""
         self._review_order = []
         # Orin's order inside each tier, as the review page shows it (ticket 28),
         # and each lane's place in the last lines applied, which starts it
         self._tier_order = {tier: [] for tier in range(1, 5)}
         self._line_order = {}
-        self._width = 80
         _rows, self._unmatched = resolve_effort_rows(self.lanes_doc, effort_rows)
         self._proposals = propose_enabled(self.lanes_doc, effort_rows)
         self._reasons = {name: carry_reason(decision) for name, decision in self._proposals.items()}
@@ -322,8 +392,38 @@ class Wizard:
             }
             for tier in range(1, 5)
         }
-        if self.focus:
-            self._enter_focus()
+
+    def rescan_ready(self):
+        """Whether `r` scrubs again here: on the harnesses page, with a scrub
+        to run. The page comes before every carry and Tier decision, so a
+        rescan throws none away; nowhere later offers it."""
+        return self.screen == "discovery" and self._rescan is not None
+
+    def rescan(self):
+        """`r` on the harnesses page: the launch scrub again — the harnesses'
+        models, the benchmark rows fetched afresh, the current generation
+        proposed — and every later page starts over from what it found, with
+        the `--tiers-from` lines applied again. A scrub that fails is a
+        message and changes nothing; nothing here writes a file."""
+        if not self.rescan_ready():
+            return
+        try:
+            found = self._rescan()
+        except Exception as e:  # the scrub shells out and fetches; any failure is one message
+            self.message = f"rescan failed: {e}"
+            return
+        self._load(found["lanes_doc"], found.get("bench"), found.get("discovered") or (),
+                   found.get("effort_rows"), found.get("discovery"), found.get("refresh"),
+                   found.get("rows_note") or "")
+        self.scanned = f"at {self._clock()}"
+        refresh = self.refresh or {}
+        message = (f"Rescanned {self.scanned}: {plural(len(refresh.get('new') or ()), 'new Lane')}, "
+                   f"{len(refresh.get('removed') or ())} removed")
+        if found.get("message"):
+            message = f"{message}; {found['message']}"
+        if self.tier_lines is not None:
+            message = f"{message}; {self.apply_tier_lines(self.tier_lines)}"
+        self.message = message
 
     def result(self):
         return self._result
@@ -629,6 +729,8 @@ class Wizard:
                 self.screen = "start"
                 self.cursor = 0
                 self.message = ""
+            elif key == "r" and self.rescan_ready():
+                self.rescan()
             else:
                 self._enter_prescreen()
             return
@@ -923,7 +1025,8 @@ class Wizard:
         return values
 
     def _frame(self, screen, title, *, tier=None, columns=None, rows=None,
-               footer="", body=None, legend=None, elastic="", panel=None):
+               footer="", body=None, legend=None, elastic="", panel=None,
+               defs=None, warnings=None):
         return {
             "screen": screen, "title": title, "tier": tier,
             "columns": columns or [], "rows": rows or [],
@@ -932,29 +1035,37 @@ class Wizard:
             "steps": self._step_marker(), "elastic": elastic,
             # paragraphs drawn beside the table, wrapped to the room it leaves
             "panel": panel or [],
+            # under the table, before the legend: terms defined in two columns
+            # (`definition`), and after it: warnings, read before the keys
+            "defs": list(defs or []), "warnings": list(warnings or []),
         }
 
     def _prescreen_legend(self):
-        """Explain the reasons that are on this screen, and no others.
+        """(definitions, legend lines): the reasons on this screen, and no
+        others, plus a count of the benchmarked models that are nobody's lane.
 
         Each reason in the `why` column is a phrase; the sentence it stands for
-        is here. Listing the sentences unconditionally would push the lane rows
-        off a short window to explain a case that is not on screen, so each line
-        is earned by a reason that is actually shown.
+        is a definition here. Defining every phrase unconditionally would push
+        the lane rows off a short window to explain a case that is not on
+        screen, so each entry is earned by a reason that is actually shown.
+        The models no lane runs used to be listed by name, which at thirty
+        names was noise that ran off the line; the count says what matters,
+        that the rows name models the catalog does not.
         """
-        kinds = [self._proposals[name]["kind"] for name in self._lane_names()]
-        lines = [DOMINATED_LEGEND]
-        if any(kind in (KIND_NO_ROWS, KIND_UNAVAILABLE) for kind in kinds):
-            lines.append(ABSENCE_LEGEND)
-        # a `published_as` still owed to us shows up here and nowhere else
-        ignored = unmatched_message(self._unmatched, self._width - 1) if self.effort_rows else ""
-        if ignored:
-            lines.append(ignored)
-        if any(kind == KIND_ULTRA for kind in kinds):
-            lines.append(ULTRA_LEGEND)
-        if any(kind == KIND_RECORDED for kind in kinds):
-            lines.append(RECORDED_LEGEND)
-        return lines
+        kinds = {self._proposals[name]["kind"] for name in self._lane_names()}
+        defs = []
+        for kind, entry in ((KIND_DOMINATED, DOMINATED_DEF), (KIND_NOT_DOMINATED, NOT_DOMINATED_DEF),
+                            (KIND_RECORDED, RECORDED_DEF), (KIND_ULTRA, ULTRA_DEF)):
+            if kind in kinds:
+                defs.append(entry)
+        if kinds & {KIND_NO_ROWS, KIND_UNAVAILABLE}:
+            defs.append(ABSENCE_DEF)
+        legend = []
+        if self.effort_rows and self._unmatched:
+            count = len(self._unmatched)
+            legend.append(self._fit(f"{plural(count, 'benchmarked model')} "
+                                    f"{'has' if count == 1 else 'have'} no lane"))
+        return defs, legend
 
     def _tier_legend(self):
         """Say what this page left out, then the tier definition.
@@ -1000,24 +1111,27 @@ class Wizard:
     def _drift_line(self, label, items, always_count=False):
         return list_line(label, items, self._width, always_count)
 
-    def _margin_legend(self):
-        value = self.routing_doc["margin"]
-        if not self._meters_on():
-            return [f"margin {value} is stored; metering is off."]
-        return [
-            f"margin {value} — a lane further down the order takes the job instead of",
-            f"  the top pick only when its pace beats the pick's by more than {value}.",
-        ]
-
-    def _gate_legend(self):
-        value = self.routing_doc["gate"]
-        if not self._meters_on():
-            return [f"gate {value} is stored; metering is off."]
-        percent = f"{value * 100:g}%"
-        return [
-            f"gate {value} — a lane is skipped outright once its meter drops below",
-            f"  {percent} remaining, however capable it is.",
-        ]
+    def _confirm_defs(self):
+        """The confirm page's definitions: each routing term, its value as it
+        will be written, and what it means in one line, from CONTEXT.md."""
+        margin, gate = self.routing_doc["margin"], self.routing_doc["gate"]
+        if self._meters_on():
+            entries = [
+                definition("margin", "the pace lead a later lane needs to take the job from the pick",
+                           value=str(margin)),
+                definition("gate", "the lowest remaining a meter may have and still take a job: "
+                           f"{gate * 100:g}%", value=str(gate)),
+                definition("meters", "ranking uses Gate and Margin; off is Tier, Order and name only",
+                           value="on"),
+            ]
+        else:
+            entries = [
+                definition("margin", "stored; metering is off", value=str(margin)),
+                definition("gate", "stored; metering is off", value=str(gate)),
+                definition("meters", "ranking is Tier, Order and name; Gate and Margin stay stored",
+                           value="off"),
+            ]
+        return [CLASSES_DEF, *entries, CONFIRM_OFF_DEF]
 
     def _meters_on(self):
         return meters_enabled(self.routing_doc)
@@ -1031,12 +1145,6 @@ class Wizard:
         else:
             self.routing_doc["meters"] = False
 
-    def _meters_legend(self):
-        state = "on" if self._meters_on() else "off"
-        if self._meters_on():
-            return ["meters on — ranking uses Gate and Margin. Off is Tier, Order and name only."]
-        return [f"meters {state} — ranking is Tier, Order and name only. Gate and Margin stay stored."]
-
     def _routing_settings(self):
         values = []
         for name in CLASSES:
@@ -1047,6 +1155,42 @@ class Wizard:
                        (None, "gate", self.routing_doc["gate"]),
                        (None, "meters", "on" if self._meters_on() else "off")])
         return values
+
+    # The routing page's last group: the three settings that make the pick.
+    RANKING_GROUP = ("ranking", "how the pick is made among eligible lanes")
+
+    def _routing_rows(self):
+        """The settings grouped: each class is a heading with its description
+        from the Class guide, its floor and ceiling indented under it, then
+        `ranking` with margin, gate and meters. The cursor is an index into
+        `_routing_settings`, so it lands only on a setting, never a heading.
+
+        A description is fitted to the room the panel leaves at this width,
+        because the panel explains the setting under the cursor and is the
+        one thing this page must not lose at 80 places; at 120 the sentence
+        is whole.
+        """
+        settings = self._routing_settings()
+        names = ["  floor", "  ceiling", "  margin", "  gate", "  meters", *CLASSES,
+                 self.RANKING_GROUP[0], "setting"]
+        room = max(MIN_ELASTIC, self._width - 1 - max(len(n) for n in names) - 2
+                   - (PANEL_MIN + PANEL_GAP + 2))
+
+        def heading(name, desc):
+            return {"cells": [name, _clip(desc, room)], "marked": False, "dimmed": False,
+                    "cursor": False, "tag": "", "styles": {"setting": "section", "value": "desc"}}
+
+        rows = []
+        for index, (cls, kind, value) in enumerate(settings):
+            if kind == "floor":
+                rows.append(heading(cls, self.class_guide.get(cls, "")))
+            elif kind == "margin":
+                rows.append(heading(*self.RANKING_GROUP))
+            cell = ("[x] on" if self._meters_on() else "[ ] off") if kind == "meters" else str(value)
+            rows.append({"cells": [f"  {kind}", cell],
+                         "marked": kind == "meters" and self._meters_on(),
+                         "dimmed": False, "cursor": index == self.cursor, "tag": ""})
+        return rows
 
     def _routing_panel(self):
         """What the setting under the cursor does, drawn beside the table
@@ -1145,8 +1289,23 @@ class Wizard:
                 body=body,
             )
         if self.screen == "discovery":
-            harnesses = (self.discovery.get("harnesses")
-                         if isinstance(self.discovery, dict) else None) or {}
+            # What the scrub found, per harness: whether it answered, how many
+            # models it listed, and the Lanes the current generation adds and
+            # supersedes. It ran at launch, before this page, and `r` runs it
+            # again; nothing on this page said so, and Orin asked when it ran.
+            live = isinstance(self.discovery, dict)
+            # a saved snapshot of harness facts alone lists no model, which is
+            # not the same as a harness that listed none
+            facts = live and self.discovery.get("model_facts_available") is not False
+            harnesses = (self.discovery.get("harnesses") if live else None) or {}
+            listed = {}
+            for item in (self.discovery.get("models") if live else None) or []:
+                if isinstance(item, dict):
+                    listed[item.get("harness")] = listed.get(item.get("harness"), 0) + 1
+            refresh = self.refresh or {}
+            new = {name: (self.lanes_doc["lanes"].get(name) or {}).get("harness")
+                   for name in refresh.get("new") or ()}
+            removed = [name.rsplit("@", 1)[-1] for name in refresh.get("removed") or ()]
             rows = []
             for name in HARNESSES:
                 info = harnesses.get(name) if isinstance(harnesses.get(name), dict) else None
@@ -1159,16 +1318,29 @@ class Wizard:
                         label, found = f"error: {err}", False
                     else:
                         label, found = "missing", False
+                    count = info.get("discovered_count")
+                    models = ("" if not found else "—" if not facts
+                              else str(count if isinstance(count, int) else listed.get(name, 0)))
                 else:
                     found = name in self.discovered
                     label = "found" if found else "missing"
-                rows.append({"cells": [name, label], "marked": False, "dimmed": not found,
-                             "cursor": False, "tag": ""})
+                    models = "—"
+                counts = ([str(sum(1 for h in new.values() if h == name)), str(removed.count(name))]
+                          if self.refresh is not None else ["—", "—"])
+                rows.append({"cells": [name, label, models, *counts], "marked": False,
+                             "dimmed": not found, "cursor": False, "tag": ""})
+            body = [self._fit(f"Scanned {self.scanned}: models per harness, benchmark rows, "
+                              "current generation.")]
+            if self.rows_note:
+                body.append(self._fit(self.rows_note))
+            legend = [CLAUDE_COUNT_LEGEND] if live and "claude" in harnesses else []
             return self._frame(
                 "discovery", "Delegate setup: discovery",
-                columns=["harness", "status"],
+                columns=["harness", "status", "models", "new lanes", "removed lanes"],
                 rows=rows,
-                footer="any key: continue  b: back  q: quit",
+                body=body,
+                footer=DISCOVERY_RESCAN_FOOTER if self._rescan is not None else DISCOVERY_FOOTER,
+                legend=legend,
             )
         if self.screen == "prescreen":
             names = self._lane_names()
@@ -1189,13 +1361,21 @@ class Wizard:
                     "marked": on, "dimmed": not on,
                     "cursor": index == self.cursor,
                     "tag": "",
+                    # The one reason class drawn in a style of its own: a
+                    # verdict the data gave, which nobody recorded and which is
+                    # worth a second look. The others say nothing the box and
+                    # the row's weight do not already say.
+                    "styles": ({"why": "why-data"}
+                               if self._proposals[name]["kind"] == KIND_DOMINATED else {}),
                 })
+            defs, legend = self._prescreen_legend()
             return self._frame(
                 "prescreen", "Lanes to carry",
                 columns=["carry", "lane", "model", "effort", "why"],
                 rows=rows,
                 footer=PRESCREEN_FOOTER,
-                legend=self._prescreen_legend(),
+                defs=defs,
+                legend=legend,
                 elastic="why",
             )
         if self.screen == "tier":
@@ -1249,34 +1429,39 @@ class Wizard:
                         "marked": False, "dimmed": False,
                         "cursor": name == here, "tag": "",
                     })
-            off = [name for name in self.lanes_doc["lanes"] if not self._enabled[name]]
-            legend = [REVIEW_MOVE_LEGEND, REVIEW_ORDER_LEGEND if self._meters_on()
+            off = sum(1 for name in self.lanes_doc["lanes"] if not self._enabled[name])
+            # The keys spelled out, then the rule, then any warning: three
+            # things read three ways. The lanes not carried used to be listed
+            # by name, which at thirty-seven ran off the line; they are on
+            # the carry page, so a count is what this page owes.
+            legend = [REVIEW_ORDER_LEGEND if self._meters_on()
                       else "Metering is off. Ranking uses Tier, Order and Lane name."]
             if off:
-                legend.append(self._drift_line("Not carried, keeps its catalog tier", off))
-            # Coverage, not a verdict on the Tier: which lanes a Tier carries
-            # stays Orin's decision (ticket 29).
-            legend.extend(meter_dependency_lines(self._meter_coverage()))
+                legend.append(f"{plural(off, 'lane')} not carried "
+                              f"{'keeps its' if off == 1 else 'keep their'} catalog tier.")
             return self._frame(
                 "review", "Order each tier",
                 columns=columns, rows=rows,
                 footer=REVIEW_FOOTER,
+                defs=REVIEW_MOVE_DEFS,
                 legend=legend,
+                # Coverage, not a verdict on the Tier: which lanes a Tier
+                # carries stays Orin's decision (ticket 29). A warning, so it
+                # is drawn as one and never sits in the dim legend.
+                warnings=meter_dependency_lines(self._meter_coverage()),
             )
         if self.screen == "routing":
-            rows = [{"cells": [f"{cls} {kind}" if cls else kind,
-                               ("[x] on" if self._meters_on() else "[ ] off") if kind == "meters" else str(value)],
-                     "marked": kind == "meters" and self._meters_on(),
-                     "dimmed": False, "cursor": i == self.cursor, "tag": ""}
-                    for i, (cls, kind, value) in enumerate(self._routing_settings())]
             return self._frame(
                 "routing", "Routing",
-                columns=["setting", "value"], rows=rows,
+                columns=["setting", "value"], rows=self._routing_rows(),
                 footer=ROUTING_FOOTER,
                 # what the setting under the cursor does sits beside the table;
                 # the tier map below is reference for every setting at once
                 panel=self._routing_panel(),
                 legend=self._tier_map_lines(),
+                # the descriptions are fitted to the panel's room in
+                # `_routing_rows`, so the column may take their width
+                elastic="value",
             )
         if self.screen == "confirm":
             rows = []
@@ -1315,9 +1500,8 @@ class Wizard:
                 # a path is the one value here that will not fit a 24-place cell,
                 # and `/Users/dreiss/.config/de…` is not a path anyone can check
                 elastic="value",
-                legend=(["Only the listed changes will be written."] if self.focus else
-                        [CLASSES_LEGEND, *self._margin_legend(),
-                         *self._gate_legend(), *self._meters_legend(), CONFIRM_OFF_LEGEND]),
+                legend=["Only the listed changes will be written."] if self.focus else [],
+                defs=[] if self.focus else self._confirm_defs(),
             )
         return self._frame(self.screen, "Delegate setup")
 
@@ -1419,6 +1603,45 @@ def _fit_table(view, width):
 # reference and the rows are the work.
 ROW_FLOOR = 6
 MIN_WIDTH, MIN_HEIGHT = 80, 16
+# The rows above the body on every page: the trail, a blank row, the title and
+# a blank row. The body or the table starts here.
+TOP = 4
+
+# One palette for every screen. A style names what a piece of text is, never
+# how it looks; the look is decided here, once, as (attributes, colour), and
+# `_palette` turns it into curses attributes for the terminal in front of us:
+# the colour when the terminal has colours, and bold, dim and reverse alone
+# when it has not, so every style is still told apart. Colours are three of
+# the basic eight on the terminal's own background, and each means one thing:
+# green is settled (a step behind us, a box ticked, a value to be written),
+# yellow is attention (a verdict the data gave, a warning), cyan is a key to
+# press. Everything else is weight.
+STYLES = {
+    "steps": ("dim", None),               # the trail: its dots and the steps ahead
+    "step-done": ("", "green"),           # a step behind us
+    "step-here": ("bold reverse", None),  # the step this page is
+    "title": ("bold", None),
+    "title-note": ("dim", None),          # `1-44 of 46` beside the title
+    "header": ("bold underline", None),   # the underline is the rule under it
+    "body": ("", None),
+    "row": ("", None),
+    "row-dim": ("dim", None),             # a lane not carried, a harness missing
+    "row-cursor": ("reverse", None),      # one bar, readable on any background
+    "row-cursor-dim": ("reverse", None),
+    "mark-on": ("bold", "green"),         # a ticked box
+    "why-data": ("", "yellow"),           # a reason the data gave, not the human
+    "section": ("bold", None),            # a heading inside a table
+    "desc": ("dim", None),                # a description beside a heading
+    "panel": ("", None),
+    "panel-head": ("bold", None),
+    "legend": ("dim", None),              # reference, read after the rows
+    "term": ("bold", None),               # the term of a definition
+    "value": ("bold", "green"),           # a value about to be written
+    "warning": ("bold", "yellow"),        # a warning: read before the keys
+    "footer": ("", None),                 # the keys' actions
+    "key": ("bold", "cyan"),              # the keys themselves
+    "message": ("bold", None),
+}
 # A panel beside a table: the gap before its rule, the narrowest it may be
 # before it is not drawn, and the widest its prose runs, for reading.
 PANEL_GAP, PANEL_MIN, PANEL_MAX = 3, 28, 72
@@ -1436,13 +1659,83 @@ def _panel_lines(paragraphs, width):
     return out
 
 
+def _step_spans(steps):
+    """Where each step of the trail is drawn: the steps before `[here]` are
+    done, `[here]` is the step this page is, and the rest, like the dots
+    between them, keep the line's own quiet style."""
+    spans, x, done = [], 0, True
+    for part in steps.split(" · "):
+        if part.startswith("[") and part.endswith("]"):
+            spans.append((x, x + len(part), "step-here"))
+            done = False
+        elif done:
+            spans.append((x, x + len(part), "step-done"))
+        x += len(part) + 3
+    return spans
+
+
+def _key_spans(footer):
+    """The keys of a footer, one `key: action` two spaces from the next: each
+    key up to its colon is drawn as a key, and the action keeps the line's
+    style."""
+    spans, x = [], 0
+    for item in footer.split("  "):
+        key, colon, _action = item.partition(": ")
+        if colon:
+            spans.append((x, x + len(key), "key"))
+        x += len(item) + 2
+    return spans
+
+
+def _definition_lines(defs):
+    """A page's definitions in two aligned columns, each as (text, role,
+    spans): the term in its own style, the value in the value style, and the
+    meaning in the legend's."""
+    if not defs:
+        return []
+    term_width = max(len(entry["term"]) for entry in defs)
+    value_width = max(len(entry.get("value") or "") for entry in defs)
+    out = []
+    for entry in defs:
+        text = entry["term"].ljust(term_width) + "  "
+        spans = [(0, len(entry["term"]), entry.get("style") or "term")]
+        if value_width:
+            value = entry.get("value") or ""
+            if value:
+                spans.append((len(text), len(text) + len(value), "value"))
+            text += value.ljust(value_width) + "  "
+        out.append((text + entry["text"], "legend", spans))
+    return out
+
+
+def _legend_zone(view):
+    """What sits between the table and the keys, top to bottom: the
+    definitions, the legend lines, then the warnings, as (text, role, spans)."""
+    return [*_definition_lines(view.get("defs") or []),
+            *((line, "legend", []) for line in view.get("legend") or []),
+            *((line, "warning", []) for line in view.get("warnings") or [])]
+
+
 def layout_lines(view, width, height):
-    """Place one frame on a character grid: [(row, text, role)].
+    """Place one frame on a character grid: [(row, text, role, spans)].
 
     Separated from the curses call so a test can read the screen a human sees.
     Every fault this function now guards against — a reason column silently
     dropped, a tag clipped to `ti`, rows scrolled away with nothing to say so —
     was invisible to tests that only ever read the frame dict.
+
+    The trail is row 0 and the title row 2, a blank row under each, and the
+    body or the table starts at `TOP`. The keys are the third row from the
+    end with a blank row above them; the legend zone — definitions, legend
+    lines, warnings (`_legend_zone`) — ends at that blank row and keeps one
+    more between it and the last table row, so the rows, the reference and
+    the keys never run together. The zone gives way first, last line first,
+    once the table would lose its floor.
+
+    `spans` is [(start, end, style)] over `text`: each a piece the renderer
+    draws again in a style of its own over the line's role — a ticked box,
+    the step this page is, a key, a reason the data gave. Most lines have
+    none, and the cursor row never does, so it stays one bar.
 
     An entry's leading spaces are its column: a panel line beside the table
     shares a row with a table line and starts where the table ends, so it is
@@ -1453,24 +1746,30 @@ def layout_lines(view, width, height):
     tag_room = max([len(row["tag"]) for row in rows], default=0)
     chosen, widths = _fit_table(view, width - (tag_room + 2 if tag_room else 0))
     body = view.get("body") or []
-    legend = list(view.get("legend") or [])
     footer_y = height - 3
-    steps = view.get("steps") or ""
-    steps_y = footer_y - 1 if steps else footer_y
-    table_floor = 2 + (1 if view["columns"] else 0) + min(len(rows), ROW_FLOOR)
-    if legend and steps_y - len(legend) < table_floor:
-        keep = max(0, steps_y - table_floor)
-        if keep < len(legend):
-            legend = legend[:keep]
-            if keep:
-                legend[-1] = "… enlarge the window for the rest"
-    legend_y = steps_y - len(legend)
+    # the keys never touch what stands above them
+    legend_end = footer_y - 1
+    table_floor = TOP + (1 if view["columns"] else 0) + min(len(rows), ROW_FLOOR)
 
-    y = 2
+    def fit_legend(candidate):
+        """The zone entries that leave the table its floor and its blank row."""
+        keep = max(0, legend_end - (table_floor + 1))
+        if keep < len(candidate):
+            candidate = candidate[:keep]
+            if keep:
+                candidate[-1] = ("… enlarge the window for the rest", "legend", [])
+        return candidate
+
+    legend = fit_legend(_legend_zone(view))
+    legend_y = legend_end - len(legend)
+    # the last table row stops a blank row short of the legend, or of the keys
+    table_end = legend_y - 1 if legend else legend_y
+
+    y = TOP
     for line in body:
-        if y >= legend_y:
+        if y >= table_end:
             break
-        lines.append((y, line, "body"))
+        lines.append((y, line, "body", []))
         y += 1
     first, shown = 0, 0
     if chosen and view.get("panel"):
@@ -1480,63 +1779,76 @@ def layout_lines(view, width, height):
         if panel_width >= PANEL_MIN:
             panel_y = y + (1 if body else 0)
             for offset, (text, role) in enumerate(_panel_lines(view["panel"], panel_width)):
-                if panel_y + offset >= legend_y:
+                if panel_y + offset >= table_end:
                     break
-                lines.append((panel_y + offset, " " * panel_x + "│ " + text, role))
+                lines.append((panel_y + offset, " " * panel_x + "│ " + text, role, []))
         else:
             # no room beside the table: the panel takes the legend's place,
             # ahead of it, since it explains the row being edited
-            legend = [text for text, _role in _panel_lines(view["panel"], width - 1)] + legend
-            if steps_y - len(legend) < table_floor:
-                legend = legend[:max(0, steps_y - table_floor)]
-            legend_y = steps_y - len(legend)
-    if chosen and y < legend_y:
+            legend = fit_legend([(text, "legend", []) for text, _role
+                                 in _panel_lines(view["panel"], width - 1)] + legend)
+            legend_y = legend_end - len(legend)
+            table_end = legend_y - 1 if legend else legend_y
+    if chosen and y < table_end:
         if body:
             y += 1
-        if y < legend_y:
+        if y < table_end:
             lines.append((y, "  ".join(_clip(view["columns"][i], w).ljust(w)
-                                      for i, w in zip(chosen, widths)), "header"))
+                                      for i, w in zip(chosen, widths)), "header", []))
             y += 1
-        room = max(1, legend_y - y)
+        room = max(1, table_end - y)
         cursor_index = next((i for i, row in enumerate(rows) if row["cursor"]), 0)
         if cursor_index >= room:
             first = cursor_index - room + 1
         for row in rows[first:]:
-            if y >= legend_y:
+            if y >= table_end:
                 break
             if row.get("section"):
-                lines.append((y, fit_line(row["section"], width), "section"))
+                lines.append((y, fit_line(row["section"], width), "section", []))
                 y += 1
                 shown += 1
                 continue
-            cells = []
+            cells, spans, x = [], [], 0
+            styles = row.get("styles") or {}
             for i, w in zip(chosen, widths):
                 cell = row["cells"][i] if i < len(row["cells"]) else ""
+                # a ticked box and a cell the frame styles are drawn in their
+                # own style; the cursor row is one bar, so it takes none
+                if not row["cursor"]:
+                    if cell.startswith("[x]"):
+                        spans.append((x, x + min(3, w), "mark-on"))
+                    style = styles.get(view["columns"][i])
+                    if style and cell:
+                        spans.append((x, x + min(len(cell), w), style))
                 cells.append(_clip(cell, w).ljust(w))
+                x += w + 2
             line = "  ".join(cells)
             if row["tag"]:
                 line += "  " + row["tag"]
             role = "row-cursor" if row["cursor"] else "row"
             if row["dimmed"]:
                 role += "-dim"
-            lines.append((y, line, role))
+            lines.append((y, line, role, spans))
             y += 1
             shown += 1
 
     title = view["title"]
+    title_spans = []
     if shown and shown < len(rows):
         # a window too short for the list said nothing about it, so eight lanes
         # looked like the whole catalog
         note = f"{first + 1}-{first + shown} of {len(rows)}"
         gap = width - 1 - len(title) - len(note)
         title = title + " " * gap + note if gap >= 2 else f"{title}  {note}"
-    lines.append((0, title, "title"))
-    for offset, line in enumerate(legend):
-        lines.append((legend_y + offset, line, "legend"))
+        title_spans = [(len(title) - len(note), len(title), "title-note")]
+    steps = view.get("steps") or ""
     if steps:
-        lines.append((steps_y, steps, "steps"))
-    lines.append((footer_y, view["footer"], "footer"))
-    lines.append((height - 2, view["message"], "message"))
+        lines.append((0, steps, "steps", _step_spans(steps)))
+    lines.append((2, title, "title", title_spans))
+    for offset, (text, role, spans) in enumerate(legend):
+        lines.append((legend_y + offset, text, role, spans))
+    lines.append((footer_y, view["footer"], "footer", _key_spans(view["footer"])))
+    lines.append((height - 2, view["message"], "message", []))
     return lines
 
 
@@ -1544,13 +1856,49 @@ def overlay(entries, width, height):
     """The grid a terminal of this size shows, one string per row, with each
     entry drawn at its leading-space indent over what the row already holds."""
     grid = [""] * height
-    for y, text, _role in entries:
+    for y, text, _role, _spans in entries:
         if not (0 <= y < height) or not text:
             continue
         x = len(text) - len(text.lstrip(" "))
         row = grid[y].ljust(x)
         grid[y] = (row[:x] + text[x:] + row[len(text):])[: width - 1].rstrip()
     return grid
+
+
+def _palette(curses):
+    """`STYLES` as curses attributes for this terminal.
+
+    Colour comes only when the terminal has at least the basic eight and
+    takes its own background (`use_default_colors`), so a light theme and a
+    dark one both keep their background under the text. Without that, or if
+    a pair cannot be made, every style keeps its attributes and drops its
+    colour, so a ticked box is still bold and a key is still bold.
+    """
+    attrs = {"bold": curses.A_BOLD, "dim": curses.A_DIM,
+             "reverse": curses.A_REVERSE, "underline": curses.A_UNDERLINE}
+    codes = {"green": curses.COLOR_GREEN, "cyan": curses.COLOR_CYAN,
+             "yellow": curses.COLOR_YELLOW}
+    mono = {}
+    for style, (words, _colour) in STYLES.items():
+        attr = 0
+        for word in words.split():
+            attr |= attrs[word]
+        mono[style] = attr
+    try:
+        if not (curses.has_colors() and getattr(curses, "COLORS", 0) >= 8):
+            return mono
+        curses.use_default_colors()
+        pairs = {}
+        palette = dict(mono)
+        for style, (_words, colour) in STYLES.items():
+            if colour:
+                if colour not in pairs:
+                    pairs[colour] = len(pairs) + 1
+                    curses.init_pair(pairs[colour], codes[colour], -1)
+                palette[style] |= curses.color_pair(pairs[colour])
+        return palette
+    except curses.error:
+        return mono
 
 
 def run_curses(wizard):
@@ -1563,19 +1911,33 @@ def run_curses(wizard):
         except curses.error:
             pass
         stdscr.keypad(True)
-        roles = {
-            "title": curses.A_BOLD, "header": curses.A_BOLD,
-            "steps": curses.A_BOLD, "message": curses.A_BOLD,
-            "body": 0, "legend": 0, "footer": 0, "row": 0,
-            "row-dim": curses.A_DIM,
-            "panel": 0, "panel-head": curses.A_BOLD, "section": curses.A_BOLD,
-            "row-cursor": curses.A_REVERSE | curses.A_BOLD,
-            "row-cursor-dim": curses.A_DIM | curses.A_REVERSE | curses.A_BOLD,
-        }
-        while wizard.screen not in ("done", "quit"):
+        palette = _palette(curses)
+
+        def draw(width, height):
             stdscr.erase()
+            view = wizard.view(width)
+            for y, text, role, spans in layout_lines(view, width, height):
+                if 0 <= y < height and text:
+                    # leading spaces are the entry's column, so a panel line
+                    # beside the table does not blank the row it shares
+                    x = len(text) - len(text.lstrip(" "))
+                    if x >= width - 1:
+                        continue
+                    try:
+                        stdscr.addnstr(y, x, text[x:], max(1, width - 1 - x), palette[role])
+                        # each span is drawn again over the line, in its own style
+                        for start, end, style in spans:
+                            if start < width - 1 and end > start:
+                                stdscr.addnstr(y, start, text[start:end],
+                                               width - 1 - start, palette[style])
+                    except curses.error:
+                        pass
+            stdscr.refresh()
+
+        while wizard.screen not in ("done", "quit"):
             height, width = stdscr.getmaxyx()
             if width < MIN_WIDTH or height < MIN_HEIGHT:
+                stdscr.erase()
                 try:
                     stdscr.addnstr(0, 0, "Please enlarge the terminal window "
                                    f"(minimum {MIN_WIDTH}x{MIN_HEIGHT}).", max(1, width - 1))
@@ -1588,19 +1950,7 @@ def run_curses(wizard):
                 if code in (ord("q"), ord("Q")):
                     wizard.handle("q")
                 continue
-            view = wizard.view(width)
-            for y, text, role in layout_lines(view, width, height):
-                if 0 <= y < height and text:
-                    # leading spaces are the entry's column, so a panel line
-                    # beside the table does not blank the row it shares
-                    x = len(text) - len(text.lstrip(" "))
-                    if x >= width - 1:
-                        continue
-                    try:
-                        stdscr.addnstr(y, x, text[x:], max(1, width - 1 - x), roles[role])
-                    except curses.error:
-                        pass
-            stdscr.refresh()
+            draw(width, height)
             code = stdscr.getch()
             mapping = {curses.KEY_UP: "up", curses.KEY_DOWN: "down",
                        ord("k"): "up", ord("j"): "down", ord(" "): "space",
@@ -1614,6 +1964,14 @@ def run_curses(wizard):
                        curses.KEY_SF: "lane-down", curses.KEY_SR: "lane-up"}
             if ord("1") <= code <= ord("5"):
                 key = chr(code)
+            elif code in (ord("r"), ord("R")) and wizard.rescan_ready():
+                # the scrub shells out and fetches, so the page says what it
+                # is doing before `handle` runs it; a probe may print, so the
+                # screen is painted whole afterwards
+                key = "r"
+                wizard.message = "rescanning…"
+                draw(width, height)
+                stdscr.clear()
             else:
                 key = mapping.get(code, "other")
             if key == "o" and wizard.bench_page_path:

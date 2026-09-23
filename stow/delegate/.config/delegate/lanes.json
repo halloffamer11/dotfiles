@@ -370,7 +370,7 @@
       "tier": 4,
       "basis": "frontier codex model, priority 1 in the CLI; added 2026-09-09",
       "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight 40 is a placeholder set by the session. price: developers.openai.com/api/docs/pricing, gpt-6-astra short-context row, read 2026-09-18.",
-      "enabled": false
+      "order": 3
     },
     "astra-low@codex": {
       "harness": "codex",
@@ -424,7 +424,7 @@
       "tier": 4,
       "basis": "same model as astra-high@codex; effort 'xhigh' offered by codex, discovered by discover.py --efforts 2026-09-10",
       "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from astra-high@codex; a different effort spends a different share of the meter and needs a different time. price: developers.openai.com/api/docs/pricing, gpt-6-astra short-context row, read 2026-09-18.",
-      "order": 3
+      "enabled": false
     },
     "astra-max@codex": {
       "harness": "codex",
@@ -478,7 +478,7 @@
       "tier": 3,
       "basis": "gpt-6-sol supersedes gpt-5.6-sol on codex; takes the place of sol-high@codex",
       "note": "UNMEASURED: meter_weight and timeout copied from sol-high@codex. price: developers.openai.com/api/docs/pricing, gpt-6-sol short-context row, read 2026-09-22.",
-      "order": 4
+      "enabled": false
     },
     "sol6-low@codex": {
       "harness": "codex",
@@ -529,10 +529,10 @@
         "cache_write": 2.5,
         "out": 10.0
       },
-      "tier": 4,
+      "tier": 3,
       "basis": "gpt-6-sol supersedes gpt-5.6-sol on codex; takes the place of sol-xhigh@codex",
       "note": "UNMEASURED: meter_weight and timeout copied from sol-xhigh@codex. price: developers.openai.com/api/docs/pricing, gpt-6-sol short-context row, read 2026-09-22.",
-      "enabled": false
+      "order": 4
     },
     "sol6-max@codex": {
       "harness": "codex",
