@@ -702,7 +702,9 @@ def case_native_agent_files_follow_the_claude_lanes():
     files beside it take, and removes each superseded one (ticket 33)."""
     import setup
     _frozen, refreshed, plan = refresh_fixture()
-    shape_path = os.path.join(REPO_AGENTS, "lane-opus-high.md")
+    # the checkout's own file for this lane is the form, byte for byte: it is
+    # what a real run of this code wrote, and the test regenerates it
+    shape_path = os.path.join(REPO_AGENTS, "lane-opus55-high.md")
     with open(shape_path, encoding="utf-8") as f:
         shape = f.read()
     with tempfile.TemporaryDirectory() as td:
@@ -715,12 +717,9 @@ def case_native_agent_files_follow_the_claude_lanes():
         written = sorted(os.listdir(agents))
         with open(os.path.join(agents, "lane-opus55-high.md"), encoding="utf-8") as f:
             text = f.read()
-        expected = (shape.replace("lane-opus-high", "lane-opus55-high")
-                         .replace("opus-high@claude", "opus55-high@claude")
-                         .replace("model: claude-opus-5\n", "model: claude-opus-5-5\n"))
         ok = (written == sorted(f"lane-opus55-{e}.md"
                                 for e in ("low", "medium", "high", "xhigh", "max"))
-              and text == expected
+              and text == shape
               and os.path.realpath(setup.NATIVE_AGENTS_DIR) == os.path.realpath(REPO_AGENTS)
               and len(lines) == 10)
         return ok, f"written={written} lines={lines} text={text!r}"
@@ -768,6 +767,7 @@ def case_the_real_layout_saves_the_agent_files():
         for effort in ("low", "medium", "high", "xhigh", "max"):
             with open(os.path.join(agents, f"lane-opus-{effort}.md"), "w") as f:
                 f.write("superseded\n")
+        before = sorted(os.listdir(real))
         setup.NATIVE_AGENTS_DIR = agents
         try:
             found = setup.native_agents_dir(config)
@@ -780,8 +780,7 @@ def case_the_real_layout_saves_the_agent_files():
                                     for e in ("low", "medium", "high", "xhigh", "max"))
               and len(lines) == 10
               # the checkout's own agent files are untouched by a test
-              and not any(name.startswith("lane-opus55-") for name in os.listdir(real))
-              and "lane-opus-high.md" in os.listdir(real))
+              and sorted(os.listdir(real)) == before)
         return ok, f"found={found} written={written}"
 
 

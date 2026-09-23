@@ -191,10 +191,21 @@ _stowed_path = _os.path.abspath(_os.path.join(
 with open(_stowed_path, encoding="utf-8") as _f:
     _stowed = _json.load(_f)
 record("stowed catalog validates", catalog.validate_lanes(copy.deepcopy(_stowed)) is not None)
-for lane_name in ("haiku-high@claude", "sonnet-high@claude", "opus-high@claude"):
+# By level, never by lane name: a refresh renames a lane when its model moves on
+# (`opus-high@claude` became `opus55-high@claude` when Opus 5.5 landed), and the
+# rule is about the level being there, on the general Claude meter (ticket 33).
+sys.path.insert(0, DELEGATE_DIR)
+import discover as _discover
+_claude_lanes = {n: l for n, l in _stowed["lanes"].items() if l["harness"] == "claude"}
+_by_level = {}
+for _name, _lane in _claude_lanes.items():
+    _by_level.setdefault(_discover.model_level(_lane["model"])[0], {})[_name] = _lane
+for _level in ("claude-haiku", "claude-sonnet", "claude-opus"):
+    _at_level = _by_level.get(_level, {})
     record(
-        f"native lane {lane_name} present in the stowed catalog",
-        lane_name in _stowed["lanes"] and _stowed["lanes"][lane_name]["meter"] == "claude-general",
+        f"the stowed catalog runs {_level}, on the general Claude meter",
+        bool(_at_level) and {l["meter"] for l in _at_level.values()} == {"claude-general"},
+        str({n: l["meter"] for n, l in _at_level.items()}),
     )
 
 # 1g. ticket 19: Fable, Opus and Sonnet at every effort claude offers, each lane
@@ -202,11 +213,14 @@ for lane_name in ("haiku-high@claude", "sonnet-high@claude", "opus-high@claude")
 _by_model = {}
 for _name, _lane in _stowed["lanes"].items():
     _by_model.setdefault((_lane["harness"], _lane["model"]), {})[_lane["effort"]] = (_name, _lane)
-for _model in ("claude-fable-5-1", "claude-opus-5", "claude-sonnet-5"):
-    _lanes = _by_model.get(("claude", _model), {})
+for _level in ("claude-fable", "claude-opus", "claude-sonnet"):
+    # the level's own model, whatever version the catalog is on today
+    _lanes = {e: (n, l) for n, l in _by_level.get(_level, {}).items()
+              for e in [l["effort"]]}
     record(
-        f"stowed catalog runs {_model} at every effort claude offers, on one meter",
+        f"stowed catalog runs {_level} at every effort claude offers, on one meter",
         set(_lanes) == set(catalog.HARNESS_EFFORTS["claude"])
+        and len({l["model"] for _n, l in _lanes.values()}) == 1
         and len({l["meter"] for _n, l in _lanes.values()}) == 1,
         str({e: (n, l["meter"]) for e, (n, l) in _lanes.items()}),
     )
@@ -800,16 +814,27 @@ record(
 #     until someone decides which it is.
 _data_dir = _os.path.abspath(_os.path.join(
     _os.path.dirname(__file__), "..", "..", "..", "..", ".scratch", "delegate-redesign", "_data"))
-_claude_names = {
+# Which model each printed name denotes. What it resolves to is that model while
+# a lane runs it, and nothing once no lane does, so this table follows the
+# catalog through a refresh instead of being rewritten after one (ticket 33).
+_denotes = {
     "Claude Fable 5.1": "claude-fable-5-1", "Fable 5.1": "claude-fable-5-1",
-    "Claude Opus 5": "claude-opus-5", "Opus 5": "claude-opus-5", "claude-opus-5": "claude-opus-5",
+    "Claude Fable 5": "claude-fable-5", "Fable 5": "claude-fable-5",
+    "Claude Opus 5": "claude-opus-5", "Opus 5": "claude-opus-5",
+    "claude-opus-5": "claude-opus-5",
+    # "Opus 5.5", the short form, is deliberately absent: the opus55 lanes carry
+    # no `published_as` for it, so it resolves to nothing. No rows file prints it
+    # yet, and the `_seen` check below fails the day one does, which is when
+    # someone has to decide whether the catalog should claim it.
+    "Claude Opus 5.5": "claude-opus-5-5",
+    "Claude Opus 4.8": "claude-opus-4-8", "Opus 4.8": "claude-opus-4-8",
     "Claude Sonnet 5": "claude-sonnet-5", "Sonnet 5": "claude-sonnet-5",
     "claude-sonnet-5": "claude-sonnet-5",
+    "Claude Sonnet 4.6": "claude-sonnet-4-6",
     "Claude 4.5 Haiku": "claude-haiku-4-5-20251001",
-    # other versions, which no lane runs
-    "Claude Fable 5": None, "Fable 5": None, "Claude Opus 4.8": None, "Opus 4.8": None,
-    "Claude Sonnet 4.6": None,
 }
+_claude_models = {l["model"] for l in _claude_lanes.values()}
+_claude_names = {n: (m if m in _claude_models else None) for n, m in _denotes.items()}
 _seen = set()
 for _file in ("aa-accepted.json", "tbench-accepted.json", "swerb-accepted.json"):
     _p = _os.path.join(_data_dir, _file)
