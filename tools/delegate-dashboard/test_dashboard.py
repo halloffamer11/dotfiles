@@ -580,15 +580,22 @@ class DashboardModelTest(ProjectFixture):
         lanes["lanes"]["terra-high@codex"]["enabled"] = False
         write_json(self.config / "lanes.json", lanes)
 
+        # A lane turned off behind the dashboard's back no longer raises on the
+        # read (ticket 36); the sources moved under it, so the move is a
+        # conflict to reload and repeat, and nothing is written either way.
         self.assertFalse(dashboard.move_lane("sol-high@codex", -1))
         self.assertEqual(project_policy.read_bytes(), before)
-        self.assertEqual(dashboard.state["save"]["status"], "error")
+        self.assertEqual(dashboard.state["save"]["status"], "conflict")
         self.assertIsNotNone(dashboard.state["save"]["detail"])
 
+        # The save itself still refuses to write a document that names an off
+        # lane, and says which lane.
         edit = dashboard.begin_percentage_edit("gate")
         self.assertFalse(dashboard.save_percentage_edit(edit, "25"))
         self.assertEqual(project_policy.read_bytes(), before)
         self.assertEqual(dashboard.state["save"]["status"], "error")
+        self.assertIn("terra-high@codex", dashboard.state["save"]["detail"])
+        self.assertIn("globally off", dashboard.state["save"]["detail"])
         self.assertEqual(json.loads(project_policy.read_text()), original)
 
     def test_save_rejects_stale_merged_class_constraint_without_refresh(self):

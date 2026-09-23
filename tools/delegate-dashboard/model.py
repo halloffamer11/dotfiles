@@ -682,7 +682,12 @@ class DashboardModel:
         }
 
     def _validate_project_proposal(self, proposal: dict[str, Any]) -> str | None:
-        """Validate a complete project document against freshly read globals."""
+        """Validate a complete project document against freshly read globals.
+
+        This is a save, so ``proposal=True``: a document about to be written may
+        not name a globally off Lane, where one already on disk only warns
+        (ticket 36).
+        """
         try:
             global_lanes, _ = self._load_json_snapshot(self.global_lanes_path)
             global_routing, _ = self._load_json_snapshot(self.global_routing_path)
@@ -693,6 +698,7 @@ class DashboardModel:
                 source=str(self.project_policy_path),
                 lanes_source=str(self.global_lanes_path),
                 global_source=str(self.global_routing_path),
+                proposal=True,
             )
         except (DashboardError, catalog.CatalogError) as exc:
             return str(exc)

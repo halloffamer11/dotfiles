@@ -512,13 +512,34 @@ def warn_stale_lane(source, lane_name, lanes_source):
     that project must not stop over a stale name, so the entry is ignored and
     the next project save drops it (ticket 33).
     """
+    _warn_once(
+        source, lane_name,
+        f"warning: {source}: lane '{lane_name}' is not in {lanes_source} any more; "
+        "ignoring it. The next project save drops it.\n",
+    )
+
+
+def warn_off_lane(source, lane_name, lanes_source):
+    """Say once, on stderr, that a project file names a lane that is globally off.
+
+    Turning a lane off in the wizard must never stop routing in a project that
+    named it, so the entry is ignored on load exactly as a removed lane's is
+    (ticket 36). A project save still refuses to name an off lane: `project_order`
+    orders carried lanes and cannot restore one.
+    """
+    _warn_once(
+        source, lane_name,
+        f"warning: {source}: lane '{lane_name}' is off in {lanes_source}; ignoring it. "
+        "project_order orders carried lanes and cannot restore one, and the next "
+        "project save drops it.\n",
+    )
+
+
+def _warn_once(source, lane_name, text):
     if (source, lane_name) in _WARNED_STALE_LANES:
         return
     _WARNED_STALE_LANES.add((source, lane_name))
-    sys.stderr.write(
-        f"warning: {source}: lane '{lane_name}' is not in {lanes_source} any more; "
-        "ignoring it. The next project save drops it.\n"
-    )
+    sys.stderr.write(text)
 
 
 def validate_project_lanes(doc, global_lanes, source="project lanes.json",
@@ -856,6 +877,7 @@ def validate_project_routing(
     source="project routing.json",
     lanes_source="lanes.json",
     global_source="routing.json",
+    proposal=False,
 ):
     """Validate proposed project policy against both global documents.
 
@@ -863,6 +885,12 @@ def validate_project_routing(
     three input documents, Project order's catalog references, and the complete
     routing document produced by merging the proposal over global routing.
     Returns ``doc`` unchanged, or raises ``CatalogError``.
+
+    ``proposal`` says which side of the write this is. A document being saved
+    may not name a lane that is globally off, and says so. A document being read
+    already exists, and a lane the wizard turned off since it was written must
+    not stop routing in that project, so the entry warns and is ignored
+    (ticket 36), the way a removed lane's does (ticket 33).
     """
     validate_lanes(global_lanes, source=lanes_source)
     validate_routing(global_routing, source=global_source, partial=False)
@@ -881,6 +909,9 @@ def validate_project_routing(
             warn_stale_lane(source, lane_name, lanes_source)
             continue
         if not lanes[lane_name].get("enabled", True):
+            if not proposal:
+                warn_off_lane(source, lane_name, lanes_source)
+                continue
             raise CatalogError(
                 f"{source}: project_order lane '{lane_name}': lane is globally off; "
                 "project_order cannot restore it"
@@ -972,10 +1003,13 @@ def _effective_lanes(lanes, routing, sources, lanes_source, project_lanes=None,
         return effective
 
     project_source = sources.get("project_order", "project routing.json")
-    # A name the global catalog no longer has was warned about in validation and
-    # is ignored here, so a refreshed catalog never stops routing in a project
-    # whose file predates it (ticket 33).
-    project_order = [name for name in routing["project_order"] if name in effective]
+    # A name the global catalog no longer has, or has turned off, was warned
+    # about in validation and is ignored here, so neither a refreshed catalog nor
+    # a lane switched off stops routing in a project whose file predates it
+    # (tickets 33 and 36). Project order orders carried lanes; an off lane takes
+    # no place in a Tier.
+    project_order = [name for name in routing["project_order"]
+                     if name in effective and effective[name].get("enabled", True)]
     named = set(project_order)
 
     for tier in range(1, 5):
@@ -1968,9 +2002,12 @@ def _plan_order(lane, position, scope, lanes_doc, routing_doc, project_doc, file
     current = _carried_in_tier(before_cat["lanes"], tier)
     new_seq = _move_in_sequence(current, lane, position)
     existing = list((project_doc or {}).get("project_order", []))
+    # A save drops what the load ignored: a lane the catalog lost (ticket 33) and
+    # a lane it turned off (ticket 36). Project order orders carried lanes.
     kept = [
         name for name in existing
         if name in before_cat["lanes"] and before_cat["lanes"][name]["tier"] != tier
+        and before_cat["lanes"][name].get("enabled", True)
     ]
     if proposed_project is None:
         proposed_project = {}

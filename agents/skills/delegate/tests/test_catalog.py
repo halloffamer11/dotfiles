@@ -902,11 +902,32 @@ msg = check_catalog_error(
     {"project_order": ["terra-high@codex"]},
     off_lanes,
     copy.deepcopy(routing_sample),
+    proposal=True,
 )
 record(
-    "8.3 Project order cannot restore a globally off lane",
+    "8.3 a project save may not name a globally off lane",
     bool(msg and "terra-high@codex" in msg and "globally off" in msg),
     msg,
+)
+
+# On the read, the same entry is a warning: a lane the wizard turned off must
+# never stop routing in a project that named it (ticket 36).
+off_err = io.StringIO()
+_stderr = sys.stderr
+sys.stderr = off_err
+try:
+    kept_off = catalog.validate_project_routing(
+        {"project_order": ["terra-high@codex", "sol-high@codex"]},
+        off_lanes,
+        copy.deepcopy(routing_sample),
+    )
+finally:
+    sys.stderr = _stderr
+record(
+    "8.3 a project file that already names an off lane warns and is read",
+    kept_off is not None and "terra-high@codex" in off_err.getvalue()
+    and "is off in" in off_err.getvalue() and "warning" in off_err.getvalue(),
+    repr(off_err.getvalue()),
 )
 
 # The partial project document is valid by itself, but the merged Class is not.
@@ -2774,6 +2795,67 @@ with tempfile.TemporaryDirectory() as td:
         and cat_stale["lanes"]["terra-high@codex"]["order"] == 1,
         repr({name: (lane["tier"], lane.get("order"))
               for name, lane in cat_stale["lanes"].items()}),
+    )
+
+# ---------------------------------------------------------------------------
+# 17. A lane the wizard turned off, named by a project file written before that
+# (ticket 36). Ignored with one warning; the next project save drops it.
+
+with tempfile.TemporaryDirectory() as td:
+    cfg, repo, _real = make_edit_fixture(
+        td,
+        project={"project_order": ["terra-high@codex", "sol-high@codex"]},
+        project_lanes={"lanes": {"terra-high@codex": {"tier": 4}}},
+    )
+    turned_off = catalog.load_json(os.path.join(cfg, "lanes.json"))
+    turned_off["lanes"]["terra-high@codex"]["enabled"] = False
+    catalog.write_json(os.path.join(cfg, "lanes.json"), turned_off)
+
+    off_err = io.StringIO()
+    _stderr = sys.stderr
+    sys.stderr = off_err
+    try:
+        cat_off = catalog.load_catalog(cwd=repo, config_dir=cfg)
+        off_rows = rank.rank("impl", cat_off, {}, ALL_HARNESSES)
+    finally:
+        sys.stderr = _stderr
+    said = off_err.getvalue()
+    record(
+        "17.1 an off lane named by a project file warns once and does not stop the load",
+        said.count("terra-high@codex") == 1 and "is off in" in said and "warning" in said,
+        repr(said),
+    )
+    record(
+        "17.2 rank still picks a lane in that project, and the off lane takes no place",
+        bool(off_rows) and off_rows[0].get("pick")
+        and "order" not in cat_off["lanes"]["terra-high@codex"]
+        and cat_off["lanes"]["sol-high@codex"]["order"] == 1,
+        repr((off_rows[:1], cat_off["lanes"]["terra-high@codex"].get("order"))),
+    )
+    record(
+        "17.3 a project lanes.json entry for an off lane is no error either",
+        catalog.project_tier_changes(
+            {"lanes": turned_off["lanes"]},
+            catalog.load_json(os.path.join(repo, ".delegate", "lanes.json")),
+        ).get("terra-high@codex", {}).get("to") == 4,
+        repr(cat_off["lanes"]["terra-high@codex"]["tier"]),
+    )
+
+    env = isolated_cli_env(td)
+    res_off = catalog_cli(
+        ["order", "sol-high@codex", "1", "--scope", "project",
+         "--cwd", repo, "--config-dir", cfg],
+        env,
+    )
+    planned_off = json.loads(res_off.stdout) if res_off.returncode == 0 else {}
+    record(
+        "17.4 the next project save drops the off lane, and says so once",
+        res_off.returncode == 0
+        and [line for line in res_off.stderr.splitlines()
+             if "terra-high@codex" in line and "is off in" in line]
+        and "terra-high@codex" not in planned_off["values"]["sequence"]["resulting"]
+        and "terra-high@codex" not in json.dumps(planned_off["changed"]),
+        f"rc={res_off.returncode} stderr={res_off.stderr!r} out={res_off.stdout[:200]!r}",
     )
 
 sys.exit(1 if fails else 0)
