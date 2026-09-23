@@ -1195,4 +1195,91 @@ try:
 except Exception as e:
     record("ticket 12 HTML shared evidence records", False, repr(e))
 
+
+# Ticket 35: the page places a lane the catalog does not carry, as long as a
+# board draws it, and never an ultra lane.
+T35_DRIVER = r"""
+const P = require(process.argv[1]);
+const c = JSON.parse(require("fs").readFileSync(0, "utf8"));
+const lanes = c.lanes.map((l, rank) => Object.assign({ rank }, l));
+const out = {};
+out.placeable = P.placeable(lanes).map((l) => l.name);
+out.groups = P.panelGroups(lanes, c.tiers, c.meters).map((g) => [g.tier, g.count, g.meters.map((m) => [m.meter, m.lanes.map((l) => l.name)])]);
+out.text = P.tierLinesText(P.placeable(lanes), c.tiers);
+// a band never carries a lane by itself: only the carried ones are assigned
+const banded = {};
+P.applyBands({ source: "s", benchmark: "toy", points: c.points }, [10, 20, 25], lanes, banded, {});
+out.banded = banded;
+process.stdout.write(JSON.stringify(out));
+"""
+
+try:
+    if not NODE:
+        record("35 the page places a lane the catalog does not carry, under node", True,
+               "(node not on PATH; skipped)")
+    else:
+        # opus55-medium is the lane Orin picked tier 3 for: it has rows and the
+        # catalog does not carry it. quiet@x has neither rows nor carry, and
+        # deep@x is ultra: neither may be placed.
+        lanes = [
+            {"name": "opus-high@claude", "group": "opus", "effort": "high", "meter": "m1",
+             "carried": True, "rows": True},
+            {"name": "opus55-medium@claude", "group": "opus55", "effort": "medium", "meter": "m1",
+             "carried": False, "rows": True},
+            {"name": "dry@x", "group": "dry", "effort": "high", "meter": "m1",
+             "carried": True, "rows": False},
+            {"name": "quiet@x", "group": "quiet", "effort": "high", "meter": "m1",
+             "carried": False, "rows": False},
+            {"name": "deep@x", "group": "deep", "effort": "ultra", "meter": "m1",
+             "carried": False, "rows": True},
+        ]
+        case = {
+            "lanes": lanes,
+            "meters": [{"name": "m1", "harness": "claude", "shade": 0}],
+            "tiers": {"opus55-medium@claude": 3, "opus-high@claude": 4, "deep@x": 2},
+            "points": [pt(["opus55-medium@claude"], 30, 1), pt(["opus-high@claude"], 12, 1)],
+        }
+        result = subprocess.run([NODE, "-e", T35_DRIVER, os.path.abspath(bench_page.SCRIPT_PATH)],
+                                input=json.dumps(case), capture_output=True, text=True, timeout=60)
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr[-800:])
+        out = json.loads(result.stdout)
+        record("35.1 a lane with rows is placeable whether or not the catalog carries it; "
+               "a lane with neither, and an ultra lane, are not",
+               out["placeable"] == ["opus-high@claude", "opus55-medium@claude", "dry@x"],
+               repr(out["placeable"]))
+        record("35.2 the tier panel lists and counts the uncarried lane, and ultra reaches no tier",
+               out["groups"][0] == [4, 1, [["m1", ["opus-high@claude"]]]]
+               and out["groups"][1] == [3, 1, [["m1", ["opus55-medium@claude"]]]]
+               and out["groups"][2] == [2, 0, []]
+               and out["groups"][5] == [None, 1, [["m1", ["dry@x"]]]],
+               repr(out["groups"]))
+        record("35.3 a band assigns only the lanes the page carries",
+               out["banded"] == {"opus-high@claude": 2},
+               repr(out["banded"]))
+
+        # The page's own text, through the wizard's parser and application: the
+        # lane the catalog does not carry ends up carried at the tier picked.
+        doc = {"lanes": {
+            "opus-high@claude": {"harness": "claude", "model": "claude-opus-5", "effort": "high", "tier": 3},
+            "opus55-medium@claude": {"harness": "claude", "model": "claude-opus-5-5", "effort": "medium",
+                                     "tier": 1, "enabled": False},
+            "dry@x": {"harness": "codex", "model": "dry", "effort": "high", "tier": 1},
+        }}
+        parsed = setup_tui.parse_tier_lines(out["text"], doc)
+        dropped = setup_tui.unnamed_carried(parsed, [n for n, l in doc["lanes"].items()
+                                                     if l.get("enabled") is not False])
+        setup_tui.apply_tier_lines_to_doc(doc, parsed)
+        record("35.4 pasted into the wizard, the page's line carries that lane at that tier",
+               out["text"].splitlines() == ["opus-high@claude 4", "opus55-medium@claude 3"]
+               and parsed["decided"] == {"opus-high@claude": 4, "opus55-medium@claude": 3}
+               and not any(parsed[k] for k in ("unknown", "bad", "repeated", "refused"))
+               and doc["lanes"]["opus55-medium@claude"]["tier"] == 3
+               and "enabled" not in doc["lanes"]["opus55-medium@claude"]
+               and dropped == ["dry@x"],
+               repr((out["text"], doc["lanes"]["opus55-medium@claude"], dropped)),
+       )
+except Exception as e:
+    record("35 the page places a lane the catalog does not carry", False, repr(e))
+
 sys.exit(1 if fails else 0)

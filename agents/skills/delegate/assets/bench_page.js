@@ -302,6 +302,16 @@
     return new Set(lanes.filter((l) => l.carried && (tiers || {})[l.name] !== OFF).map((l) => l.name));
   }
 
+  // The lanes this page may place (ticket 35). A tier is picked on a dot, and a
+  // dot is a lane with rows, so a lane the catalog does not carry is placeable
+  // as soon as a board draws it: the wizard carries whatever a line names. A
+  // carried lane with no rows stays listed, because it still takes a tier.
+  // `ultra` is never placeable — `parse_tier_lines` refuses it, so offering it
+  // would only write a line the wizard throws away.
+  function placeable(lanes) {
+    return (lanes || []).filter((l) => (l.carried || l.rows) && l.effort !== "ultra");
+  }
+
   // At least the score for no more money, and strictly better in one of the
   // two: the pre-screen's comparison (setup_tui._beats), here across models.
   function beats(o, q) {
@@ -335,7 +345,7 @@
   function panelGroups(lanes, tiers, meters) {
     const order = (meters || []).map((m) => m.name);
     return TIERS.concat([OFF, null]).map((tier) => {
-      const mine = lanes.filter((l) => l.carried && ((tiers || {})[l.name] || null) === tier);
+      const mine = placeable(lanes).filter((l) => ((tiers || {})[l.name] || null) === tier);
       const names = order.concat([...new Set(mine.map((l) => l.meter))].filter((m) => !order.includes(m)));
       const groups = [];
       for (const meter of names) {
@@ -1286,7 +1296,7 @@
 
   function makeTierPanel(data, page, host, sensHost) {
     host.hidden = false;
-    const lanes = data.lanes.filter((l) => l.carried);
+    const lanes = placeable(data.lanes);
     const meters = (data.meters || []).filter((m) => lanes.some((l) => l.meter === m.name));
     el("h2", {}, "Tiers drawn here", host);
     const note = el("p", { class: "note" }, null, host);
@@ -1374,6 +1384,12 @@
         page.select({ key: `${lane.model} ${lane.effort}`, lanes: [lane.name] }, null);
       });
       if (!lane.rows) el("span", { class: "tag" }, "no rows", row);
+      // the page places a lane the catalog does not carry (ticket 35), and says
+      // so, because a line that carries it is a change the wizard will make
+      if (!lane.carried) {
+        el("span", { class: "tag", title: "the catalog does not carry this lane; a tier here carries it" },
+           "not carried", row);
+      }
       if (lane.off) el("span", { class: "tag off", title: lane.off }, "proposed off", row);
       const by = beaten[lane.name];
       if (by) {
@@ -1397,7 +1413,7 @@
       if (!group.count) {
         el("p", { class: "empty" }, tier === OFF ? "No lane is off. Press off on a lane's line, or click a dot and press o."
           : tier ? "No lane yet. Click a dot and press " + tier + ", or press a box here."
-          : "Every carried lane has a tier or is off.", sec);
+          : "Every lane here has a tier or is off.", sec);
         return;
       }
       for (const m of group.meters) {
@@ -1633,7 +1649,8 @@
     module.exports = { layout, frontier, logTicks, logDomain, niceLinear, fmtMoney, fmtTickMoney, place,
                        zoomAbout, covers, panBy, bandTier, defaultLines, pointTier, groupLanes, reviewOrder,
                        tierLinesText, focusDomain, applyBands, makeStore, boardKey, pointOff, carriedNames,
-                       beatenByLane, panelGroups, sensitivity, meterColour, setShades, OFF, W, H, PAD };
+                       placeable, beatenByLane, panelGroups, sensitivity, meterColour, setShades,
+                       OFF, W, H, PAD };
   } else if (typeof document !== "undefined") {
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
     else boot();
