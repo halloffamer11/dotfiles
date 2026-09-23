@@ -13,9 +13,8 @@ ceiling routing this reads.
 
 **Category:** enhancement
 
-**Status:** implemented 2026-09-11 (`4a9f815`, `2191462`, `fec4395`, `ddbb9f7`)
-on `main`; the last box is Orin's: one press of ⌥⌘D in each direction, after one
-`usage.py --refresh` so the cache gains `remaining_weekly_model`. Raised by Orin 2026-09-11 ("some sort of TUI thing
+**Status:** landed. Implemented 2026-09-11 (`4a9f815`, `2191462`, `fec4395`, `ddbb9f7`)
+on `main`; Orin confirmed the ⌥⌘D toggle on 2026-09-22. Raised by Orin 2026-09-11 ("some sort of TUI thing
 in Claude that will give me some indication of how many agents are running on
 which harness and then some of the harness usage levels ... ideally it's
 something collapsible"). Prototyped the same day; Orin chose variant H. Branch
@@ -34,7 +33,7 @@ something collapsible"). Prototyped the same day; Orin chose variant H. Branch
 - [x] Every row starts with a non-space glyph, so Claude Code's per-row trim cannot shift the columns: an unbadged row carries a dim `·` in the badge column
 - [x] `report.py statusline off|on|toggle|status` switches the rows through the flag file `~/.cache/delegate/statusline.off` (`DELEGATE_STATUSLINE_SWITCH` in tests); while it exists `statusline` prints nothing and exits 0. Covered in `test_report.py`
 - [x] A keyboard shortcut runs the toggle from any terminal: ⌥⌘D in `stow/hammerspoon/.hammerspoon/init.lua`, next to the ⌥⌘R recorder
-- [ ] Orin presses ⌥⌘D once in each direction (his; Hammerspoon is running since 2026-09-11 21:04 and `~/.hammerspoon` is the Makefile's whole-directory symlink into the repo, so the binding is live after the merge, and stow must never touch that package)
+- [x] Orin presses ⌥⌘D once in each direction (his; Hammerspoon is running since 2026-09-11 21:04 and `~/.hammerspoon` is the Makefile's whole-directory symlink into the repo, so the binding is live after the merge, and stow must never touch that package). Confirmed by Orin 2026-09-22: the toggle works both ways and takes 2-3 s. `report.py` takes 0.05 s, so Claude Code's status line redraw sets the delay; `refreshInterval` stays 30 (Orin, 2026-09-22)
 
 ## The row
 

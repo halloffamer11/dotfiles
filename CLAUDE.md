@@ -88,9 +88,6 @@ Current Tier and Order values belong to the catalog. The long form
 
 **Waiting on Orin** (nothing else blocks on these):
 
-- Ticket 23: press ⌥⌘D once in each direction (the status-line meter rows and
-  `report.py statusline off|on|toggle`). `~/.hammerspoon` is the Makefile's
-  whole-directory symlink, never a stow package.
 - Type each of the four `/delegate-*` wrappers once, with a plain-language constraint
   (ticket 11).
 - Two one-liners in his own files, outside this repo (ticket 09):
