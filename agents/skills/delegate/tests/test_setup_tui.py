@@ -2312,4 +2312,60 @@ try:
 except Exception as e:
     record("63 the start page states the refresh", False, repr(e))
 
+
+try:
+    # Ticket 35: `o` writes the page again from the catalog as the session holds
+    # it, so a lane carried on the carry page reaches the page, and the page's
+    # catalog key does not move, so tiers drawn in the browser survive.
+    import bench_page
+    with tempfile.TemporaryDirectory() as td:
+        page_path = os.path.join(td, "bench.html")
+        # the page embeds its data, and its catalog key, only with rows to plot
+        page_rows = [
+            {"model": "grok-4.6", "effort": "high", "score": 5.0, "cost_usd": 2.0,
+             "uncertain": False, "source": "t", "benchmark": "b"},
+            {"model": "gpt-5.6-sol", "effort": "high", "score": 9.0, "cost_usd": 4.0,
+             "uncertain": False, "source": "t", "benchmark": "b"},
+        ]
+        doc = copy.deepcopy(LANES)
+        doc["lanes"]["grok46-high@grok"]["enabled"] = False
+        bench_page.write(page_path, None, doc, page_rows)
+        first = open(page_path, encoding="utf-8").read()
+        w = Wizard(doc, copy.deepcopy(ROUTING), None, DISCOVERED,
+                   "/tmp/lanes.json", "/tmp/routing.json", "",
+                   bench_page_path=page_path, effort_rows=page_rows)
+        key_before = bench_page.catalog_key(w.current_lanes())
+        carried_before = [l["name"] for l in bench_page.plot_data(page_rows, w.current_lanes())["lanes"]
+                          if l["carried"]]
+        # carry it here, as the carry page's space does
+        w._enter_prescreen()
+        w._toggle_enabled("grok46-high@grok")
+        message = w.rewrite_bench_page()
+        after = open(page_path, encoding="utf-8").read()
+        key_after = bench_page.catalog_key(w.current_lanes())
+        carried_after = [l["name"] for l in bench_page.plot_data(page_rows, w.current_lanes())["lanes"]
+                         if l["carried"]]
+        record("64 o writes the page again from this session's carry decisions",
+               message == ""
+               and "grok46-high@grok" not in carried_before
+               and "grok46-high@grok" in carried_after
+               and first != after,
+               repr((message, carried_before, carried_after)))
+        record("64b the page's catalog key does not move, so tiers drawn in the browser survive",
+               key_before == key_after == bench_page.catalog_key(LANES)
+               and f'"catalogKey":"{key_after}"' in after and key_after in first,
+               repr((key_before, key_after)))
+        record("64c a tier taken on a tier page reaches the page the same way",
+               w.current_lanes()["lanes"]["grok46-high@grok"]["tier"]
+               == LANES["lanes"]["grok46-high@grok"]["tier"]
+               and w.current_lanes() is not w.lanes_doc,
+               repr(w.current_lanes()["lanes"]["grok46-high@grok"]))
+        # a page that cannot be written is a message, never a stop
+        w.bench_page_path = os.path.join(td, "no-such-directory", "bench.html")
+        record("64d a page that cannot be written says so and changes nothing else",
+               w.rewrite_bench_page().startswith("benchmark page:"),
+               repr(w.rewrite_bench_page()))
+except Exception as e:
+    record("64 o writes the page again from this session's carry decisions", False, repr(e))
+
 sys.exit(1 if fails else 0)

@@ -5,6 +5,7 @@ import os
 import subprocess
 import textwrap
 
+import bench_page
 from bench import (
     EPOCH_BENCHMARKS,
     KIND_DOMINATED,
@@ -344,6 +345,37 @@ class Wizard:
 
     def _carried(self):
         return [name for name in self.lanes_doc["lanes"] if self._enabled[name]]
+
+    def current_lanes(self):
+        """The catalog as this session holds it: the document it started from,
+        with the carry and Tier decisions made so far. Not a save — the confirm
+        screen's `y` is the save."""
+        doc = copy.deepcopy(self._original_lanes)
+        for name, lane in doc["lanes"].items():
+            lane["tier"] = self._final_tier(name)
+            if self._enabled[name]:
+                lane.pop("enabled", None)
+            else:
+                lane["enabled"] = False
+        return doc
+
+    def rewrite_bench_page(self):
+        """Write the benchmark page again from the catalog as it stands, and
+        return "" or a message saying why it could not be.
+
+        `o` used to reopen the file written at start, so a lane carried on the
+        carry page reached the page only on the next run (ticket 35). The page's
+        catalog key is its lane names, which no screen here changes, so the
+        tiers already drawn in the browser survive the rewrite.
+        """
+        if not self.bench_page_path:
+            return ""
+        try:
+            bench_page.write(self.bench_page_path, self.bench, self.current_lanes(),
+                             self.effort_rows)
+        except (OSError, ValueError) as e:
+            return f"benchmark page: {e}"
+        return ""
 
     def _tier_names(self):
         """The lanes open on this tier page: carried, and not placed higher.
@@ -1585,6 +1617,11 @@ def run_curses(wizard):
             else:
                 key = mapping.get(code, "other")
             if key == "o" and wizard.bench_page_path:
+                # the page is written again first, so it opens on this session's
+                # carry and Tier decisions and not the ones it started with
+                message = wizard.rewrite_bench_page()
+                if message:
+                    wizard.message = message
                 try:
                     import pathlib
                     import webbrowser
