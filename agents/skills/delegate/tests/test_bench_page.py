@@ -214,7 +214,9 @@ try:
     kinds = set(re.findall(r'<table class="(\w+)"', page))
     compare = page.find('<table class="compare"')
     record("every evidence table is collapsed until asked for, under the plots and the board comparison",
-           kinds == {"sweep", "rows", "catalog", "scores", "compare"}
+           # "prices" is the price-per-model table (ticket 36), collapsed under
+           # its own plot like every other table of figures
+           kinds == {"sweep", "rows", "catalog", "scores", "compare", "prices"}
            and all(inside_details(i) for i in tables)
            and not inside_details(compare)
            and not re.search(r"<details[^>]*\bopen\b", page)
@@ -1339,5 +1341,137 @@ try:
                repr((out["stored"], out["reloaded"])))
 except Exception as e:
     record("36 reset clears every tier, mark and line", False, repr(e))
+
+
+# Ticket 36: price per model — one row per model, two dots on one log axis.
+
+T36_PRICE_DRIVER = r"""
+const P = require(process.argv[1]);
+const c = JSON.parse(require("fs").readFileSync(0, "utf8"));
+// the smallest DOM the drawing needs: nodes that remember their attributes
+const make = (tag) => ({
+  tag, attrs: {}, kids: [], textContent: "",
+  setAttribute(k, v) { this.attrs[k] = String(v); },
+  getAttribute(k) { return this.attrs[k]; },
+  appendChild(n) { this.kids.push(n); return n; },
+});
+global.document = { createElementNS: (_ns, tag) => make(tag), createElement: (tag) => make(tag) };
+const host = make("div");
+P.setShades(c.meters);
+P.drawPrices(c.rows, host);
+const flat = [];
+(function walk(n) { flat.push(n); for (const k of n.kids) walk(k); })(host);
+const of = (tag, cls) => flat.filter((n) => n.tag === tag
+  && (cls === undefined || (n.attrs.class || "").split(" ").includes(cls)));
+const out = {
+  circles: of("circle").map((n) => [n.attrs.class, Number(n.attrs.cx), n.attrs.fill]),
+  names: of("text", "price-name").map((n) => n.textContent),
+  values: of("text", "price-value").map((n) => n.textContent),
+  none: of("text", "price-none").map((n) => n.textContent),
+  spans: of("line", "price-span").length,
+  links: of("line", "price-link").length,
+  ticks: of("text", "tick").map((n) => n.textContent),
+  colours: of("circle").map((n) => n.attrs.fill + "|" + (n.attrs.stroke || "")),
+  titles: of("title").map((n) => n.textContent),
+};
+process.stdout.write(JSON.stringify(out));
+"""
+
+try:
+    lanes_doc = {
+        "version": "delegate-lanes.v1",
+        "meters": {
+            "codex": {"harness": "codex", "plan": "p", "price_month": 20, "probe": "usage.py"},
+            "agy-gemini": {"harness": "agy", "plan": "p", "price_month": 17, "probe": "usage.py"},
+        },
+        "lanes": {},
+    }
+    def price_lane(harness, model, effort, meter, price, enabled=None):
+        lane = {"harness": harness, "model": model, "effort": effort, "meter": meter,
+                "meter_weight": 1, "timeout": "10m", "tier": 1, "basis": "fixture",
+                "price": price}
+        if enabled is not None:
+            lane["enabled"] = enabled
+        return lane
+    dear = {"in": 10.0, "cache_read": 1.0, "cache_write": None, "out": 50.0}
+    cheap = {"in": 0.75, "cache_read": 0.075, "cache_write": None, "out": 3.75}
+    none_price = {"in": None, "cache_read": None, "cache_write": None, "out": None}
+    for effort in ("low", "medium", "high"):
+        lanes_doc["lanes"][f"astra-{effort}@codex"] = price_lane(
+            "codex", "gpt-6-astra", effort, "codex", dict(dear))
+        lanes_doc["lanes"][f"flash-{effort}@agy"] = price_lane(
+            "agy", f"gemini-3.8-flash-{effort}", effort, "agy-gemini", dict(cheap))
+    lanes_doc["lanes"]["quiet-high@codex"] = price_lane(
+        "codex", "gpt-quiet", "high", "codex", dict(none_price), enabled=False)
+    # two efforts of one model that disagree, which should not happen
+    lanes_doc["lanes"]["odd-low@codex"] = price_lane(
+        "codex", "gpt-odd", "low", "codex", {"in": 1.0, "cache_read": None, "cache_write": None, "out": 9.0})
+    lanes_doc["lanes"]["odd-high@codex"] = price_lane(
+        "codex", "gpt-odd", "high", "codex", {"in": 2.0, "cache_read": None, "cache_write": None, "out": 9.0})
+    catalog.validate_lanes(copy.deepcopy(lanes_doc), "price fixture")
+
+    rows = bench_page.price_rows(lanes_doc)
+    by_model = {r["model"]: r for r in rows}
+    record("36.4 one row per model, not per effort, with the agy family collapsed",
+           [r["model"] for r in rows] == ["gpt-6-astra", "gpt-odd", "gemini-3.8-flash", "gpt-quiet"]
+           and by_model["gemini-3.8-flash"]["efforts"] == ["high", "medium", "low"]
+           and by_model["gemini-3.8-flash"]["lanes"] == ["flash-high@agy", "flash-low@agy", "flash-medium@agy"]
+           and by_model["gpt-6-astra"]["meter"] == "codex"
+           and by_model["gpt-quiet"]["carried"] is False
+           and by_model["gpt-6-astra"]["carried"] is True,
+           repr([(r["model"], r["efforts"], r["out"]) for r in rows]))
+    record("36.5 a model with no published price has no figure, and disagreeing efforts flag a range",
+           by_model["gpt-quiet"]["in"] is None and by_model["gpt-quiet"]["out"] is None
+           and by_model["gpt-quiet"]["disagree"] is False
+           and by_model["gpt-odd"]["disagree"] is True
+           and by_model["gpt-odd"]["in_range"] == [1.0, 2.0]
+           and by_model["gpt-odd"]["out_range"] is None
+           and by_model["gpt-odd"]["in"] == 2.0,
+           repr(by_model["gpt-odd"]))
+
+    page = bench_page.render(None, lanes_doc, None)
+    record("36.6 the section, its data and the table under it are on the page",
+           "Price per model" in page
+           and 'id="price-chart"' in page and 'id="price-data"' in page
+           and "The same figures as a table" in page
+           and "no published price" in page
+           and ">0.75<" in page and ">50.00<" in page,
+           repr([line for line in page.splitlines() if "no published price" in line][:1]))
+
+    if not NODE:
+        record("36.7 the plot draws one dot per published price, under node", True,
+               "(node not on PATH; skipped)")
+    else:
+        case = {"rows": rows, "meters": bench_page.meter_shades(lanes_doc)}
+        result = subprocess.run([NODE, "-e", T36_PRICE_DRIVER, os.path.abspath(bench_page.SCRIPT_PATH)],
+                                input=json.dumps(case), capture_output=True, text=True, timeout=60)
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr[-800:])
+        out = json.loads(result.stdout)
+        kinds = [c[0] for c in out["circles"]]
+        xs = {c[0] + str(i): c[1] for i, c in enumerate(out["circles"])}
+        astra_in, astra_out = out["circles"][0][1], out["circles"][1][1]
+        record("36.7 every priced model gets an input dot and an output dot, and nothing else does",
+               kinds == ["price-dot in", "price-dot out"] * 3
+               and len(out["names"]) == 4 and out["none"] == ["no published price"]
+               and out["links"] == 3,
+               repr((kinds, out["none"])))
+        record("36.8 the two dots share one log axis, dearer further right, and each is labelled",
+               astra_in < astra_out
+               and out["circles"][4][1] < out["circles"][0][1]   # flash in is left of astra in
+               and out["values"] == ["$10.0", "$50.0", "$1\u2013$2", "$9", "$0.75", "$3.75"]
+               and len(out["ticks"]) >= 3,
+               repr((out["circles"], out["values"], out["ticks"])))
+        # an open dot wears the meter's colour on its stroke and the surface in
+        # its fill; a filled one is the other way about, with a surface ring
+        record("36.9 a disagreement draws its range and says so, and colour is the meter",
+               out["spans"] == 1
+               and out["colours"][4] == "var(--surface, #ffffff)|var(--h-agy, var(--accent))"
+               and out["colours"][5] == "var(--h-agy, var(--accent))|"
+               and out["colours"][0] == "var(--surface, #ffffff)|var(--h-codex, var(--accent))"
+               and any("efforts disagree: $1 to $2" in t for t in out["titles"]),
+               repr((out["spans"], out["values"], out["colours"], out["titles"][:3])))
+except Exception as e:
+    record("36 price per model", False, repr(e))
 
 sys.exit(1 if fails else 0)

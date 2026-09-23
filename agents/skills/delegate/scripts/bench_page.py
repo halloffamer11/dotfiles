@@ -29,6 +29,7 @@ from bench import (
     carry_reason,
     certain_effort_rows,
     dominating_row,
+    effort_rank,
     evidence_unavailable,
     fmt_aa_value,
     fmt_cost,
@@ -38,7 +39,7 @@ from bench import (
     model_group,
     propose_enabled,
 )
-from catalog import EFFORTS
+from catalog import EFFORTS, agy_family
 
 # A published sweep runs the API's own enum, which starts below the lowest
 # effort a lane can be set to. `none` is a real row and the cheapest one, so a
@@ -495,6 +496,71 @@ def meter_shades(lanes_doc):
     return out
 
 
+def _price_of(lane, key):
+    """One price key off a lane, or None when it is not a number."""
+    price = lane.get("price") if isinstance(lane.get("price"), dict) else {}
+    value = price.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def price_rows(lanes_doc):
+    """One row per model for the price chart, efforts collapsed (ticket 36).
+
+    Every effort of a model is charged at the same token price, so a row is a
+    model and not a lane. An agy model names its effort in the slug, so its
+    efforts join through `catalog.agy_family`, the family rule the rest of the
+    page already uses. Each row carries the input and output list price in USD
+    per 1M tokens, the meter its lanes drain, whether the catalog carries any of
+    its lanes, and — when two efforts of one model disagree about a price, which
+    they should not — the range they disagree over and a flag.
+
+    Dearest output first; a model with no published price sorts last, by name,
+    and has no figure to draw.
+    """
+    groups, order = {}, []
+    for name, lane in _lanes(lanes_doc).items():
+        model = lane.get("model")
+        if not isinstance(model, str) or not model.strip():
+            continue
+        base = agy_family(model)[0] if lane.get("harness") == "agy" else model
+        row = groups.get(base)
+        if row is None:
+            row = groups[base] = {"model": base, "harness": lane.get("harness"),
+                                  "lanes": [], "efforts": [], "carried": False,
+                                  "_meters": [], "_in": [], "_out": []}
+            order.append(base)
+        row["lanes"].append(name)
+        row["carried"] = row["carried"] or _carried(lane)
+        if lane.get("effort"):
+            row["efforts"].append(lane["effort"])
+        if lane.get("meter"):
+            row["_meters"].append(lane["meter"])
+        for key in ("in", "out"):
+            value = _price_of(lane, key)
+            if value is not None:
+                row[f"_{key}"].append(value)
+
+    out = []
+    for base in order:
+        row = groups.pop(base)
+        meters = row.pop("_meters")
+        row["meter"] = (min(set(meters), key=lambda m: (-meters.count(m), m))
+                        if meters else None)
+        row["efforts"] = sorted(set(row["efforts"]), key=effort_rank)
+        row["lanes"].sort()
+        for key in ("in", "out"):
+            values = sorted(set(row.pop(f"_{key}")))
+            # the dearest of a disagreement is the one a run might be charged
+            row[key] = values[-1] if values else None
+            row[f"{key}_range"] = [values[0], values[-1]] if len(values) > 1 else None
+        row["disagree"] = bool(row["in_range"] or row["out_range"])
+        out.append(row)
+    out.sort(key=lambda r: (r["out"] is None, -(r["out"] or 0), r["model"]))
+    return out
+
+
 def catalog_key(lanes_doc):
     """A short key for this catalog's lane names, so the page's own tiers are
     kept apart from another catalog's in the same browser (ticket 26)."""
@@ -579,6 +645,57 @@ def _plots_section(effort_rows, lanes_doc, proposals, bench=None):
             f'<script type="application/json" id="bench-data">{_json_for_script(data)}</script>',
             "</section>"]
     return out + _comparison_section(data)
+
+
+def _price_section(lanes_doc):
+    """"Price per model": what every model in the catalog lists, input and
+    output, on one log scale (Orin, 2026-09-22; ticket 36).
+
+    The plot is drawn from the JSON below it; the table under it carries the
+    same figures for a reader without it.
+    """
+    rows = price_rows(lanes_doc)
+    if not rows:
+        return []
+    data = {"rows": rows, "meters": meter_shades(lanes_doc)}
+    out = ['<section class="prices">', "<h2>Price per model</h2>",
+           '<p class="lede">List price in USD per 1M tokens, the vendor\'s own, input '
+           "and output on one log scale, so the relative price reads straight off the "
+           "axis. One row per model: every effort of a model is charged the same, so "
+           "efforts collapse, and an agy model’s per-effort slugs join into their "
+           "family. Colour is the meter, as on the plots, and a model no carried Lane "
+           "runs is dimmed. Nothing here is a benchmark figure, and nothing here is "
+           "what a job actually costs.</p>"]
+    if not any(row["in"] is not None or row["out"] is not None for row in rows):
+        out.append('<p class="missing">No model in this catalog has a published price.</p>')
+    out += ['<div id="price-chart" class="price-chart"></div>',
+            '<noscript><p class="missing">The plot needs JavaScript. The same figures '
+            "are in the table below.</p></noscript>",
+            f'<script type="application/json" id="price-data">{_json_for_script(data)}</script>',
+            "<details><summary>The same figures as a table</summary>",
+            '<div class="scroll"><table class="prices"><thead><tr>'
+            + "".join(f"<th>{_esc(h)}</th>" for h in
+                      ["model", "harness", "meter", "efforts", "in $/1M", "out $/1M", "carried"])
+            + "</tr></thead><tbody>"]
+    for row in rows:
+        def cell(key):
+            if row[key] is None:
+                return '<span class="quiet">no published price</span>'
+            text = fmt_cost(row[key])
+            if row[f"{key}_range"]:
+                lo, hi = row[f"{key}_range"]
+                return (f'<span class="flagged">{_esc(fmt_cost(lo))}–{_esc(fmt_cost(hi))}</span>')
+            return _esc(text)
+        out.append("<tr>"
+                   f'<td><span class="mono">{_esc(row["model"])}</span></td>'
+                   f'<td>{_esc(row["harness"])}</td>'
+                   f'<td>{_esc(row["meter"])}</td>'
+                   f'<td>{_esc(", ".join(row["efforts"]))}</td>'
+                   f"<td>{cell('in')}</td><td>{cell('out')}</td>"
+                   f'<td>{"carried" if row["carried"] else "<span class=\'quiet\'>no</span>"}</td>'
+                   "</tr>")
+    out += ["</tbody></table></div>", "</details>", "</section>"]
+    return out
 
 
 def _comparison_section(data):
@@ -1101,6 +1218,28 @@ svg text.label.cmp { fill: var(--ink-2); }
 svg text.label.fr { font-weight: 650; fill: var(--frontier-ink); }
 svg text.label.off { text-decoration: line-through; fill: var(--off-ink); }
 svg .band { fill: var(--accent); fill-opacity: 0.08; stroke: var(--accent); stroke-dasharray: 3 3; }
+/* price per model: one row per model, two dots on one log axis (ticket 36) */
+.price-chart { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px;
+  padding: 0.6rem 0.4rem 0.2rem; margin-top: 0.7rem; }
+.price-chart svg.price-plot { display: block; width: 100%; height: auto; }
+.price-key { display: flex; align-items: center; gap: 0.3rem; margin: 0 0 0.2rem 0.6rem;
+  font-size: 12.5px; color: var(--ink-2); }
+.price-key svg.key { width: 12px; height: 12px; flex: none; }
+svg text.price-name { font-size: 12px; fill: var(--ink); }
+svg text.price-name.quiet { fill: var(--muted); }
+svg text.price-value { font-size: 11.5px; fill: var(--ink-2); font-variant-numeric: tabular-nums;
+  paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
+svg text.price-none { font-size: 11.5px; fill: var(--muted); }
+svg text.mid { text-anchor: middle; }
+/* the two dots of a row are one model's two prices, so a line joins them; it is
+   context, not a third figure, so it stays under the dots and thin */
+svg .price-link { stroke-width: 2; stroke-linecap: round; opacity: 0.35; }
+svg .price-span { stroke-width: 6; stroke-linecap: round; opacity: 0.25; }
+svg .price-dot { stroke-width: 2; }
+svg .price-dot.out { paint-order: stroke; stroke: var(--surface); }
+svg .price-hit { fill: transparent; }
+table.prices td, table.prices th { white-space: nowrap; }
+.flagged { background: var(--flag); color: var(--flag-ink); padding: 0 0.25rem; border-radius: 3px; }
 svg.focusing .pt, svg.focusing text.label, svg.focusing .sweep { opacity: 0.16; }
 svg.focusing .hot { opacity: 1 !important; }
 svg.focusing .sweep.hot { stroke-width: 2.2; }
@@ -1257,6 +1396,7 @@ def render(bench, lanes_doc, effort_rows=None):
     ]
     chunks.extend(_header(lanes_doc, effort_rows, proposals))
     chunks.extend(_plots_section(effort_rows, lanes_doc, proposals, bench))
+    chunks.extend(_price_section(lanes_doc))
     chunks += ['<section class="evidence">', "<h2>The numbers</h2>",
                "<p>Every figure behind the plots and the pre-screen, closed until you open one.</p>"]
     chunks.extend(_boards_block(effort_rows, lanes_doc, proposals))

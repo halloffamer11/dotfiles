@@ -1568,7 +1568,126 @@
     return page;
   }
 
+  // --- price per model ---------------------------------------------------------
+  // One row per model, two dots on one log axis: what the vendor lists per 1M
+  // tokens in and out (ticket 36). Efforts collapsed, because every effort of a
+  // model is charged the same. Colour is the meter, as everywhere else here;
+  // identity is the row's own name beside it, so colour carries nothing alone.
+  // Input is an open dot and output a filled one, the two marks a row needs,
+  // rather than a second hue for the same money.
+
+  const PRICE_ROW = 26, PRICE_PAD = { l: 200, r: 64, t: 10, b: 34 };
+  // the page's surface, for an open dot's fill and a filled dot's ring
+  const SURFACE = "var(--surface, #ffffff)";
+
+  function priceValues(rows) {
+    const out = [];
+    for (const row of rows) {
+      for (const key of ["in", "out"]) {
+        if (typeof row[key] === "number" && row[key] > 0) out.push(row[key]);
+        const span = row[`${key}_range`];
+        if (Array.isArray(span)) for (const v of span) if (v > 0) out.push(v);
+      }
+    }
+    return out;
+  }
+
+  function drawPrices(rows, host) {
+    host.textContent = "";
+    const values = priceValues(rows);
+    const height = PRICE_PAD.t + rows.length * PRICE_ROW + PRICE_PAD.b;
+    const frame = svg("svg", {
+      viewBox: `0 0 ${W} ${height}`, class: "price-plot", role: "img",
+      "aria-label": "List price per 1M tokens, input and output, per model, on a log scale",
+    }, host);
+    if (!values.length) return frame;
+    const [lo, hi] = logDomain(values);
+    const x0 = PRICE_PAD.l, x1 = W - PRICE_PAD.r;
+    const at = (v) => x0 + (Math.log10(v) - Math.log10(lo)) / (Math.log10(hi) - Math.log10(lo)) * (x1 - x0);
+    const bottom = height - PRICE_PAD.b;
+
+    for (const tick of logTicks(lo, hi)) {
+      const x = at(tick);
+      svg("line", { x1: x, y1: PRICE_PAD.t, x2: x, y2: bottom, class: "grid" }, frame);
+      svg("text", { x, y: bottom + 16, class: "tick mid" }, frame).textContent = fmtTickMoney(tick);
+    }
+    svg("text", { x: (x0 + x1) / 2, y: bottom + 30, class: "axis-title mid" }, frame)
+      .textContent = "USD per 1M tokens (log)";
+
+    rows.forEach((row, index) => {
+      const y = PRICE_PAD.t + index * PRICE_ROW + PRICE_ROW / 2;
+      const colour = meterColour(row.meter);
+      const name = svg("text", { x: x0 - 12, y: y + 4, class: "price-name" + (row.carried ? "" : " quiet"),
+                                 "text-anchor": "end" }, frame);
+      // the gutter is fixed, so a name too long for it is cut rather than drawn
+      // off the edge; the row's own tooltip still says it whole
+      const room = Math.floor((x0 - 16) / CHAR_PX);
+      name.textContent = row.model.length > room ? row.model.slice(0, room - 1) + "\u2026" : row.model;
+      const said = [`${row.model}: ${row.efforts.length} effort${row.efforts.length === 1 ? "" : "s"}`,
+                    row.meter ? `meter ${row.meter}` : null,
+                    row.carried ? "carried" : "not carried",
+                    `in ${fmtMoney(row.in)}`, `out ${fmtMoney(row.out)}`].filter(Boolean);
+      svg("title", {}, svg("rect", { x: 0, y: y - PRICE_ROW / 2, width: W, height: PRICE_ROW,
+                                     class: "price-hit" }, frame)).textContent = said.join(" · ");
+      if (row.in === null && row.out === null) {
+        svg("text", { x: x0, y: y + 4, class: "price-none" }, frame).textContent = "no published price";
+        return;
+      }
+      if (row.in !== null && row.out !== null) {
+        svg("line", { x1: at(row.in), y1: y, x2: at(row.out), y2: y,
+                      class: "price-link", stroke: colour }, frame);
+      }
+      for (const key of ["in", "out"]) {
+        const value = row[key];
+        if (value === null) continue;
+        const span = row[`${key}_range`];
+        if (span) {
+          svg("line", { x1: at(span[0]), y1: y, x2: at(span[1]), y2: y,
+                        class: "price-span", stroke: colour }, frame);
+        }
+        // the filled dot takes its 2px ring from the surface in CSS, so it stays
+        // legible where two rows' dots meet; the open one is the meter's colour
+        const dot = svg("circle", { cx: at(value), cy: y, r: 5,
+                                    class: key === "out" ? "price-dot out" : "price-dot in",
+                                    fill: key === "out" ? colour : SURFACE }, frame);
+        if (key === "in") dot.setAttribute("stroke", colour);
+        svg("title", {}, dot).textContent =
+          `${row.model} · ${key === "out" ? "output" : "input"} ${fmtMoney(value)} per 1M tokens`
+          + (span ? ` · efforts disagree: ${fmtMoney(span[0])} to ${fmtMoney(span[1])}` : "");
+        // the cheaper end labels left and the dearer right, so the two never sit
+        // on top of each other however close the prices are; a label that would
+        // reach into the name gutter flips to the right of its dot instead. A
+        // disagreement reads as the range itself, which is the whole of what
+        // there is to say about it.
+        const text = span ? `${fmtMoney(span[0])}\u2013${fmtMoney(span[1])}` : fmtMoney(value);
+        const other = key === "in" ? row.out : row.in;
+        let left = other !== null && value <= other;
+        if (left && at(value) - 10 - (text.length * CHAR_PX + 6) < x0 - 4) left = false;
+        svg("text", { x: at(value) + (left ? -10 : 10), y: y + 4, class: "price-value",
+                      "text-anchor": left ? "end" : "start" }, frame).textContent = text;
+      }
+    });
+    return frame;
+  }
+
+  function bootPrices() {
+    const source = document.getElementById("price-data");
+    const host = document.getElementById("price-chart");
+    if (!source || !host) return;
+    const data = JSON.parse(source.textContent);
+    if (!SHADES.size) setShades(data.meters);
+    const key = el("p", { class: "price-key" }, null, host);
+    svg("circle", { cx: 6, cy: 6, r: 4, class: "price-dot in", fill: SURFACE, stroke: "var(--muted)" },
+        svg("svg", { viewBox: "0 0 12 12", class: "key", "aria-hidden": "true" }, key));
+    key.appendChild(document.createTextNode(" input  "));
+    svg("circle", { cx: 6, cy: 6, r: 4, class: "price-dot out", fill: "var(--muted)" },
+        svg("svg", { viewBox: "0 0 12 12", class: "key", "aria-hidden": "true" }, key));
+    key.appendChild(document.createTextNode(" output"));
+    drawPrices(data.rows || [], el("div", { class: "price-body" }, null, host));
+  }
+
   function boot() {
+    bootPrices();
     const source = document.getElementById("bench-data");
     const host = document.getElementById("plots");
     if (!source || !host) return;
@@ -1679,7 +1798,7 @@
                        zoomAbout, covers, panBy, bandTier, defaultLines, pointTier, groupLanes, reviewOrder,
                        tierLinesText, focusDomain, applyBands, makeStore, boardKey, pointOff, carriedNames,
                        placeable, beatenByLane, panelGroups, sensitivity, meterColour, setShades,
-                       OFF, W, H, PAD };
+                       priceValues, drawPrices, OFF, W, H, PAD };
   } else if (typeof document !== "undefined") {
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
     else boot();
