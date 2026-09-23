@@ -55,7 +55,9 @@ written until the wizard's confirm, and quitting writes nothing.
 - A new Lane with a **predecessor** takes that predecessor's place: the superseded
   model's Lane at the same effort. It inherits `enabled`, `tier`, `order`, `meter`,
   `meter_weight` and `timeout`. Its note says `UNMEASURED: meter_weight and timeout
-  copied from <lane>`.
+  copied from <lane>`. **Changed by ticket 35:** `enabled` is not inherited. A new
+  Lane starts carried, `ultra` apart, because a predecessor switched off at an effort
+  judged that model, not the one replacing it; the rest of the list still holds.
 - A new Lane with no predecessor starts carried. It is marked on no Tier page, so it
   ends on Tier 1 unless Orin marks it higher. Its meter, `meter_weight` and `timeout`
   are copied from the same harness's Lane at the same effort, with the same

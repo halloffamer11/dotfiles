@@ -59,16 +59,51 @@ Paths are relative to `agents/skills/delegate/`:
 
 **Status:** ready-for-agent
 
-- [ ] On the 2026-09-22 fixtures, every new non-`ultra` Lane starts carried, with its
+- [x] On the 2026-09-22 fixtures, every new non-`ultra` Lane starts carried, with its
   predecessor's Tier and Order. Every `ultra` Lane starts off.
-- [ ] On the page, a Tier picked on the dot of a Lane the catalog does not carry
+- [x] On the page, a Tier picked on the dot of a Lane the catalog does not carry
   appears in the Tier panel and in "Copy as lines". Pasted into the wizard with `v`,
   or given with `--tiers-from`, it carries that Lane at that Tier. Show this with a
   test through `parse_tier_lines` and `apply_tier_lines_to_doc`, using the page's own
   text.
-- [ ] A Lane carried on the carry page after start appears as carried the next time
+- [x] A Lane carried on the carry page after start appears as carried the next time
   `o` opens the page, and tiers drawn earlier in the browser survive the rewrite
   (same catalog key).
-- [ ] No carry-page reason says "in the catalog" for a Lane the catalog file does not
+- [x] No carry-page reason says "in the catalog" for a Lane the catalog file does not
   hold.
-- [ ] All 14 suites pass.
+- [x] All 14 suites pass.
+
+## Landed
+
+One commit per cause.
+
+- `scripts/discover.py` (`refresh_catalog`): `enabled` is the one field a successor
+  does not inherit. On the 2026-09-22 fixtures, 19 of the 20 new Lanes start carried
+  and `sol6-ultra@codex` is the one that does not. Tier, Order, Meter, weight and
+  timeout still come across: `opus55-medium@claude` keeps `opus-medium@claude`'s Tier.
+- `assets/bench_page.js`: `placeable(lanes)` — a Lane a board draws, or one the
+  catalog carries, and never an `ultra` Lane — is what `makeTierPanel` lists and counts
+  and what `panelGroups` groups, so "Copy as lines" writes a Tier picked on any dot.
+  `applyBands` still assigns only the carried Lanes, so a line drawn on the plot never
+  carries a Lane by itself, and a Lane the catalog does not carry says "not carried" on
+  its row.
+- `scripts/setup_tui.py`: `Wizard.current_lanes()` is the catalog as the session holds
+  it, and `Wizard.rewrite_bench_page()` writes the page from it; `o` calls it before
+  opening. `bench_page.catalog_key` is over the lane names, which no screen changes, so
+  the tiers in the browser's `localStorage` survive the rewrite — proved, not assumed,
+  in test 64b.
+- No carry-page reason claims catalog state the file does not hold: a new Lane records
+  no `enabled` at all, so it never reaches `KIND_RECORDED`, and `ultra` is judged before
+  `enabled` is read, so it reads "ultra, never carried". Tested over every new Lane on
+  the fixtures.
+
+Session decisions, Orin's to overrule:
+
+- A Lane with neither rows nor carry is not listed on the page. A Tier is picked on a
+  dot, so a Lane with no dot has no way to be placed there, and listing it would put
+  every off Lane in the panel for nothing.
+- `ULTRA_REASON` stays "ultra, never carried" rather than the ticket's suggested
+  "new, off (ultra)": it already says why and claims nothing about the file, and the
+  wording is shared with the legend and the Lanes that were always there.
+- The "not carried" tag is new. The page now offers Lanes the catalog does not carry,
+  and a row that said nothing would imply the catalog already had them.
