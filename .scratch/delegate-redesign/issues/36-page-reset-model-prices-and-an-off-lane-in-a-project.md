@@ -132,8 +132,11 @@ Session decisions, Orin's to overrule:
 - When two efforts disagree about a price, the dot sits on the dearer of the two
   and the label reads as the range (`$1–$2`). The dearer is the one a run might
   be charged, and the range in the label is the whole of what there is to say.
-- The chart uses the page's `fmtMoney`, so $50 reads `$50.0`, the same as every
-  other figure on the page.
+- The chart has its own short price form, `fmtPrice` ($50, $12, $2, $0.75,
+  $0.125), after the review found `$10.0` sitting beside `$2`; `fmtMoney` still
+  carries a measured cost everywhere else on the page. The cheapest model's
+  input label, which had no room beside its dot at the end of the axis, goes
+  above the dot rather than over its own link line.
 - A model name longer than the name gutter is cut with an ellipsis and stays
   whole in the row's tooltip, rather than drawn off the edge.
 - `dataviz` asks for selective labels; Orin asked for a value on every dot, and
@@ -143,3 +146,10 @@ Session decisions, Orin's to overrule:
   `proposal=True`. Its own test moves with it: a lane turned off behind the
   dashboard's back now reads as a conflict to reload and repeat, and the save is
   still refused.
+- Orin's first refreshed catalog renamed `opus-*@claude` and moved its model, and
+  five tests that read the stowed catalog and the checkout's agent files by name
+  broke on it. They now read the level, not the lane name, so the next refresh
+  does not break them again. One thing that came out of it is open: the
+  `opus55-*@claude` lanes carry no `published_as`, so a benchmark row printing
+  the short "Opus 5.5" would attribute to nothing; no rows file prints it yet,
+  and test 7.9 fails the day one does.
