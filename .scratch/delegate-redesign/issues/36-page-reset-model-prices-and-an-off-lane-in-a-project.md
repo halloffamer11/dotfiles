@@ -87,16 +87,59 @@ Paths are relative to `agents/skills/delegate/`:
 
 **Status:** ready-for-agent
 
-- [ ] "Reset every tier" asks once. After yes, the page holds no Tier, off, manual
+- [x] "Reset every tier" asks once. After yes, the page holds no Tier, off, manual
   mark or moved line for this catalog key, and it shows the catalog's own state.
   Test the store logic.
-- [ ] "Price per model" shows one row per model, and no row per effort. Show it with a
+- [x] "Price per model" shows one row per model, and no row per effort. Show it with a
   test over a catalog that has several efforts per model and an agy family.
-- [ ] Every priced model has an input dot and an output dot on one log axis, a model
+- [x] Every priced model has an input dot and an output dot on one log axis, a model
   with a `null` price reads "no published price", and a row whose efforts disagree is
   flagged.
-- [ ] The rank.py comment is present, and nothing else in ranking or dispatch changes.
+- [x] The rank.py comment is present, and nothing else in ranking or dispatch changes.
   The rank tests are unchanged and pass.
-- [ ] A project file that names a globally off Lane warns once, and `rank.py` still
+- [x] A project file that names a globally off Lane warns once, and `rank.py` still
   ranks there. A project save drops the entry.
-- [ ] All 14 suites pass.
+- [x] All 14 suites pass.
+
+## Landed
+
+One commit per item.
+
+1. **Reset.** `page.resetAll()` in `makeStore` empties the three things the page
+   keeps for this catalog — tiers and offs, manual marks, and every board's tier
+   lines — writes that back, and the button in the Tier panel asks once through
+   `window.confirm` before calling it. The tier view toggle stays; the focused
+   tier goes with the tiers, because there is nothing left to focus on. Tested
+   through the store: what it clears is cleared in the browser too, so a reload
+   draws nothing.
+2. **Price per model.** `bench_page.price_rows(lanes_doc)` is the data, one row
+   per model with efforts collapsed and an agy family joined through
+   `catalog.agy_family`; `drawPrices` in `assets/bench_page.js` draws it. On the
+   2026-09-22 fixture catalog that is 10 rows, dearest output first, and on a
+   refreshed priced catalog 12, with `grok-4.7-build-fast` last and unpriced.
+3. **The comment** sits where `rank()` returns the Pick. Nothing else changed:
+   `tests/test_rank.py` and `tests/test_dispatch.py` are untouched and pass.
+4. **An off Lane in a project file.** The reproduction stopped with
+   "lane is globally off; project_order cannot restore it"; it now warns once and
+   ranks. `.delegate/lanes.json` naming an off Lane was never an error and is
+   tested so it stays that way.
+
+Session decisions, Orin's to overrule:
+
+- The price chart draws input as an open dot and output as a filled one, rather
+  than a second hue for the same money. Colour stays the meter, and the row's own
+  name is the identity, so colour carries nothing on its own.
+- When two efforts disagree about a price, the dot sits on the dearer of the two
+  and the label reads as the range (`$1–$2`). The dearer is the one a run might
+  be charged, and the range in the label is the whole of what there is to say.
+- The chart uses the page's `fmtMoney`, so $50 reads `$50.0`, the same as every
+  other figure on the page.
+- A model name longer than the name gutter is cut with an ellipsis and stays
+  whole in the row's tooltip, rather than drawn off the edge.
+- `dataviz` asks for selective labels; Orin asked for a value on every dot, and
+  with one row per model there are few enough that both can be served. The labels
+  wear text tokens, never the mark's colour, and flip sides rather than collide.
+- The dashboard's `_validate_project_proposal` is the one caller that passes
+  `proposal=True`. Its own test moves with it: a lane turned off behind the
+  dashboard's back now reads as a conflict to reload and repeat, and the save is
+  still refused.
