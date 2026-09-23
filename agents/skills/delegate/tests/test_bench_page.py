@@ -1367,9 +1367,12 @@ const out = {
   circles: of("circle").map((n) => [n.attrs.class, Number(n.attrs.cx), n.attrs.fill]),
   names: of("text", "price-name").map((n) => n.textContent),
   values: of("text", "price-value").map((n) => n.textContent),
+  placed: of("text", "price-value").map((n) => [n.textContent,
+    n.attrs["text-anchor"] || ((n.attrs.class || "").split(" ").includes("mid") ? "middle" : "start"),
+    Number(n.attrs.y)]),
+  links: of("line", "price-link").map((n) => [Number(n.attrs.x1), Number(n.attrs.x2), Number(n.attrs.y1)]),
   none: of("text", "price-none").map((n) => n.textContent),
   spans: of("line", "price-span").length,
-  links: of("line", "price-link").length,
   ticks: of("text", "tick").map((n) => n.textContent),
   colours: of("circle").map((n) => n.attrs.fill + "|" + (n.attrs.stroke || "")),
   titles: of("title").map((n) => n.textContent),
@@ -1454,12 +1457,12 @@ try:
         record("36.7 every priced model gets an input dot and an output dot, and nothing else does",
                kinds == ["price-dot in", "price-dot out"] * 3
                and len(out["names"]) == 4 and out["none"] == ["no published price"]
-               and out["links"] == 3,
+               and len(out["links"]) == 3,
                repr((kinds, out["none"])))
         record("36.8 the two dots share one log axis, dearer further right, and each is labelled",
                astra_in < astra_out
                and out["circles"][4][1] < out["circles"][0][1]   # flash in is left of astra in
-               and out["values"] == ["$10.0", "$50.0", "$1\u2013$2", "$9", "$0.75", "$3.75"]
+               and out["values"] == ["$10", "$50", "$1\u2013$2", "$9", "$0.75", "$3.75"]
                and len(out["ticks"]) >= 3,
                repr((out["circles"], out["values"], out["ticks"])))
         # an open dot wears the meter's colour on its stroke and the surface in
@@ -1473,5 +1476,46 @@ try:
                repr((out["spans"], out["values"], out["colours"], out["titles"][:3])))
 except Exception as e:
     record("36 price per model", False, repr(e))
+
+
+# Ticket 36, after review: every label off its own link, and one short form for
+# a list price.
+try:
+    if not NODE:
+        record("36.10 the cheapest label goes above its dot, not over its link", True,
+               "(node not on PATH; skipped)")
+    else:
+        floor_case = {
+            "meters": [{"name": "codex", "harness": "codex", "shade": 0}],
+            "rows": [
+                {"model": "dear", "harness": "codex", "meter": "codex", "carried": True,
+                 "efforts": ["high"], "lanes": ["dear-high@codex"], "in": 10.0, "out": 50.0,
+                 "in_range": None, "out_range": None, "disagree": False},
+                # the cheapest model of all: its input dot sits against the axis
+                # end, where the label has no room beside it
+                {"model": "tiny", "harness": "codex", "meter": "codex", "carried": True,
+                 "efforts": ["low"], "lanes": ["tiny-low@codex"], "in": 0.1, "out": 0.5,
+                 "in_range": None, "out_range": None, "disagree": False},
+            ],
+        }
+        result = subprocess.run([NODE, "-e", T36_PRICE_DRIVER, os.path.abspath(bench_page.SCRIPT_PATH)],
+                                input=json.dumps(floor_case), capture_output=True, text=True, timeout=60)
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr[-800:])
+        out = json.loads(result.stdout)
+        placed = {text: (anchor, y) for text, anchor, y in out["placed"]}
+        # the second row's link, which the $0.1 label would have lain over
+        tiny_link_y = sorted(y for _x1, _x2, y in out["links"])[1]
+        record("36.10 a label with no room beside its dot goes above it, never over its own link",
+               placed["$0.1"] == ("middle", tiny_link_y - 9)
+               and placed["$0.5"] == ("start", tiny_link_y + 4)
+               and placed["$10"][0] == "end" and placed["$50"][0] == "start",
+               repr((out["placed"], out["links"])))
+        record("36.11 every label on the chart is one short price form",
+               [t for t, _a, _y in out["placed"]] == ["$10", "$50", "$0.1", "$0.5"]
+               and all(re.fullmatch(r"\$[\d,]+(\.\d+)?", t) for t, _a, _y in out["placed"]),
+               repr(out["values"]))
+except Exception as e:
+    record("36.10 the cheapest label goes above its dot, not over its link", False, repr(e))
 
 sys.exit(1 if fails else 0)

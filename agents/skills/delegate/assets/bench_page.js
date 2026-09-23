@@ -1580,6 +1580,17 @@
   // the page's surface, for an open dot's fill and a filled dot's ring
   const SURFACE = "var(--surface, #ffffff)";
 
+  // A list price, short and in one form the whole chart over: $50, $12, $2,
+  // $0.75, $0.125. `fmtMoney` is the page's figure for a measured cost, where a
+  // trailing place carries information; a price is the vendor's own round
+  // number, and "$10.0" beside "$2" reads as two different kinds of number.
+  function fmtPrice(v) {
+    if (v === null || v === undefined || !isFinite(v)) return "\u2014";
+    const a = Math.abs(v);
+    if (a >= 1000) return "$" + Math.round(v).toLocaleString("en-US");
+    return "$" + String(+v.toFixed(a >= 10 ? 0 : a >= 1 ? 2 : 3));
+  }
+
   function priceValues(rows) {
     const out = [];
     for (const row of rows) {
@@ -1626,7 +1637,7 @@
       const said = [`${row.model}: ${row.efforts.length} effort${row.efforts.length === 1 ? "" : "s"}`,
                     row.meter ? `meter ${row.meter}` : null,
                     row.carried ? "carried" : "not carried",
-                    `in ${fmtMoney(row.in)}`, `out ${fmtMoney(row.out)}`].filter(Boolean);
+                    `in ${fmtPrice(row.in)}`, `out ${fmtPrice(row.out)}`].filter(Boolean);
       svg("title", {}, svg("rect", { x: 0, y: y - PRICE_ROW / 2, width: W, height: PRICE_ROW,
                                      class: "price-hit" }, frame)).textContent = said.join(" · ");
       if (row.in === null && row.out === null) {
@@ -1652,19 +1663,25 @@
                                     fill: key === "out" ? colour : SURFACE }, frame);
         if (key === "in") dot.setAttribute("stroke", colour);
         svg("title", {}, dot).textContent =
-          `${row.model} · ${key === "out" ? "output" : "input"} ${fmtMoney(value)} per 1M tokens`
-          + (span ? ` · efforts disagree: ${fmtMoney(span[0])} to ${fmtMoney(span[1])}` : "");
-        // the cheaper end labels left and the dearer right, so the two never sit
-        // on top of each other however close the prices are; a label that would
-        // reach into the name gutter flips to the right of its dot instead. A
-        // disagreement reads as the range itself, which is the whole of what
-        // there is to say about it.
-        const text = span ? `${fmtMoney(span[0])}\u2013${fmtMoney(span[1])}` : fmtMoney(value);
+          `${row.model} · ${key === "out" ? "output" : "input"} ${fmtPrice(value)} per 1M tokens`
+          + (span ? ` · efforts disagree: ${fmtPrice(span[0])} to ${fmtPrice(span[1])}` : "");
+        // The cheaper end labels left and the dearer right, so the two never sit
+        // on top of each other however close the prices are. A disagreement
+        // reads as the range itself, which is the whole of what there is to say
+        // about it.
+        const text = span ? `${fmtPrice(span[0])}\u2013${fmtPrice(span[1])}` : fmtPrice(value);
         const other = key === "in" ? row.out : row.in;
-        let left = other !== null && value <= other;
-        if (left && at(value) - 10 - (text.length * CHAR_PX + 6) < x0 - 4) left = false;
-        svg("text", { x: at(value) + (left ? -10 : 10), y: y + 4, class: "price-value",
-                      "text-anchor": left ? "end" : "start" }, frame).textContent = text;
+        const cheaper = other !== null && value <= other;
+        // The cheapest model of all sits against the left end of the axis, where
+        // its label may not fit beside it. That label goes above its dot, never
+        // to the right, where the link to the other dot runs: a label lying over
+        // its own line is unreadable, and the row has the height to spare.
+        if (cheaper && at(value) - 10 - (text.length * CHAR_PX + 6) < x0 - 4) {
+          svg("text", { x: at(value), y: y - 9, class: "price-value mid" }, frame).textContent = text;
+        } else {
+          svg("text", { x: at(value) + (cheaper ? -10 : 10), y: y + 4, class: "price-value",
+                        "text-anchor": cheaper ? "end" : "start" }, frame).textContent = text;
+        }
       }
     });
     return frame;
@@ -1798,7 +1815,7 @@
                        zoomAbout, covers, panBy, bandTier, defaultLines, pointTier, groupLanes, reviewOrder,
                        tierLinesText, focusDomain, applyBands, makeStore, boardKey, pointOff, carriedNames,
                        placeable, beatenByLane, panelGroups, sensitivity, meterColour, setShades,
-                       priceValues, drawPrices, OFF, W, H, PAD };
+                       priceValues, drawPrices, fmtPrice, OFF, W, H, PAD };
   } else if (typeof document !== "undefined") {
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
     else boot();
