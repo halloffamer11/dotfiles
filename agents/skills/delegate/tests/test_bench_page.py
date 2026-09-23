@@ -1282,4 +1282,62 @@ try:
 except Exception as e:
     record("35 the page places a lane the catalog does not carry", False, repr(e))
 
+
+# Ticket 36: "Reset every tier" clears everything this page holds for this
+# catalog, and a reload finds it cleared.
+T36_RESET_DRIVER = r"""
+const P = require(process.argv[1]);
+const c = JSON.parse(require("fs").readFileSync(0, "utf8"));
+const lanes = c.lanes.map((l, rank) => Object.assign({ rank }, l));
+const data = { catalogKey: "k", lanes, boards: c.boards };
+let saved = JSON.stringify(c.saved);
+global.localStorage = { getItem: () => saved, setItem: (k, v) => { saved = v; } };
+const page = P.makeStore(data);
+// a snapshot, not the live objects the reset below empties
+const copy = (o) => JSON.parse(JSON.stringify(o));
+const out = { before: { tiers: copy(page.tiers), manual: copy(page.manual),
+                        lines: copy(page.lines), tierView: page.tierView } };
+page.focusTier = 3;
+page.resetAll();
+out.after = { tiers: page.tiers, manual: page.manual, lines: page.lines,
+              tierView: page.tierView, focusTier: page.focusTier };
+out.stored = JSON.parse(saved);
+// a reload of the same catalog key finds nothing drawn
+const again = P.makeStore(data);
+out.reloaded = { tiers: again.tiers, manual: again.manual, lines: again.lines, tierView: again.tierView };
+process.stdout.write(JSON.stringify(out));
+"""
+
+try:
+    if not NODE:
+        record("36.1 reset clears every tier, mark and line, under node", True,
+               "(node not on PATH; skipped)")
+    else:
+        case = {
+            "lanes": [{"name": "a@x", "group": "a", "effort": "high", "meter": "m1", "carried": True},
+                      {"name": "b@x", "group": "b", "effort": "high", "meter": "m1", "carried": True}],
+            "boards": [{"id": "b0", "source": "s", "benchmark": "toy", "points": []}],
+            "saved": {"version": 2, "tiers": {"a@x": 4, "b@x": "off"}, "manual": {"a@x": True},
+                      "lines": {'["s","toy"]': [1, 2, 3]}, "tierView": True},
+        }
+        result = subprocess.run([NODE, "-e", T36_RESET_DRIVER, os.path.abspath(bench_page.SCRIPT_PATH)],
+                                input=json.dumps(case), capture_output=True, text=True, timeout=60)
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr[-800:])
+        out = json.loads(result.stdout)
+        record("36.1 the page starts from what the browser held",
+               out["before"] == {"tiers": {"a@x": 4, "b@x": "off"}, "manual": {"a@x": True},
+                                 "lines": {'["s","toy"]': [1, 2, 3]}, "tierView": True},
+               repr(out["before"]))
+        record("36.2 reset clears every tier, off, manual mark and tier line, and keeps the tier view",
+               out["after"] == {"tiers": {}, "manual": {}, "lines": {},
+                                "tierView": True, "focusTier": None},
+               repr(out["after"]))
+        record("36.3 what it clears is cleared in the browser too, so a reload draws nothing",
+               out["stored"] == {"version": 2, "tiers": {}, "lines": {}, "manual": {}, "tierView": True}
+               and out["reloaded"] == {"tiers": {}, "manual": {}, "lines": {}, "tierView": True},
+               repr((out["stored"], out["reloaded"])))
+except Exception as e:
+    record("36 reset clears every tier, mark and line", False, repr(e))
+
 sys.exit(1 if fails else 0)

@@ -1309,6 +1309,20 @@
       page.redraw();
     });
     const copyButton = el("button", { type: "button", class: "reset" }, "Copy as lines", tools);
+    // It drops drawn work, so it asks first, once (ticket 36).
+    const resetButton = el("button", { type: "button", class: "reset" }, "Reset every tier", tools);
+    resetButton.addEventListener("click", () => {
+      const drawn = Object.keys(page.tiers).length;
+      const asked = typeof window !== "undefined" && window.confirm
+        ? window.confirm(drawn
+            ? `Clear the ${drawn} tier${drawn === 1 ? "" : "s"} drawn here, and every tier line? `
+              + "The catalog's own tiers are not touched."
+            : "Clear every tier line drawn here? The catalog's own tiers are not touched.")
+        : true;
+      if (!asked) return;
+      page.resetAll();
+      page.redraw();
+    });
     const copyBox = el("textarea", { rows: 6, readonly: "", "aria-label": "Decisions as lines, lane then tier or off" }, null, host);
     copyBox.hidden = true;
     const copyNote = el("p", { class: "empty" }, null, host);
@@ -1534,6 +1548,21 @@
       } catch (_err) {
         page.storage = "unavailable";
       }
+    };
+    // Everything this page holds for this catalog, gone: every tier and off
+    // drawn, every manual mark, and the three lines on every board, which go
+    // back to undrawn and are recomputed from the scores when they are asked
+    // for again. What stays is the tier view toggle, which is how the page is
+    // read rather than what it holds. The focused tier goes too: there is
+    // nothing left to focus on, and a page still hiding dots for it would read
+    // as empty. Nothing outside the browser is touched, as nothing here ever is
+    // (ticket 36).
+    page.resetAll = () => {
+      for (const holder of [tiers, manual, lines]) {
+        for (const name of Object.keys(holder)) delete holder[name];
+      }
+      page.focusTier = null;
+      page.save();
     };
     page.save();
     return page;
