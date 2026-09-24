@@ -1,26 +1,107 @@
 {
   "skill_name": "fresh-context",
+  "notes": "Each fixture is built with `sh evals/fixtures/<name>.sh <dest>` into a fresh git repo (base commit plus this session's changes). `session` is the simulated session history the executor is told it has. The executor cannot ask the user: it pre-approves the deletions and keep/drop answers stated in `session`, and writes any question it would have asked to outputs/questions.md.",
   "evals": [
     {
       "id": 0,
       "name": "superpowers-mid-plan",
+      "fixture": "fixtures/superpowers-mid-plan.sh",
       "prompt": "FC — wrapping up for the day, about to clear context.",
-      "expected_output": "Plan checkboxes reconciled with code (step 3 checked), WIP committed or its state recorded in the plan/spec, experiment/scratch/notes-tmp deleted (decisions folded into plan), CLAUDE.md slimmed with pointer fixed to the active json-export plan, no handoff/index/archive files or new directories, chat report of kept/deleted/CLAUDE.md changes.",
-      "files": ["fixtures/superpowers-mid-plan"]
+      "session": "You finished step 3 (write_json in src/export.py) of docs/superpowers/plans/2026-09-20-json-export.md. You tried orjson in experiment/ and rejected it: faster (29 vs 41 ms on 10k rows) but it breaks the stdlib-only rule; the numbers are in scratch/bench.txt. You wrote notes-tmp.md and a Current focus section in CLAUDE.md. Next is step 4. The user approves deleting experiment/, scratch/ and notes-tmp.md, and wants the WIP committed.",
+      "expected_output": "Plan step 3 checked; the orjson decision folded into the plan; WIP committed; experiment/, scratch/, notes-tmp.md deleted; CLAUDE.md loses the Current focus paragraph and its stale pointer is fixed to the json-export plan as one pointer line; no handoff file; tripwires clean.",
+      "assertions": [
+        "Plan step 3 is checked in docs/superpowers/plans/2026-09-20-json-export.md",
+        "The orjson rejection and its reason are recorded in the json-export plan",
+        "experiment/, scratch/ and notes-tmp.md no longer exist",
+        "The write_json change is committed (git status shows no change to src/export.py)",
+        "CLAUDE.md has no Current focus section and no line over 300 characters",
+        "CLAUDE.md points to the json-export plan and no longer to the csv-import plan as active",
+        "No new file whose name contains handoff, summary, index, or session",
+        "No docs/decisions.md or other decisions file was created for the one orjson decision",
+        "tripwires.sh exits 0 on the final tree"
+      ]
     },
     {
       "id": 1,
       "name": "plain-repo-loose-ends",
+      "fixture": "fixtures/plain-repo-loose-ends.sh",
       "prompt": "tie up loose ends, I'm starting a new session after this.",
-      "expected_output": "Works without any superpowers structure: utils_old.py deleted, notes.md removed with its non-duplicate session state folded into CLAUDE.md or a commit, half-done --json WIP committed to a branch or documented as in-progress, CLAUDE.md updated to point at the in-progress work, no handoff files.",
-      "files": ["fixtures/plain-repo-loose-ends"]
+      "session": "You copied utils.py to utils_old.py before a refactor you then abandoned. You started a --json flag in cli.py (parser only). The user told you stdout must stay ASCII because the legacy log parser breaks otherwise. You kept notes.md and appended two dated bullets to CLAUDE.md. The user approves deleting utils_old.py and notes.md, and wants the --json WIP kept on a branch.",
+      "expected_output": "utils_old.py and notes.md deleted; the ASCII-stdout instruction survives as one standing line in CLAUDE.md; the --json status goes to a WIP commit on a branch (message says what is left); dated bullets gone from CLAUDE.md; no handoff file.",
+      "assertions": [
+        "utils_old.py and notes.md no longer exist",
+        "An instruction file states that stdout must stay ASCII",
+        "No dated line remains in CLAUDE.md",
+        "CLAUDE.md has no Current focus, Status, or similar state section",
+        "The --json WIP is committed on a branch other than main, and the commit message says what is left to do",
+        "No new file whose name contains handoff, summary, index, or session",
+        "tripwires.sh exits 0 on the final tree"
+      ]
     },
     {
       "id": 2,
       "name": "nearly-clean",
+      "fixture": "fixtures/nearly-clean.sh",
       "prompt": "fresh context please",
-      "expected_output": "Recognizes there is nothing to do: no files created or deleted, CLAUDE.md substantively unchanged, short report saying the project is already session-safe. Old skill would be expected to emit a resume pointer or handoff; new skill should not.",
-      "files": ["fixtures/nearly-clean"]
+      "session": "You fixed a docstring in parser.py and committed it. Nothing else happened.",
+      "expected_output": "Nothing to do: no files created, deleted, or edited; the stable wordy line in CLAUDE.md is left alone (diff-scoped review); a short report that the project is session-safe with the tripwire sizes; a one-line restart prompt.",
+      "assertions": [
+        "git status is clean and HEAD is unchanged from the fixture",
+        "CLAUDE.md is byte-identical to the fixture",
+        "The report includes lines and bytes for CLAUDE.md"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "bloated-claude-md",
+      "fixture": "fixtures/bloated-claude-md.sh",
+      "prompt": "wrap up, clearing context next.",
+      "session": "You drafted the ticket 13 token bucket in api/limits.py (WIP, keep it) and appended two dated status bullets to CLAUDE.md. The user asked you whether limits are per key or per IP; no answer yet. The user approves moving text out of CLAUDE.md.",
+      "expected_output": "Tripwires fire, so a full placement pass: dated status and review notes move verbatim to docs/issues/ (or _archive/), decisions to a decisions doc, the api/ rule from the Notes paragraph becomes a real api/CLAUDE.md with an AGENTS.md link, the ancestor link is gone, every Conventions rule survives, the open per-key/per-IP question lands in ticket 13, and the final tree passes the tripwires.",
+      "assertions": [
+        "tripwires.sh exits 0 on the final tree",
+        "api/CLAUDE.md is a regular file, not a link to ../CLAUDE.md",
+        "An instruction file under api/ requires schema validation and an Idempotency-Key header",
+        "Every bullet under the fixture's Conventions heading still appears in some instruction file",
+        "The dated status and review-note lines exist verbatim outside the instruction files",
+        "The 30 decision lines exist verbatim in a decisions doc or _archive/",
+        "docs/issues/13.md records the open per-key vs per-IP question",
+        "The report lists what moved where and the final lines and bytes"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "scoped-instructions",
+      "fixture": "fixtures/scoped-instructions.sh",
+      "prompt": "/fc",
+      "session": "You started notebook support in src/nb.py (ticket docs/issues/004-notebooks.md; keep the WIP). The user gave you two standing instructions, which you appended to CLAUDE.md: never edit a migration once it is on main, and convert notebooks with nbconvert before reading them. Codex workers are used on this repo for web/ and migrations/ work.",
+      "expected_output": "web/ and migrations/ instructions move to nested CLAUDE.md files with AGENTS.md links (one directory each, so every harness reads them); the notebook instruction becomes a paths-scoped rule for **/*.ipynb; the test-file instruction becomes a paths-scoped rule (it spans tests/ and src/); misc.md is split or removed, its npm line resolved to pnpm, its dated status moved to ticket 004; root CLAUDE.md keeps only global lines and a pointer to docs/issues/.",
+      "assertions": [
+        "migrations/CLAUDE.md exists with the never-edit rule, and migrations/AGENTS.md links to it",
+        "web/CLAUDE.md exists with the pnpm rule, and web/AGENTS.md links to it",
+        "A .claude/rules/ file with paths covering *.ipynb holds the nbconvert instruction",
+        "No instruction file says to use npm in web/",
+        "No rules file contains a date or the words in progress",
+        "Every rules file under .claude/rules/ has a paths: field, or holds only instructions that apply everywhere",
+        "The root CLAUDE.md no longer holds the migrations, web, or notebook lines",
+        "tripwires.sh exits 0 on the final tree"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "state-across-trackers",
+      "fixture": "fixtures/state-across-trackers.sh",
+      "prompt": "wrap up before I clear",
+      "session": "You finished auth plan step 4 but did not tick it in the plan. You found that billing 03 is blocked: the Stripe test key in .env.test expired and the user must rotate it. You pasted a Status and a Waiting on the user section into CLAUDE.md.",
+      "expected_output": "Status and Waiting sections removed from CLAUDE.md; step 4 ticked in the auth plan; the Stripe blocker recorded in .scratch/billing/issues/03-stripe-webhooks.md; CLAUDE.md gets exactly one pointer line per tracker; no state copied into rules or a new file.",
+      "assertions": [
+        "CLAUDE.md has no Status, Waiting, or Current focus section and no dated line",
+        "Auth plan step 4 is checked",
+        "03-stripe-webhooks.md records the expired Stripe test key and that the user must rotate it",
+        "CLAUDE.md has a pointer to docs/superpowers/plans/ and a pointer to .scratch/billing/issues/",
+        "No .claude/rules/ file and no new top-level markdown file was created",
+        "tripwires.sh exits 0 on the final tree"
+      ]
     }
   ]
 }
