@@ -6,7 +6,7 @@ Orin runs the spec acceptance list as the final assessment before this ticket cl
 
 **Blocked by:** 04 The `/delegate` skill; 05 Typed-only harness wrappers.
 
-**Status:** landed 2026-09-09 (commits 7c76843, 9545e6f; tag delegate-v1-last); unticked items wait on Orin: the one-line Delegation section in ~/.claude/CLAUDE.md and the DELEGATE_BALANCE export in ~/.zshrc.local (both blocked for the session), and the §9 walk
+**Status:** landed 2026-09-09 (commits 7c76843, 9545e6f; tag delegate-v1-last); unticked items wait on Orin, both outside this repo and both still there on 2026-09-23: `~/.claude/hooks/delegate-gate.py:56` names `{SKILL_DIR}/delegate.py`, which moved to `scripts/delegate.py` (§9.6), and `export DELEGATE_BALANCE=1` is line 1 of `~/.zshrc.local` (§9.7); then the rest of the §9 walk (§9.2 is signed). The one-line Delegation section in ~/.claude/CLAUDE.md is dropped: that section is gone (2026-09-11)
 
 - [x] Spawning a Claude worker without a reason is no longer denied; the hook only adds context
 - [ ] No environment-variable switch remains anywhere in the skill, hooks, or docs; `mode` and `balance` do not exist as settings

@@ -7,7 +7,7 @@ write restrictions and stale-editor protection. Keep the existing prototype scop
 
 **Blocked by:** None — prototype accepted and Orin approved this pass on 2026-09-17.
 
-**Status:** implemented 2026-09-18 (`e428385`, `040e136`, `3b3e00d`, `91c2ef1`, review fixes) on `worktree/delegate-monitor-herdr` — all boxes ticked; Orin's review of the updated prototype is open
+**Status:** implemented 2026-09-18 (`e428385`, `040e136`, `3b3e00d`, `91c2ef1`, review fixes) on `worktree/delegate-monitor-herdr` — all boxes ticked; Orin's review of the updated prototype is open. Open, Orin's: the one decision below (project saves keep the canonical `catalog.edit_catalog` document shape).
 
 - [x] Current main is merged into the isolated prototype branch; main and the Rust monitor are preserved.
 - [x] Metering on/off and its source are visible; off explains inactive Gate/Margin/Pace and cached observations.

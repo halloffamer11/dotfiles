@@ -6,8 +6,7 @@ the project's Gate and Margin. It reads delegate's catalog and ranking boundary 
 writes only project scope. `../delegate-mon/` is a separate program, the `delegate-mon`
 Rust monitor, and shares no code with this directory.
 
-Orin accepted `deck` on 2026-09-19 and locked it as the production view on 2026-09-20.
-The history is `.scratch/delegate-dashboard-plugin/issues/`: ticket 11 holds the layout
+`deck` is the production view. The history is `.scratch/delegate-dashboard-plugin/issues/`: ticket 11 holds the layout
 verdicts and the key map, ticket 12 the lock-in.
 
 ## How to open it

@@ -29,3 +29,5 @@ include browser_probes.py in any later Domain consumer audit.
 Orin approved a non-Claude worker for this batch's TUI changes on 2026-09-16,
 because this session cannot spawn the native Opus lane. Preserve the existing
 TUI design and verify state transitions.
+
+`research/prompt.md` is this effort's original research brief, kept as scope history.
