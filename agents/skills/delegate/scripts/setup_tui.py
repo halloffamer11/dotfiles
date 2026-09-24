@@ -1093,16 +1093,10 @@ class Wizard:
         return sorted(name for name in self._carried() if self._assigned.get(name) == tier)
 
     def _tier_map_lines(self):
-        lines = []
-        for tier in range(1, 5):
-            names = self._lanes_at(tier)
-            if not names:
-                lines.append(f"tier {tier} (0): (none)")
-            else:
-                # five lanes on one tier already ran past column 80 and were cut
-                # after a comma, which reads as a list that stops for no reason
-                lines.append(self._drift_line(f"tier {tier}", names, always_count=True))
-        return lines
+        # Counts only: a name list cut to the width read as a list that stops
+        # for no reason, and the tier pages already name every lane
+        counts = [f"tier {tier}: {len(self._lanes_at(tier))}" for tier in range(1, 5)]
+        return ["Lanes carried: " + " · ".join(counts)]
 
     def _fit(self, line):
         """One width rule for every prose line: the renderer clips at width - 1."""

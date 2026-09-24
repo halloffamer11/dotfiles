@@ -115,7 +115,7 @@
         "Fable 5.1"
       ],
       "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight, timeout and price are copied from fable-xhigh@claude; a different effort spends a different share of the meter and needs a different time. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
-      "order": 2
+      "order": 3
     },
     "fable-max@claude": {
       "harness": "claude",
@@ -370,7 +370,7 @@
       "tier": 4,
       "basis": "frontier codex model, priority 1 in the CLI; added 2026-09-09",
       "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight 40 is a placeholder set by the session. price: developers.openai.com/api/docs/pricing, gpt-6-astra short-context row, read 2026-09-18.",
-      "order": 3
+      "order": 2
     },
     "astra-low@codex": {
       "harness": "codex",
@@ -774,7 +774,7 @@
       "effort": "max",
       "meter": "codex",
       "meter_weight": 1,
-      "timeout": "10m",
+      "timeout": "40m",
       "price": {
         "in": 0.1,
         "cache_read": 0.01,
@@ -783,7 +783,7 @@
       },
       "tier": 2,
       "basis": "gpt-6-luna supersedes gpt-5.6-luna on codex; takes the place of luna-max@codex",
-      "note": "UNMEASURED: meter_weight and timeout copied from luna-max@codex. price: developers.openai.com/api/docs/pricing, gpt-6-luna short-context row, read 2026-09-22.",
+      "note": "UNMEASURED: meter_weight copied from luna-max@codex. timeout 40m set by Orin 2026-09-23 after a 10m timeout on an impl job. price: developers.openai.com/api/docs/pricing, gpt-6-luna short-context row, read 2026-09-22.",
       "order": 1
     },
     "flash-high@agy": {

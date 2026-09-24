@@ -500,9 +500,8 @@ try:
         w.handle("enter")
     w.handle("enter")
     legend = w.view().get("legend") or []
-    t4 = next(line for line in legend if line.startswith("tier 4 "))
-    t_incoming = next(line for line in legend if line.startswith(f"tier {incoming_sol} "))
-    prefixes = [line.split(" (", 1)[0] for line in legend if line.startswith("tier ")]
+    tier_map = next(line for line in legend if line.startswith("Lanes carried: "))
+    counts = tier_map.removeprefix("Lanes carried: ").split(" · ")
     panels = {}
     landings = []
     for index in range(len(w._routing_settings())):
@@ -516,9 +515,10 @@ try:
     record("13 routing legend maps this session's assignments, and a panel explains the setting",
            w.screen == "routing"
            and incoming_sol != 4
-           and "sol-high@codex" in t4
-           and "sol-high@codex" not in t_incoming
-           and prefixes == ["tier 1", "tier 2", "tier 3", "tier 4"]
+           # counts only: the session's move of sol-high to tier 4 is in them
+           and "sol-high@codex" in w._lanes_at(4)
+           and "sol-high@codex" not in w._lanes_at(incoming_sol)
+           and counts == [f"tier {t}: {len(w._lanes_at(t))}" for t in range(1, 5)]
            and all(landings) and len(landings) == 13
            # the explanation moved beside the table: one per setting, headed by it
            and set(panels) == {f"{c} {k}" for c in catalog.CLASSES for k in ("floor", "ceiling")} | {"margin", "gate", "meters"}
@@ -1494,9 +1494,10 @@ try:
                      *(view.get("body") or []), view["title"]]:
             if len(line) > 79:
                 over.append((view["screen"], len(line), line))
-    tier_map = [line for line in routing_view["legend"] if line.startswith("tier ")]
+    tier_map = [line for line in routing_view["legend"] if line.startswith("Lanes carried: ")]
     record("34 a crowded tier map still fits the line",
-           not over and any("more)" in line for line in tier_map), repr(over or tier_map))
+           not over and len(tier_map) == 1 and "more)" not in tier_map[0]
+           and tier_map[0].count("tier ") == 4, repr(over or tier_map))
 except Exception as e:
     record("34 a crowded tier map still fits the line", False, repr(e))
 
