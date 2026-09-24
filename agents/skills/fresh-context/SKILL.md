@@ -1,13 +1,13 @@
 ---
 name: fresh-context
-description: Pre-context-clear housekeeping — settles unfinished work, deletes session sprawl, and keeps CLAUDE.md/AGENTS.md a lean map (standing instructions plus pointers to where state lives; area-only detail in nested files or path-scoped rules) so a fresh session can resume from persistent files alone. Use whenever the user is about to clear context or end a session, wants loose ends tied up or the project left session-safe, or types "FC", "/fc", "fresh context", or "wrap up".
+description: Pre-context-clear housekeeping — settles unfinished work, deletes session sprawl, and keeps CLAUDE.md/AGENTS.md a lean map so a fresh session can resume from persistent files alone. Use whenever the user is about to clear context or end a session, wants loose ends tied up or the project left session-safe, or types "FC", "/fc", "fresh context", or "wrap up".
 ---
 
 # Fresh Context
 
 Leave the project so a fresh session can pick up from persistent files alone.
 State lives in the files that already own it: plans, specs, issue trackers,
-READMEs, commit messages. CLAUDE.md points to those files and never copies
+READMEs, commit messages, etc. CLAUDE.md points to those files and never copies
 them. Never create handoff, index, or summary files. Never delete a file
 without the user's direct approval.
 
@@ -87,7 +87,7 @@ fits.
 | Needed in every session, whatever the task | CLAUDE.md, one line |
 
 Do not create a decisions file for one decision; the commit message holds
-its reason until there are enough to need a file.
+its reason until there is enough to need a file.
 
 Before you write a nested file or a rule, read `references/scoped-files.md`
 for the file shapes and what each one costs in context.
