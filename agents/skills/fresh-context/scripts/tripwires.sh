@@ -3,7 +3,9 @@
 # Prints the size of each instruction file, one FIRE line per tripwire, and
 # one WARN line per status word for the agent to judge.
 # Exit status: 0 when nothing fires, 1 when something fires.
-# awk only: a grep on PATH may be a shim with other defaults.
+# awk for the checks: a grep on PATH may be a shim with other defaults.
+# python3, when present, only reads claudeMdExcludes: an excluded file never
+# loads, so it is not checked.
 
 MAX_LINES=200
 MAX_BYTES=10240
@@ -16,7 +18,30 @@ fired=0
 list() {
   find . \( -name .git -o -name node_modules -o -name .worktrees -o -name '_*' \) -prune \
     -o \( -name CLAUDE.md -o -name AGENTS.md -o -name CLAUDE.local.md \
-          -o -path '*/.claude/rules/*.md' \) "$@" -print
+          -o -path '*/.claude/rules/*.md' \) "$@" -print | loaded
+}
+
+# Drops files that match a claudeMdExcludes glob in the project or user
+# settings, and names each one on stderr.
+loaded() {
+  command -v python3 >/dev/null 2>&1 || { cat; return; }
+  python3 -c '
+import fnmatch, json, os, sys
+pats = []
+for s in (".claude/settings.json", ".claude/settings.local.json",
+          os.path.expanduser("~/.claude/settings.json")):
+    try:
+        pats += json.load(open(s)).get("claudeMdExcludes", [])
+    except (OSError, ValueError):
+        pass
+for line in sys.stdin:
+    p = line.rstrip("\n")
+    paths = (os.path.abspath(p), os.path.realpath(p))
+    if any(fnmatch.fnmatch(a, x) for a in paths for x in pats):
+        print("skip  excluded   " + p, file=sys.stderr)
+    else:
+        print(p)
+'
 }
 
 # Links: a link to a file in the same directory is fine; any other target
