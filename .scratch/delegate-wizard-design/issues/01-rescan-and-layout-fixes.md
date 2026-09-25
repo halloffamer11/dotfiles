@@ -8,7 +8,8 @@ the harnesses page layout, and the tests that should have caught them.
 
 **Category:** bug
 
-**Status:** open. Review 2026-09-23 on `opus55-medium@claude` (verdict findings);
+**Status:** landed 2026-09-24 (`732fab2`, on `opus55-medium@claude`; 871 PASS).
+A live `r` against the real harnesses and a real fetch is not run. Review 2026-09-23 on `opus55-medium@claude` (verdict findings);
 findings 1, 2 and 4 confirmed by reading the code.
 
 ## Decisions
