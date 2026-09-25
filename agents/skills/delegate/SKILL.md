@@ -1,6 +1,7 @@
 ---
 name: delegate
 description: Route worker-shaped work (implementation with a spec, verification, review, scouting, mechanical transforms) to an external worker on one lane, picked by tier and remaining subscription usage. Use before any Agent, Workflow, or teammate spawn, and to answer questions about remaining usage. Not for work that needs this session's live context.
+disable-model-invocation: true
 ---
 
 # Delegate
