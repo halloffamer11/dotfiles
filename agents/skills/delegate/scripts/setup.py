@@ -315,7 +315,7 @@ def _with_aa_rows(paths, refreshed):
 
 
 def refresh_effort_rows(paths, cache_dir=None, fixture_dir=None, now=None,
-                        max_age=AA_MAX_AGE, fetch=None, force=False):
+                        max_age=AA_MAX_AGE, fetch=None, force=False, fallback=None):
     """(the `--effort-rows` list with the Artificial Analysis rows refreshed,
     one line saying where they came from).
 
@@ -324,10 +324,12 @@ def refresh_effort_rows(paths, cache_dir=None, fixture_dir=None, now=None,
     the last 24 hours is reused, unless `force` — the harnesses page's `r`,
     which asks for the rows as they are now — and a fetch that fails keeps
     the repo's rows and says why: a leaderboard that is down must never stop
-    a catalog edit. Terminal-Bench rows stay as they are, because extracting
-    them needs a worker. `fixture_dir` reads a saved rows file beside the
-    harness fixtures, so a test and a fixture run touch no network and no
-    cache.
+    a catalog edit. `fallback` is the paths launch used, which the `r` passes:
+    a rescan whose fetch fails keeps the rows the pages already show, not the
+    repo's, which may be older than the cache launch read. Terminal-Bench rows
+    stay as they are, because extracting them needs a worker. `fixture_dir`
+    reads a saved rows file beside the harness fixtures, so a test and a
+    fixture run touch no network and no cache.
     """
     paths = list(paths or [])
     if fixture_dir is not None:
@@ -348,12 +350,16 @@ def refresh_effort_rows(paths, cache_dir=None, fixture_dir=None, now=None,
         (fetch or effort.run_aa)(cache_dir, quiet=True)
     except Exception as e:
         # Every failure here is the same failure to the operator: the rows are
-        # the repo's, and the reason is on the start page.
+        # the repo's, or on a rescan launch's, and the reason is on the start
+        # page.
+        if fallback is not None:
+            return (list(fallback),
+                    f"Benchmark rows: the rows launch used; the Artificial Analysis fetch failed: {e}")
         return paths, f"Benchmark rows: repo rows; the Artificial Analysis fetch failed: {e}"
     return _with_aa_rows(paths, accepted), "Benchmark rows: Artificial Analysis fetched just now"
 
 
-def scan(args, lanes_doc, force=False):
+def scan(args, lanes_doc, force=False, fallback=None):
     """The scrub that runs at launch, and again on the harnesses page's `r`:
     the benchmark rows and each harness's models, acquired together.
 
@@ -361,8 +367,9 @@ def scan(args, lanes_doc, force=False):
     rows as `load_effort_rows` gives them and the refreshed paths they came
     from. The rows come off a web page and the models come off three CLIs;
     neither waits on the other (ticket 33). `force` fetches the rows even
-    when the cache is fresh. Nothing here writes a file but the rows cache,
-    and no failure raises: a fetch that fails is a note, and a probe that
+    when the cache is fresh, and `fallback` is the row paths to keep if
+    that fetch fails (`refresh_effort_rows`). Nothing here writes a file but
+    the rows cache, and no failure raises: a fetch that fails is a note, and a probe that
     fails is a notice.
     """
     rows_box = {}
@@ -374,12 +381,14 @@ def scan(args, lanes_doc, force=False):
             rows_box["value"] = (
                 (list(args.effort_rows or []), "") if args.no_discover
                 else refresh_effort_rows(args.effort_rows, fixture_dir=args.fixture_dir,
-                                         force=force)
+                                         force=force, fallback=fallback)
             )
         except Exception as e:
             # a thread that raises would print a traceback over the wizard
-            rows_box["value"] = (args.effort_rows,
-                                 f"Benchmark rows: repo rows; the refresh failed: {e}")
+            rows_box["value"] = (
+                (list(fallback), f"Benchmark rows: the rows launch used; the refresh failed: {e}")
+                if fallback is not None
+                else (args.effort_rows, f"Benchmark rows: repo rows; the refresh failed: {e}"))
 
     fetcher = threading.Thread(target=fetch_rows, daemon=True)
     fetcher.start()
@@ -620,7 +629,10 @@ def main(argv=None):
             )
         else:
             note_undiscovered_lanes(lanes_doc, discovery_data)
-        # the catalog as read, which a rescan starts from again
+        # the catalog as read, which a rescan starts from again. On a first
+        # run that is the sample already filtered by launch's discovery, and a
+        # rescan never proposes it again: a harness only the rescan finds gets
+        # none of the sample's Lanes, only what the refresh proposes for it.
         base_lanes = copy.deepcopy(lanes_doc)
         lanes_doc, refresh, discovery_data = propose_generation(lanes_doc, discovery_data, rows)
         # Discovery reports drift at the moment the human is already deciding
@@ -669,7 +681,8 @@ def main(argv=None):
                 # `r` on the harnesses page: the launch scrub again, from the
                 # catalog as read, the rows fetched afresh. The same steps in
                 # the same order, so what it returns is what launch built.
-                found, data, rows_again, note, _paths = scan(args, base_lanes, force=True)
+                found, data, rows_again, note, _paths = scan(args, base_lanes, force=True,
+                                                             fallback=effort_row_paths)
                 doc, plan, data = propose_generation(copy.deepcopy(base_lanes), data, rows_again)
                 effort_rows_again, message = rows_again
                 data_again, bench_message = collect_bench(args, doc, effort_rows_again)
@@ -700,7 +713,7 @@ def main(argv=None):
                 tier_lines=tier_lines,
             )
             if tier_lines is not None:
-                summary = wizard.apply_tier_lines(tier_lines)
+                summary = wizard.apply_start_lines()
                 wizard.message = f"{initial_message}; {summary}" if initial_message else summary
             result = setup_tui.run_curses(wizard)
             if result is None:
@@ -717,7 +730,8 @@ def main(argv=None):
                     write_json(routing_path, result_routing)
                     print(f"wrote {lanes_path}")
                     print(f"wrote {routing_path}")
-                    for line in save_native_agents(refresh, result_lanes,
+                    # the plan the wizard holds: a rescan replaced launch's
+                    for line in save_native_agents(wizard.refresh, result_lanes,
                                                    native_agents_dir(config_dir)):
                         print(line)
     except SetupAbort:

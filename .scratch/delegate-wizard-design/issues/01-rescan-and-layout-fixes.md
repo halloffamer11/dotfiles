@@ -20,22 +20,22 @@ findings 1, 2 and 4 confirmed by reading the code.
 
 ## Acceptance
 
-- [ ] The save writes and removes native agent files from the plan the wizard
+- [x] The save writes and removes native agent files from the plan the wizard
   holds after a rescan, not the launch plan (`setup.py` `save_native_agents`)
-- [ ] `r` does nothing but show the refusal message once a carry or Tier choice
+- [x] `r` does nothing but show the refusal message once a carry or Tier choice
   exists; with no choice it rescans as before; the docstring claim matches
-- [ ] A forced fetch that fails falls back to the rows launch used, not to the
+- [x] A forced fetch that fails falls back to the rows launch used, not to the
   repo rows, and the note says so
-- [ ] The harnesses page counts its body lines in the table's room: at 80x16
+- [x] The harnesses page counts its body lines in the table's room: at 80x16
   every harness row shows (the legend gives way first)
-- [ ] An exception in the rescan's state rebuild becomes a message and leaves
+- [x] An exception in the rescan's state rebuild becomes a message and leaves
   the wizard as it was before `r`
-- [ ] The `_palette` docstring is true in monochrome (or the monochrome table
+- [x] The `_palette` docstring is true in monochrome (or the monochrome table
   tells `why-data` apart from a plain cell)
-- [ ] First run with no `lanes.json`: a code comment states that a rescan does
+- [x] First run with no `lanes.json`: a code comment states that a rescan does
   not re-propose the sample Lanes of a harness found only by the rescan
-- [ ] Tests: rescan after a choice is refused; the save after a rescan uses the
+- [x] Tests: rescan after a choice is refused; the save after a rescan uses the
   new plan; rescan rebuilds the row-derived state (`_proposals`, `_reasons`,
   `_unmatched`) from new rows; a failed forced fetch keeps the launch rows; the
   harnesses page at 80x16; the pty smoke fails if `r` does not rescan
-- [ ] Full suite green
+- [x] Full suite green

@@ -71,6 +71,8 @@ ROUTING_FOOTER = "j/k: move  +/-: adjust  space/x: meters  enter: confirm  b: ba
 PRESCREEN_FOOTER = f"↑/↓ or j/k: move  {FLIP_KEYS}  enter: continue  b: back  q: quit"
 DISCOVERY_FOOTER = "any key: continue  b: back  q: quit"
 DISCOVERY_RESCAN_FOOTER = "any key: continue  r: rescan  b: back  q: quit"
+# `r` once a carry or Tier choice exists: a rescan never discards one
+RESCAN_REFUSED = "r: a choice is made and a rescan would lose it; quit and start again to rescan."
 NO_DATA_MESSAGE = "No per-effort data was supplied, so nothing else could be judged."
 
 
@@ -392,37 +394,69 @@ class Wizard:
             }
             for tier in range(1, 5)
         }
+        self._settle()
+
+    def _choices(self):
+        """The carry and Tier decisions as a value to compare. An order the
+        review page only arranged is not a decision, so a tier's order counts
+        only where it differs from the order `_start_key` gives it."""
+        moved = {tier: list(order) for tier, order in self._tier_order.items()
+                 if order != sorted(order, key=self._start_key)}
+        return (dict(self._enabled), dict(self._assigned),
+                {tier: set(marks) for tier, marks in self._marks.items()},
+                moved, dict(self._line_order))
+
+    def _settle(self):
+        """Take the decisions as they stand as the ones the last load built:
+        after `_load`, and after the `--tiers-from` lines it applies again."""
+        self._loaded = self._choices()
+
+    def made_choice(self):
+        """Whether a carry or Tier choice exists: a change against what the
+        last load built. Going back and forth with no change is none."""
+        return self._choices() != self._loaded
 
     def rescan_ready(self):
-        """Whether `r` scrubs again here: on the harnesses page, with a scrub
-        to run. The page comes before every carry and Tier decision, so a
-        rescan throws none away; nowhere later offers it."""
+        """Whether `r` is the rescan key here: on the harnesses page, with a
+        scrub to run; nowhere later offers it. `b` from the carry page comes
+        back here, so once a choice exists `r` only refuses (`rescan`)."""
         return self.screen == "discovery" and self._rescan is not None
 
     def rescan(self):
         """`r` on the harnesses page: the launch scrub again — the harnesses'
         models, the benchmark rows fetched afresh, the current generation
         proposed — and every later page starts over from what it found, with
-        the `--tiers-from` lines applied again. A scrub that fails is a
-        message and changes nothing; nothing here writes a file."""
+        the `--tiers-from` lines applied again. A rescan never discards a
+        choice: once one exists, `r` says to quit and start again, and does
+        nothing else (Orin, 2026-09-24). A scrub or a rebuild that fails is a
+        message and leaves the wizard as it was; nothing here writes a file."""
         if not self.rescan_ready():
             return
+        if self.made_choice():
+            self.message = RESCAN_REFUSED
+            return
+        # `_load` replaces every attribute it sets and mutates none it finds,
+        # and the lines then change only what `_load` made, so the attributes
+        # as they stand now are the wizard before `r`
+        before = dict(self.__dict__)
         try:
             found = self._rescan()
+            self._load(found["lanes_doc"], found.get("bench"), found.get("discovered") or (),
+                       found.get("effort_rows"), found.get("discovery"), found.get("refresh"),
+                       found.get("rows_note") or "")
+            self.scanned = f"at {self._clock()}"
+            refresh = self.refresh or {}
+            message = (f"Rescanned {self.scanned}: {plural(len(refresh.get('new') or ()), 'new Lane')}, "
+                       f"{len(refresh.get('removed') or ())} removed")
+            if found.get("message"):
+                message = f"{message}; {found['message']}"
+            if self.tier_lines is not None:
+                message = f"{message}; {self.apply_start_lines()}"
         except Exception as e:  # the scrub shells out and fetches; any failure is one message
+            self.__dict__.clear()
+            self.__dict__.update(before)
             self.message = f"rescan failed: {e}"
             return
-        self._load(found["lanes_doc"], found.get("bench"), found.get("discovered") or (),
-                   found.get("effort_rows"), found.get("discovery"), found.get("refresh"),
-                   found.get("rows_note") or "")
-        self.scanned = f"at {self._clock()}"
-        refresh = self.refresh or {}
-        message = (f"Rescanned {self.scanned}: {plural(len(refresh.get('new') or ()), 'new Lane')}, "
-                   f"{len(refresh.get('removed') or ())} removed")
-        if found.get("message"):
-            message = f"{message}; {found['message']}"
-        if self.tier_lines is not None:
-            message = f"{message}; {self.apply_tier_lines(self.tier_lines)}"
         self.message = message
 
     def result(self):
@@ -662,6 +696,13 @@ class Wizard:
             if here in self._review_order:
                 self.cursor = self._review_order.index(here)
         self.message = summary
+        return summary
+
+    def apply_start_lines(self):
+        """The `--tiers-from` lines, at launch and again after a rescan. They
+        are where the pages start, not a choice made on one, so `r` stays."""
+        summary = self.apply_tier_lines(self.tier_lines)
+        self._settle()
         return summary
 
     def _paste_tier_lines(self):
@@ -1605,8 +1646,11 @@ TOP = 4
 # how it looks; the look is decided here, once, as (attributes, colour), and
 # `_palette` turns it into curses attributes for the terminal in front of us:
 # the colour when the terminal has colours, and bold, dim and reverse alone
-# when it has not, so every style is still told apart. Colours are three of
-# the basic eight on the terminal's own background, and each means one thing:
+# when it has not. Without colour a style that is colour alone is plain text:
+# a done step is still told from the dim steps ahead, but a `why-data` cell
+# looks like any other, and only its words (`X wins on S`) set it apart.
+# Colours are three of the basic eight on the terminal's own background, and
+# each means one thing:
 # green is settled (a step behind us, a box ticked, a value to be written),
 # yellow is attention (a verdict the data gave, a warning), cyan is a key to
 # press. Everything else is weight.
@@ -1743,7 +1787,11 @@ def layout_lines(view, width, height):
     footer_y = height - 3
     # the keys never touch what stands above them
     legend_end = footer_y - 1
-    table_floor = TOP + (1 if view["columns"] else 0) + min(len(rows), ROW_FLOOR)
+    # the body above the table, and the blank row under it, are the table's
+    # room too: the harnesses page's two lines of body cost two of its four
+    # rows at 80x16, with no cursor to scroll them back
+    table_floor = (TOP + (len(body) + 1 if body and rows else 0)
+                   + (1 if view["columns"] else 0) + min(len(rows), ROW_FLOOR))
 
     def fit_legend(candidate):
         """The zone entries that leave the table its floor and its blank row."""
@@ -1866,7 +1914,9 @@ def _palette(curses):
     takes its own background (`use_default_colors`), so a light theme and a
     dark one both keep their background under the text. Without that, or if
     a pair cannot be made, every style keeps its attributes and drops its
-    colour, so a ticked box is still bold and a key is still bold.
+    colour, so a ticked box is still bold and a key is still bold. A style
+    that is colour alone then draws as plain text: `why-data` looks like any
+    other cell, and only its words set it apart.
     """
     attrs = {"bold": curses.A_BOLD, "dim": curses.A_DIM,
              "reverse": curses.A_REVERSE, "underline": curses.A_UNDERLINE}
@@ -1961,11 +2011,12 @@ def run_curses(wizard):
             elif code in (ord("r"), ord("R")) and wizard.rescan_ready():
                 # the scrub shells out and fetches, so the page says what it
                 # is doing before `handle` runs it; a probe may print, so the
-                # screen is painted whole afterwards
+                # screen is painted whole afterwards. A refused `r` runs nothing.
                 key = "r"
-                wizard.message = "rescanning…"
-                draw(width, height)
-                stdscr.clear()
+                if not wizard.made_choice():
+                    wizard.message = "rescanning…"
+                    draw(width, height)
+                    stdscr.clear()
             else:
                 key = mapping.get(code, "other")
             if key == "o" and wizard.bench_page_path:

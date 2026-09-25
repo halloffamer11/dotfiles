@@ -721,6 +721,92 @@ def case_a_forced_fetch_passes_a_fresh_cache():
         return ok, f"paths={paths} calls={calls} note={note!r}"
 
 
+def case_a_failed_forced_fetch_keeps_the_launch_rows():
+    """The harnesses page's `r` passes the paths launch used: a forced fetch
+    that fails keeps those rows, the cache launch read, and not the repo's
+    older ones, and the note says so (wizard-design 01)."""
+    import setup
+    with tempfile.TemporaryDirectory() as td:
+        cache = os.path.join(td, "aa")
+        os.makedirs(cache)
+        accepted = write_rows(os.path.join(cache, "accepted.json"), "aa", "Grok 4.7")
+        repo_aa = write_rows(os.path.join(td, "repo-aa.json"), "aa", "Grok 4.6")
+        tbench = write_rows(os.path.join(td, "repo-tbench.json"), "tbench", "Grok 4.6")
+        launch, _note = setup.refresh_effort_rows([repo_aa, tbench], cache_dir=cache)
+
+        def fetch(out_dir, **kwargs):
+            raise RuntimeError("the page could not be read")
+
+        paths, note = setup.refresh_effort_rows([repo_aa, tbench], cache_dir=cache, fetch=fetch,
+                                                force=True, fallback=launch)
+        rows, _message = setup.load_effort_rows(paths)
+        ok = (launch == [accepted, tbench] and paths == launch
+              and rows[0]["model"] == "Grok 4.7"
+              and "rows launch used" in note and "the page could not be read" in note
+              and "repo rows" not in note)
+        return ok, f"paths={paths} note={note!r}"
+
+
+def case_the_save_after_a_rescan_uses_the_rescans_plan():
+    """The TUI save writes and removes the agent files from the plan the
+    wizard holds, which `r` replaced: launch here found no models, so its
+    plan was none, and the rescan's plan adds the opus55 lanes and
+    supersedes the opus ones (wizard-design 01)."""
+    import io
+    import setup
+    import setup_tui
+    real_scan, real_run, real_agents = setup.scan, setup_tui.run_curses, setup.NATIVE_AGENTS_DIR
+    real_in, real_out = sys.stdin, sys.stdout
+    aa = os.path.join(REFRESH_DIR, "aa-accepted.json")
+    seen = []
+
+    def scan(args, lanes_doc, force=False, fallback=None):
+        seen.append((force, fallback))
+        if not force:
+            return (set(catalog.HARNESSES), "probe failed", setup.load_effort_rows([aa]), "", [aa])
+        return real_scan(args, lanes_doc, force=force, fallback=fallback)
+
+    def run_curses(wizard):
+        wizard.handle("enter")
+        wizard.handle("r")
+        seen.append(wizard.message)
+        for _ in range(40):
+            if wizard.screen in ("done", "quit"):
+                break
+            wizard.handle("y" if wizard.screen == "confirm" else "enter")
+        return wizard.result()
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    with tempfile.TemporaryDirectory() as td:
+        agents = os.path.join(td, "checkout", "agents", "agents")
+        config = os.path.join(td, "checkout", "stow", "delegate", ".config", "delegate")
+        os.makedirs(agents)
+        os.makedirs(config)
+        shutil.copy(os.path.join(REFRESH_DIR, "lanes.json"), os.path.join(config, "lanes.json"))
+        catalog.write_json(os.path.join(config, "routing.json"), routing_sample)
+        for effort in ("low", "medium", "high", "xhigh", "max"):
+            with open(os.path.join(agents, f"lane-opus-{effort}.md"), "w") as f:
+                f.write("superseded\n")
+        out = Terminal()
+        setup.scan, setup_tui.run_curses, setup.NATIVE_AGENTS_DIR = scan, run_curses, agents
+        sys.stdin, sys.stdout = Terminal(), out
+        try:
+            code = setup.main(["--config-dir", config, "--fixture-dir", REFRESH_DIR,
+                               "--effort-rows", aa, "--no-bench"])
+        finally:
+            setup.scan, setup_tui.run_curses, setup.NATIVE_AGENTS_DIR = real_scan, real_run, real_agents
+            sys.stdin, sys.stdout = real_in, real_out
+        written = sorted(os.listdir(agents))
+        ok = (code == 0 and seen[0] == (False, None) and seen[1] == (True, [aa])
+              and str(seen[2]).startswith("Rescanned at ")
+              and written == sorted(f"lane-opus55-{e}.md"
+                                    for e in ("low", "medium", "high", "xhigh", "max")))
+        return ok, f"code={code} seen={seen} written={written} out={out.getvalue()[-400:]!r}"
+
+
 def case_scan_and_propose_are_the_launch_steps():
     """`r` runs the same steps launch ran, through the same functions: `scan`
     acquires the rows and the harnesses' models, `propose_generation`
@@ -920,6 +1006,9 @@ for name, case in (
     ("a stale fetch is fetched again", case_a_stale_fetch_is_fetched_again),
     ("a failed fetch keeps the repo rows", case_a_failed_fetch_keeps_the_repo_rows),
     ("a forced fetch passes a fresh cache", case_a_forced_fetch_passes_a_fresh_cache),
+    ("a failed forced fetch keeps the launch rows", case_a_failed_forced_fetch_keeps_the_launch_rows),
+    ("the save after a rescan uses the rescan's plan",
+     case_the_save_after_a_rescan_uses_the_rescans_plan),
     ("scan and propose are the launch steps", case_scan_and_propose_are_the_launch_steps),
     ("native agent files follow the claude lanes",
      case_native_agent_files_follow_the_claude_lanes),

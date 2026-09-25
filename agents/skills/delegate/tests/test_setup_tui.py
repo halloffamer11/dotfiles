@@ -1298,6 +1298,10 @@ def pty_smoke():
                            f"routing={os.path.isfile(routing_path)} output={bytes(output[-1000:])!r}")
         catalog.check_file(lanes_path)
         catalog.check_file(routing_path)
+        # the page's message after `r`: a smoke that pressed r and saw no
+        # rescan passed while r did nothing
+        if b"Rescanned at " not in output:
+            return False, f"r did not rescan: output={bytes(output[-1000:])!r}"
         return True, ""
 
 
@@ -2797,5 +2801,184 @@ try:
            repr((styled, off)))
 except Exception as e:
     record("74 the confirm page's definitions align term, value and meaning", False, repr(e))
+
+
+# --- wizard-design 01: r never discards a choice, and the harnesses page fits ---
+try:
+    # once a carry or Tier choice exists, r only says to quit and start
+    # again; back and forth with no change, or a change undone, keeps r
+    calls = []
+
+    def counted():
+        calls.append(1)
+        raise RuntimeError("not reached")
+
+    carry, _r, _p = scanned_wizard(rescan=counted)
+    carry.handle("enter"); carry.handle("enter")
+    carry.handle("x")
+    carry.handle("b")
+    lanes_before = copy.deepcopy(carry.lanes_doc)
+    enabled_before = dict(carry._enabled)
+    carry.handle("r")
+    refused_carry = (carry.message == setup_tui.RESCAN_REFUSED and carry.screen == "discovery"
+                     and calls == [] and carry._enabled == enabled_before
+                     and carry.lanes_doc == lanes_before and carry.scanned == "at launch")
+    # a Tier choice: a lane unmarked on the tier 4 page
+    tier, _r, _p = scanned_wizard(rescan=counted)
+    tier.handle("enter"); tier.handle("enter"); tier.handle("enter")
+    assert tier.screen == "tier" and tier.tier == 4, (tier.screen, tier.tier)
+    tier.handle("x")
+    tier.handle("b"); tier.handle("b")
+    tier.handle("r")
+    refused_tier = tier.message == setup_tui.RESCAN_REFUSED and calls == []
+    # all the way to routing and back, with no change: r still rescans
+    ok_calls = []
+
+    def fine():
+        ok_calls.append(1)
+        frozen = catalog.load_json(os.path.join(REFRESH_DIR, "lanes.json"))
+        return {"lanes_doc": frozen, "discovered": {"grok"}, "discovery": "probe failed",
+                "refresh": None, "rows_note": "", "effort_rows": None, "bench": None,
+                "message": ""}
+
+    trip, _r, _p = scanned_wizard(rescan=fine)
+    trip.handle("enter")
+    for _ in range(7):
+        trip.handle("enter")
+    trip_screen = trip.screen
+    for _ in range(7):
+        trip.handle("b")
+    trip_back = trip.screen
+    trip.handle("r")
+    # a toggle undone is no change either
+    undone, _r, _p = scanned_wizard(rescan=fine)
+    undone.handle("enter"); undone.handle("enter")
+    undone.handle("x"); undone.handle("x")
+    undone.handle("b")
+    undone.handle("r")
+    record("75 r once a carry or Tier choice exists does nothing but say to quit and start "
+           "again; with no change it rescans",
+           refused_carry and refused_tier
+           and trip_screen == "routing" and trip_back == "discovery"
+           and undone.scanned == "at 14:07" and trip.scanned == "at 14:07"
+           and len(ok_calls) == 2 and len(setup_tui.RESCAN_REFUSED) <= 79
+           and "quit and start again" in setup_tui.RESCAN_REFUSED,
+           repr((carry.message, tier.message, trip_screen, trip_back, trip.message,
+                 undone.message, ok_calls)))
+except Exception as e:
+    record("75 r once a carry or Tier choice exists does nothing", False, repr(e))
+
+
+try:
+    # --tiers-from lines applied at launch are where the pages start, not a
+    # choice, so r stays; after the rescan applies them again, r stays too
+    frozen = catalog.load_json(os.path.join(REFRESH_DIR, "lanes.json"))
+    named = next(iter(frozen["lanes"]))
+
+    def same():
+        return {"lanes_doc": copy.deepcopy(frozen), "discovered": {"grok"},
+                "discovery": "probe failed", "refresh": None, "rows_note": "",
+                "effort_rows": None, "bench": None, "message": ""}
+
+    w, _r, _p = scanned_wizard(rescan=same, tier_lines=f"{named} 3\n")
+    w.apply_start_lines()
+    w.handle("enter")
+    w.handle("r")
+    first = w.scanned
+    w.handle("r")
+    record("76 the tiers-from lines are the starting state, so r rescans after they are applied",
+           first == "at 14:07" and w.message.startswith("Rescanned at 14:07")
+           and not w.made_choice(),
+           repr((first, w.message)))
+except Exception as e:
+    record("76 the tiers-from lines are the starting state", False, repr(e))
+
+
+try:
+    # a rescan rebuilds what the rows decide, from the new rows
+    before, _r, _p = scanned_wizard()
+    fresh = wizard(lanes=astra_lanes(), effort_rows=TBENCH)
+
+    def other_rows():
+        return {"lanes_doc": astra_lanes(), "discovered": DISCOVERED, "discovery": None,
+                "refresh": None, "rows_note": "", "effort_rows": TBENCH, "bench": None,
+                "message": ""}
+
+    w, _r, _p = scanned_wizard(rescan=other_rows)
+    w.handle("enter")
+    old = (copy.deepcopy(w._proposals), dict(w._reasons), copy.deepcopy(w._unmatched))
+    w.handle("r")
+    record("77 a rescan rebuilds the proposals, the reasons and the unmatched models from the "
+           "rows it found",
+           w._proposals == fresh._proposals and w._reasons == fresh._reasons
+           and w._unmatched == fresh._unmatched
+           and old != (w._proposals, w._reasons, w._unmatched)
+           and any(p["kind"] == setup_tui.KIND_DOMINATED for p in w._proposals.values())
+           and w._enabled == fresh._enabled,
+           repr((w._reasons, fresh._reasons)))
+except Exception as e:
+    record("77 a rescan rebuilds the proposals, the reasons and the unmatched models", False, repr(e))
+
+
+try:
+    # a rebuild that raises is a message, and the wizard is as it was before r
+    def bad_doc():
+        return {"lanes_doc": {"lanes": {"odd@grok": {"harness": "grok"}}}, "discovered": {"grok"},
+                "discovery": None, "refresh": {"new": ["odd@grok"], "removed": []},
+                "rows_note": "Benchmark rows: nowhere", "effort_rows": None, "bench": None,
+                "message": ""}
+
+    w, _r, _p = scanned_wizard(rescan=bad_doc)
+    w.handle("enter")
+    saved = copy.deepcopy(w.__dict__)
+    w.handle("r")
+    after = dict(w.__dict__)
+    message = after.pop("message")
+    saved.pop("message")
+    # the lines raise too: a lines file the new catalog cannot take
+    def lines_raise():
+        return {"lanes_doc": catalog.load_json(os.path.join(REFRESH_DIR, "lanes.json")),
+                "discovered": {"grok"}, "discovery": None, "refresh": None, "rows_note": "",
+                "effort_rows": None, "bench": None, "message": ""}
+
+    unreadable = object()  # deepcopy makes another, so it is compared by identity
+    w2, _r, _p = scanned_wizard(rescan=lines_raise, tier_lines=unreadable)
+    w2.handle("enter")
+    saved2 = copy.deepcopy(w2.__dict__)
+    w2.handle("r")
+    after2 = dict(w2.__dict__)
+    message2 = after2.pop("message")
+    saved2.pop("message")
+    kept_lines = after2.pop("tier_lines") is unreadable
+    saved2.pop("tier_lines")
+    record("78 an exception in the rescan's rebuild is a message and leaves the wizard as it was",
+           after == saved and message.startswith("rescan failed: ")
+           and w.scanned == "at launch" and w.rescan_ready()
+           and after2 == saved2 and kept_lines and message2.startswith("rescan failed: "),
+           repr((message, message2, sorted(k for k in after if after[k] != saved.get(k)))))
+except Exception as e:
+    record("78 an exception in the rescan's rebuild is a message", False, repr(e))
+
+
+try:
+    # the harnesses page counts its body in the table's room: at 80x16 every
+    # harness shows, and the legend gives way first
+    w, _r, _p = scanned_wizard(rescan=lambda: None)
+    w.handle("enter")
+    v = w.view(80)
+    grid = screen(v, 80, 16)
+    shown = [line.split()[0] for line in grid if line.split() and line.split()[0] in catalog.HARNESSES]
+    roomy = screen(v, 80, 24)
+    record("79 the harnesses page at 80x16 shows every harness row, and its body",
+           len(v["body"]) == 2 and shown == list(catalog.HARNESSES)
+           and grid[setup_tui.TOP].startswith("Scanned at launch")
+           and not any(line.startswith(setup_tui.CLAUDE_COUNT_LEGEND[:20]) for line in grid)
+           and grid[16 - 3].startswith("any key")
+           and not grid[2].rstrip().endswith("of 4")
+           # with room, the legend is back
+           and any(line.startswith(setup_tui.CLAUDE_COUNT_LEGEND[:20]) for line in roomy),
+           repr(grid))
+except Exception as e:
+    record("79 the harnesses page at 80x16 shows every harness row", False, repr(e))
 
 sys.exit(1 if fails else 0)
