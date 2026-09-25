@@ -85,11 +85,11 @@ skills:
 
 externals:
 	@# These declarations are desired state: add installs a missing skill and refreshes an existing one.
-	npx -y skills@latest add herdrdev/herdr --skill herdr --agent claude-code codex kiro-cli -g -y
-	npx -y skills@latest add blader/humanizer --skill humanizer --agent claude-code codex kiro-cli -g -y
+	DISABLE_TELEMETRY=1 npx -y skills@latest add herdrdev/herdr --skill herdr --agent claude-code codex kiro-cli -g -y
+	DISABLE_TELEMETRY=1 npx -y skills@latest add blader/humanizer --skill humanizer --agent claude-code codex kiro-cli -g -y
 
 external-updates:
-	npx -y skills@latest update -g -y herdr humanizer
+	DISABLE_TELEMETRY=1 npx -y skills@latest update -g -y herdr humanizer
 
 update: brew external-updates
 
