@@ -34,6 +34,8 @@ something collapsible"). Prototyped the same day; Orin chose variant H. Branch
 - [x] `report.py statusline off|on|toggle|status` switches the rows through the flag file `~/.cache/delegate/statusline.off` (`DELEGATE_STATUSLINE_SWITCH` in tests); while it exists `statusline` prints nothing and exits 0. Covered in `test_report.py`
 - [x] A keyboard shortcut runs the toggle from any terminal: ⌥⌘D in `stow/hammerspoon/.hammerspoon/init.lua`, next to the ⌥⌘R recorder
 - [x] Orin presses ⌥⌘D once in each direction (his; Hammerspoon is running since 2026-09-11 21:04 and `~/.hammerspoon` is the Makefile's whole-directory symlink into the repo, so the binding is live after the merge, and stow must never touch that package). Confirmed by Orin 2026-09-22: the toggle works both ways and takes 2-3 s. `report.py` takes 0.05 s, so Claude Code's status line redraw sets the delay; `refreshInterval` stays 30 (Orin, 2026-09-22)
+- [x] The Herdr popup (`prefix+shift+U`) runs `report.py statusline --popup` under `/bin/zsh -lic`: it ignores the ⌥⌘D flag and adds each Tier leader with the Classes that pick it (`1512f28`, `94526cd`)
+- [ ] Orin opens the popup after `herdr server reload-config` and sees a lane on every Tier (his)
 
 ## The row
 
@@ -154,3 +156,18 @@ Verified: `test_report.py` 87 PASS (was 79), the other five files unchanged
 and green; live render shows every row starting with a glyph; `off` printed
 zero rows and `toggle` restored five against a scratch flag path, and
 `~/.cache/delegate/statusline.off` does not exist afterwards.
+
+## Herdr popup, 2026-09-26
+
+Orin: the popup went blank and showed no lanes. Two causes. It ran plain
+`statusline`, so the ⌥⌘D off flag hid it too; `--popup` now ignores the flag
+and appends the Tier leaders from `rank.tier_leaders`. Then Orin's screenshot
+read "no eligible lane" on all four Tiers: the popup shell has no
+`~/.local/bin`, `~/.grok/bin` or `/opt/homebrew/bin`, so every Lane was vetoed
+for a missing harness. The command now runs in a login, interactive zsh, and
+`--popup` prints `no harness CLI on PATH` when it finds none.
+
+The statusline tests had read the live `~/.cache/delegate/statusline.off`;
+with the rows off, `test_report.py` crashed on main. They use their own
+switch path now. Verified: all 14 delegate test files exit 0; the TOML command,
+run from an empty environment, prints a leader on every Tier.
