@@ -345,6 +345,10 @@ with tempfile.TemporaryDirectory() as tmp:
     check("statusline --popup keeps the meter rows first", pp[:5] == sl_lines, out_pp)
     check("statusline --popup adds one lane line per Tier",
           [l[0] for l in pp[7:] if l[:1] in "①②③④"] == list("①②③④"), out_pp)
+    rc, out_np, _ = run(["statusline", "--no-color", "--popup"] + cfg,
+                        dict(sw_env, PATH=os.path.join(tmp, "no-bin")))
+    check("statusline --popup names a missing PATH, not four empty Tiers",
+          rc == 0 and "no harness CLI on PATH" in out_np and "no eligible lane" not in out_np, out_np)
     check("statusline --popup names every Class once",
           sorted(" ".join(pp[7:]).split()) and all(" ".join(pp[7:]).split().count(k) == 1
                                                    for k in ("scout", "mechanical", "impl")), out_pp)

@@ -692,6 +692,11 @@ def lane_lines(catalog, usage_doc, present, picks, c):
     lanes = [row["lane"] for row in picks.values()] + [p["leader"] for p in previews if p["leader"]]
     w = max([len(l) for l in lanes] or [0])
     lines = ["", f"{c['DIM']}lanes: Tier leader, then the Classes that pick it{c['R']}"]
+    if not present:
+        # Every Lane is vetoed without its harness; say why instead of four
+        # "no eligible lane" lines.
+        lines.append(f"{c['RED']}no harness CLI on PATH ({', '.join(HARNESSES)}){c['R']}")
+        return lines
     for p in previews:
         t = p["tier"]
         glyph = f"{c['TIER_COL'][t]}{TIER_GLYPH[t]}{c['R']}"
