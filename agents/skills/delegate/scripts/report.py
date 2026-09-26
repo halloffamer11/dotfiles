@@ -29,9 +29,9 @@ except ImportError:
     from .catalog import load_catalog, CatalogError, HARNESSES, meters_enabled
 
 try:
-    from rank import rank
+    from rank import rank, tier_leaders
 except ImportError:
-    from .rank import rank
+    from .rank import rank, tier_leaders
 
 try:
     import usage
@@ -537,7 +537,9 @@ def cmd_statusline(a):
     if a.state:
         statusline_switch(a.state)
         return
-    if os.path.exists(SWITCH):
+    # The switch hides the rows under the Claude Code status line only; the
+    # Herdr popup asks for them with --popup and always gets them.
+    if os.path.exists(SWITCH) and not a.popup:
         return
     no_color = a.no_color or bool(os.environ.get("NO_COLOR"))
     c = get_colors(no_color)
@@ -561,6 +563,7 @@ def cmd_statusline(a):
     metering = meters_enabled(routing)
 
     won_by_meter = {}
+    picks = {}
     for cls in classes:
         try:
             rows = rank(cls, catalog, usage_doc, present)
@@ -572,6 +575,7 @@ def cmd_statusline(a):
             tier = picked.get("tier")
             if m_name and tier is not None:
                 won_by_meter.setdefault(m_name, set()).add(tier)
+            picks[cls] = picked
 
     ledger_path = os.environ.get("DELEGATE_LEDGER") or os.path.expanduser("~/.cache/delegate/ledger.jsonl")
     running_by_lane = Counter()
@@ -665,8 +669,47 @@ def cmd_statusline(a):
 
         out_lines.append(line.rstrip())
 
+    if a.popup:
+        out_lines += lane_lines(catalog, usage_doc, present, picks, c)
+
     for l in out_lines:
         print(l)
+
+
+def lane_lines(catalog, usage_doc, present, picks, c):
+    """The popup's lane block: each Tier leader, then the Classes that pick it.
+
+    A Class Pick that is not its Tier's leader gets its own line under that
+    Tier, so every Class appears once.
+    """
+    try:
+        previews = tier_leaders(catalog, usage_doc, present)
+    except Exception:
+        return []
+    by_lane = {}
+    for cls, row in picks.items():
+        by_lane.setdefault(row["lane"], []).append(cls)
+    lanes = [row["lane"] for row in picks.values()] + [p["leader"] for p in previews if p["leader"]]
+    w = max([len(l) for l in lanes] or [0])
+    lines = ["", f"{c['DIM']}lanes: Tier leader, then the Classes that pick it{c['R']}"]
+    for p in previews:
+        t = p["tier"]
+        glyph = f"{c['TIER_COL'][t]}{TIER_GLYPH[t]}{c['R']}"
+        tier_lanes = [p["leader"]] if p["leader"] else []
+        tier_lanes += [l for l in dict.fromkeys(r["lane"] for r in picks.values() if r["tier"] == t)
+                       if l not in tier_lanes]
+        if not tier_lanes:
+            lines.append(f"{glyph}  {c['MUTE']}no eligible lane{c['R']}")
+            continue
+        for i, lane in enumerate(tier_lanes):
+            lead = glyph if i == 0 else f"{c['MUTE']}·{c['R']}"
+            col = c["TIER_COL"][t] if lane == p["leader"] else c["FG"]
+            classes = " ".join(by_lane.get(lane, []))
+            text = f"{col}{c['BOLD']}{lane:<{w}}{c['R']}"
+            if classes:
+                text += f"  {c['DIM']}{classes}{c['R']}"
+            lines.append(f"{lead}  {text}".rstrip())
+    return lines
 
 
 # ---------------------------------------------------------------- main
@@ -711,6 +754,8 @@ def main():
     sl = sub.add_parser("statusline", parents=[cfg], help="Claude Code statusline meter rows")
     sl.add_argument("--no-color", action="store_true", help="strip ANSI color escapes")
     sl.add_argument("--no-running", action="store_true", help="suppress the running agents column")
+    sl.add_argument("--popup", action="store_true",
+                    help="the Herdr popup view: ignore the off switch and add the Tier leaders")
     sl.add_argument("state", nargs="?", choices=["on", "off", "toggle", "status"],
                     help="switch the rows instead of printing them (flag file ~/.cache/delegate/statusline.off)")
     sl.set_defaults(fn=cmd_statusline)

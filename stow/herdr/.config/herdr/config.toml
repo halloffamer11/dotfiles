@@ -69,8 +69,8 @@ type = "pane"
 command = "hunk diff --watch"
 
 [[keys.command]]
-key = "prefix+shift+u"        # usage: cached cross-harness Delegate meters
+key = "prefix+shift+u"        # usage: Delegate meters and Tier leaders; ⌥⌘D does not hide them
 type = "popup"
-command = '''python3 "$HOME/.agents/skills/delegate/scripts/report.py" statusline; printf '\nPress Enter to close'; read -r _'''
+command = '''python3 "$HOME/.agents/skills/delegate/scripts/report.py" statusline --popup; printf '\nPress Enter to close'; read -r _'''
 width = "85%"
 height = "40%"

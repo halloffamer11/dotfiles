@@ -296,7 +296,11 @@ with tempfile.TemporaryDirectory() as tmp:
         f.write(json.dumps({"v": 1, "kind": "dispatch.finish", "ts": t_fin, "thread_id": "tid-finished",
                             "lane": "grok46-high@grok", "secs": 50, "rc": 0, "status": "done"}) + "\n")
 
-    sl_env = {"DELEGATE_CACHE": sl_cache, "DELEGATE_LEDGER": sl_ledger}
+    # A switch path of its own, so the live ~/.cache/delegate/statusline.off
+    # never hides the rows under test.
+    sl_switch = os.path.join(tmp, "sl_rows_on", "statusline.off")
+    sl_env = {"DELEGATE_CACHE": sl_cache, "DELEGATE_LEDGER": sl_ledger,
+              "DELEGATE_STATUSLINE_SWITCH": sl_switch}
     rc, out, err = run(["statusline", "--no-color"] + cfg, sl_env)
     check("statusline exits 0", rc == 0, err)
     sl_lines = [l for l in out.splitlines() if l.strip()]
@@ -324,7 +328,8 @@ with tempfile.TemporaryDirectory() as tmp:
     rc, out_color, _ = run(["statusline"] + cfg, color_env)
     check("statusline with color has ANSI escapes", "\033[" in out_color, out_color)
 
-    rc, out_nocache, _ = run(["statusline"] + cfg, {"DELEGATE_CACHE": os.path.join(tmp, "missing_cache.json")})
+    rc, out_nocache, _ = run(["statusline"] + cfg, {"DELEGATE_CACHE": os.path.join(tmp, "missing_cache.json"),
+                                                     "DELEGATE_STATUSLINE_SWITCH": sl_switch})
     check("statusline with missing cache exits 0 and prints nothing", rc == 0 and out_nocache == "", out_nocache)
 
     sw_env = dict(sl_env, DELEGATE_STATUSLINE_SWITCH=os.path.join(tmp, "sl_switch", "statusline.off"))
@@ -334,6 +339,15 @@ with tempfile.TemporaryDirectory() as tmp:
     check("statusline off creates the flag file", rc == 0 and os.path.exists(sw_env["DELEGATE_STATUSLINE_SWITCH"]), out_off)
     rc, out_sw, _ = run(["statusline", "--no-color"] + cfg, sw_env)
     check("statusline prints nothing while the switch is off", rc == 0 and out_sw == "", out_sw)
+    rc, out_pp, err_pp = run(["statusline", "--no-color", "--popup"] + cfg, sw_env)
+    pp = out_pp.splitlines()
+    check("statusline --popup ignores the off switch", rc == 0 and len(pp) > 6, out_pp + err_pp)
+    check("statusline --popup keeps the meter rows first", pp[:5] == sl_lines, out_pp)
+    check("statusline --popup adds one lane line per Tier",
+          [l[0] for l in pp[7:] if l[:1] in "①②③④"] == list("①②③④"), out_pp)
+    check("statusline --popup names every Class once",
+          sorted(" ".join(pp[7:]).split()) and all(" ".join(pp[7:]).split().count(k) == 1
+                                                   for k in ("scout", "mechanical", "impl")), out_pp)
     rc, out_st, _ = run(["statusline", "status"] + cfg, sw_env)
     check("statusline status reports off", out_st.strip() == "off", out_st)
     rc, out_tg, _ = run(["statusline", "toggle"] + cfg, sw_env)
@@ -361,7 +375,8 @@ with tempfile.TemporaryDirectory() as tmp:
              "status": "unknown",
              "note": "agy combined remaining and pace unknown until a vendor joint bound exists"},
         ]}, f)
-    old_env = {"DELEGATE_CACHE": old_cache, "DELEGATE_LEDGER": sl_ledger}
+    old_env = {"DELEGATE_CACHE": old_cache, "DELEGATE_LEDGER": sl_ledger,
+               "DELEGATE_STATUSLINE_SWITCH": sl_switch}
     rc, out_old, err_old = run(["limits", "--max-age-min", "600"] + cfg, old_env)
     check("limits prints agy figures from a cache written under the old rule",
           rc == 0 and "| agy-gemini" in out_old and "62%" in out_old and "86%" in out_old,
@@ -392,7 +407,8 @@ with tempfile.TemporaryDirectory() as tmp:
              "remaining_weekly": 0.46, "r": 0.46, "remaining_weekly_model": 0.59, "status": "ok",
              "reset_5h": now + 3600, "reset_weekly": now + 4 * 86400},
         ]}, f)
-    eq_env = {"DELEGATE_CACHE": eq_cache, "DELEGATE_RUNS": env["DELEGATE_RUNS"]}
+    eq_env = {"DELEGATE_CACHE": eq_cache, "DELEGATE_RUNS": env["DELEGATE_RUNS"],
+              "DELEGATE_STATUSLINE_SWITCH": sl_switch}
     rc, out_eq, _ = run(["limits", "--max-age-min", "600", "--eligible"] + cfg, eq_env)
     check("limits --eligible keeps r equal to gate despite status=unavailable",
           rc == 0 and "| codex" in out_eq.split("**Plan consumption this cycle:**")[0], out_eq)
