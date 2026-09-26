@@ -32,6 +32,7 @@ require("lazy").setup({
   },
   install = { colorscheme = { "gruvbox", "habamax" } },
   checker = {
+    lockfile = vim.fn.stdpath("state") .. "/lazy-lock.json", -- per machine, outside the repo
     enabled = true, -- check for plugin updates periodically
     notify = false, -- notify on update
   }, -- automatically check for plugin updates
