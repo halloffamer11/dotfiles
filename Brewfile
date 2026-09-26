@@ -47,7 +47,8 @@ brew "borders", restart_service: :changed # focused-window highlight; config: st
 cask "bitwarden"
 
 # Terminals
-cask "wezterm"                          # primary
+cask "ghostty"                          # primary; config: stow/ghostty
+cask "wezterm"                          # fallback; config: stow/wezterm
 
 # Apps
 cask "raycast"
