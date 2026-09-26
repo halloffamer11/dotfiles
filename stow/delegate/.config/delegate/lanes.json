@@ -52,7 +52,7 @@
         "Fable 5.1"
       ],
       "note": "price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
-      "enabled": false
+      "order": 3
     },
     "fable-low@claude": {
       "harness": "claude",
@@ -115,7 +115,7 @@
         "Fable 5.1"
       ],
       "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight, timeout and price are copied from fable-xhigh@claude; a different effort spends a different share of the meter and needs a different time. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-18.",
-      "order": 3
+      "enabled": false
     },
     "fable-max@claude": {
       "harness": "claude",
@@ -277,10 +277,10 @@
         "cache_write": 5,
         "out": 20
       },
-      "tier": 3,
+      "tier": 4,
       "basis": "claude-opus-5-5 supersedes claude-opus-5 on claude; takes the place of opus-high@claude",
       "note": "UNMEASURED: meter_weight and timeout copied from opus-high@claude. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-22.",
-      "enabled": false
+      "order": 5
     },
     "opus55-low@claude": {
       "harness": "claude",
@@ -334,7 +334,7 @@
       "tier": 4,
       "basis": "claude-opus-5-5 supersedes claude-opus-5 on claude; takes the place of opus-xhigh@claude",
       "note": "UNMEASURED: meter_weight and timeout copied from opus-xhigh@claude. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-22.",
-      "order": 1
+      "order": 2
     },
     "opus55-max@claude": {
       "harness": "claude",
@@ -349,10 +349,10 @@
         "cache_write": 5,
         "out": 20
       },
-      "tier": 3,
+      "tier": 4,
       "basis": "claude-opus-5-5 supersedes claude-opus-5 on claude; takes the place of opus-max@claude",
       "note": "UNMEASURED: meter_weight and timeout copied from opus-max@claude. price: platform.claude.com/docs/en/about-claude/pricing, model pricing table (5m cache write), read 2026-09-22.",
-      "enabled": false
+      "order": 1
     },
     "astra-high@codex": {
       "harness": "codex",
@@ -370,7 +370,7 @@
       "tier": 4,
       "basis": "frontier codex model, priority 1 in the CLI; added 2026-09-09",
       "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight 40 is a placeholder set by the session. price: developers.openai.com/api/docs/pricing, gpt-6-astra short-context row, read 2026-09-18.",
-      "order": 2
+      "order": 6
     },
     "astra-low@codex": {
       "harness": "codex",
@@ -424,7 +424,7 @@
       "tier": 4,
       "basis": "same model as astra-high@codex; effort 'xhigh' offered by codex, discovered by discover.py --efforts 2026-09-10",
       "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight and timeout are copied from astra-high@codex; a different effort spends a different share of the meter and needs a different time. price: developers.openai.com/api/docs/pricing, gpt-6-astra short-context row, read 2026-09-18.",
-      "enabled": false
+      "order": 4
     },
     "astra-max@codex": {
       "harness": "codex",
@@ -478,7 +478,7 @@
       "tier": 3,
       "basis": "gpt-6-sol supersedes gpt-5.6-sol on codex; takes the place of sol-high@codex",
       "note": "UNMEASURED: meter_weight and timeout copied from sol-high@codex. price: developers.openai.com/api/docs/pricing, gpt-6-sol short-context row, read 2026-09-22.",
-      "enabled": false
+      "order": 3
     },
     "sol6-low@codex": {
       "harness": "codex",
@@ -532,7 +532,7 @@
       "tier": 3,
       "basis": "gpt-6-sol supersedes gpt-5.6-sol on codex; takes the place of sol-xhigh@codex",
       "note": "UNMEASURED: meter_weight and timeout copied from sol-xhigh@codex. price: developers.openai.com/api/docs/pricing, gpt-6-sol short-context row, read 2026-09-22.",
-      "order": 4
+      "enabled": false
     },
     "sol6-max@codex": {
       "harness": "codex",
@@ -694,7 +694,7 @@
       "tier": 3,
       "basis": "grok-4.7 supersedes grok-4.6 on grok; takes the place of grok46-high@grok",
       "note": "UNMEASURED: meter_weight and timeout copied from grok46-high@grok. price: docs.x.ai/docs/models, grok-4.7 row for prompts under 200k tokens, read 2026-09-22; the page lists no cache-write price.",
-      "order": 3
+      "order": 2
     },
     "luna6-low@codex": {
       "harness": "codex",
@@ -801,7 +801,7 @@
       },
       "tier": 3,
       "basis": "cheap floor; fabricated citations in 3 impl briefs (ledger)",
-      "order": 2
+      "order": 4
     },
     "flash-low@agy": {
       "harness": "agy",
@@ -837,7 +837,7 @@
       "tier": 2,
       "basis": "same model as flash-high@agy; effort 'medium' offered by agy models (slug suffix) and agy --help, 2026-09-12 (ticket 19)",
       "note": "The tier is Orin's (ticket 28, 2026-09-13). UNMEASURED: meter_weight, timeout and price are copied from flash-high@agy; a different effort spends a different share of the meter and needs a different time.",
-      "order": 2
+      "enabled": false
     },
     "pro31-low@agy": {
       "harness": "agy",

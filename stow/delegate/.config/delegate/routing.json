@@ -3,7 +3,7 @@
   "classes": {
     "scout": {
       "floor": 1,
-      "ceiling": 2
+      "ceiling": 3
     },
     "mechanical": {
       "floor": 2,
@@ -19,7 +19,7 @@
     },
     "hard-impl": {
       "floor": 3,
-      "ceiling": 3
+      "ceiling": 4
     }
   },
   "margin": 0.2,
