@@ -15,9 +15,9 @@ External worker routing lives in this directory. Read `SKILL.md` first.
 
 ## Rules
 
-- Run the wizard with `--config-dir` at the repo's `stow/delegate/.config/delegate`, or
-  through `make delegate-wizard`: a write to the stowed `~/.config/delegate/lanes.json`
-  replaces the link with a plain file.
+- The catalog (`~/.config/delegate/{lanes,routing}.json`) and the `lane-*.md` agents in
+  `~/.claude/agents` are machine-local. Never add them to the repo; each machine keeps
+  its own preferences. `make delegate-wizard` edits them.
 - Before you change browser dispatch, read the browser section of
   `references/architecture.md` and
   `.scratch/delegate-browser/research/2026-09-10-browser-routes.md`.

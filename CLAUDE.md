@@ -27,8 +27,9 @@ public.
 
 ## Standing rules
 
-- `~/.config/delegate/{lanes,routing}.json` are stow links; edit
-  `stow/delegate/.config/delegate/`, never the live files.
+- `~/.config/delegate/{lanes,routing}.json` and the `lane-*.md` agents in
+  `~/.claude/agents` are machine-local, never in the repo. Edit them with
+  `make delegate-wizard`.
 - A project's `.delegate/` policy never goes to main.
 - Never stow or commit `~/.config/delegate/aa-key`.
 - Preserve unrelated working-tree changes.

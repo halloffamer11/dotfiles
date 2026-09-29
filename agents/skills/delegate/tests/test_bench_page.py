@@ -25,7 +25,9 @@ DELEGATE_DIR = os.path.abspath(os.path.join(HERE, "..", "scripts"))
 FIXTURE = os.path.join(HERE, "fixture", "bench-epoch.csv")
 REPO = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
 REAL_DATA = os.path.join(REPO, ".scratch", "delegate-redesign", "_data")
-STOWED_LANES = os.path.join(REPO, "stow", "delegate", ".config", "delegate", "lanes.json")
+# A real catalog, frozen: the live one is machine-local and never in the repo
+# (Orin, 2026-09-29).
+REAL_LANES = os.path.join(HERE, "fixtures", "refresh-2026-09-22", "lanes.json")
 sys.path.insert(0, DELEGATE_DIR)
 
 import bench
@@ -631,7 +633,7 @@ try:
         for p in real:
             with open(p, encoding="utf-8") as f:
                 rows.extend(json.load(f))
-        lanes = catalog.load_json(STOWED_LANES)
+        lanes = catalog.load_json(REAL_LANES)
         data = data_of(bench_page.render(None, lanes, rows))
         runs = run_layout([{"board": b, "state": {"labels": "all", "frontier": mode}}
                            for b in data["boards"] for mode in ("lanes", "shown")])
@@ -670,7 +672,7 @@ def every_known_row():
 
 try:
     rows = every_known_row()
-    data = bench_page.plot_data(rows, catalog.load_json(STOWED_LANES) if os.path.isfile(STOWED_LANES) else LANES)
+    data = bench_page.plot_data(rows, catalog.load_json(REAL_LANES) if os.path.isfile(REAL_LANES) else LANES)
     missing = [(b["source"], b["benchmark"]) for b in data["boards"]
                if not b["about"] or not b["about"]["measures"] or not b["about"]["url"]
                or not b["about"]["url"].startswith("https://")]

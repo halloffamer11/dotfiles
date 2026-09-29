@@ -614,7 +614,6 @@ def case_saved_discovery_never_probes():
 # --- ticket 33: the wizard refreshes to the current generation --------------
 
 REFRESH_DIR = os.path.join(HERE, "fixtures", "refresh-2026-09-22")
-REPO_AGENTS = os.path.abspath(os.path.join(HERE, "..", "..", "..", "agents"))
 
 
 def refresh_fixture():
@@ -756,6 +755,7 @@ def case_the_save_after_a_rescan_uses_the_rescans_plan():
     import setup
     import setup_tui
     real_scan, real_run, real_agents = setup.scan, setup_tui.run_curses, setup.NATIVE_AGENTS_DIR
+    real_config = catalog.CONFIG_DIR
     real_in, real_out = sys.stdin, sys.stdout
     aa = os.path.join(REFRESH_DIR, "aa-accepted.json")
     seen = []
@@ -781,8 +781,9 @@ def case_the_save_after_a_rescan_uses_the_rescans_plan():
             return True
 
     with tempfile.TemporaryDirectory() as td:
-        agents = os.path.join(td, "checkout", "agents", "agents")
-        config = os.path.join(td, "checkout", "stow", "delegate", ".config", "delegate")
+        # a stand-in for ~/.config/delegate and ~/.claude/agents
+        agents = os.path.join(td, ".claude", "agents")
+        config = os.path.join(td, ".config", "delegate")
         os.makedirs(agents)
         os.makedirs(config)
         shutil.copy(os.path.join(REFRESH_DIR, "lanes.json"), os.path.join(config, "lanes.json"))
@@ -792,12 +793,14 @@ def case_the_save_after_a_rescan_uses_the_rescans_plan():
                 f.write("superseded\n")
         out = Terminal()
         setup.scan, setup_tui.run_curses, setup.NATIVE_AGENTS_DIR = scan, run_curses, agents
+        catalog.CONFIG_DIR = config
         sys.stdin, sys.stdout = Terminal(), out
         try:
             code = setup.main(["--config-dir", config, "--fixture-dir", REFRESH_DIR,
                                "--effort-rows", aa, "--no-bench"])
         finally:
             setup.scan, setup_tui.run_curses, setup.NATIVE_AGENTS_DIR = real_scan, real_run, real_agents
+            catalog.CONFIG_DIR = real_config
             sys.stdin, sys.stdout = real_in, real_out
         written = sorted(os.listdir(agents))
         ok = (code == 0 and seen[0] == (False, None) and seen[1] == (True, [aa])
@@ -838,11 +841,18 @@ def case_native_agent_files_follow_the_claude_lanes():
     files beside it take, and removes each superseded one (ticket 33)."""
     import setup
     _frozen, refreshed, plan = refresh_fixture()
-    # the checkout's own file for this lane is the form, byte for byte: it is
-    # what a real run of this code wrote, and the test regenerates it
-    shape_path = os.path.join(REPO_AGENTS, "lane-opus55-high.md")
-    with open(shape_path, encoding="utf-8") as f:
-        shape = f.read()
+    # the form, byte for byte: what a real run of this code wrote for this lane
+    shape = (
+        "---\n"
+        "name: lane-opus55-high\n"
+        'description: "Delegate native lane opus55-high@claude. Use only when /delegate '
+        'prints a native line that names this agent, or when Orin names this lane."\n'
+        "model: claude-opus-5-5\n"
+        "effort: high\n"
+        "---\n"
+        "\n"
+        + setup.NATIVE_AGENT_BODY + "\n"
+    )
     with tempfile.TemporaryDirectory() as td:
         agents = os.path.join(td, "agents")
         os.makedirs(agents)
@@ -856,14 +866,13 @@ def case_native_agent_files_follow_the_claude_lanes():
         ok = (written == sorted(f"lane-opus55-{e}.md"
                                 for e in ("low", "medium", "high", "xhigh", "max"))
               and text == shape
-              and os.path.realpath(setup.NATIVE_AGENTS_DIR) == os.path.realpath(REPO_AGENTS)
               and len(lines) == 10)
         return ok, f"written={written} lines={lines} text={text!r}"
 
 
 def case_a_catalog_elsewhere_gets_no_agent_file():
-    """The agent files belong to this checkout's catalog, so a catalog somewhere
-    else gets none, and the run says so rather than writing into the repo."""
+    """The agent files belong to the live catalog, so a catalog somewhere else
+    gets none, and the run says so rather than writing into ~/.claude/agents."""
     import setup
     _frozen, refreshed, plan = refresh_fixture()
     with tempfile.TemporaryDirectory() as td:
@@ -873,51 +882,56 @@ def case_a_catalog_elsewhere_gets_no_agent_file():
         return ok, f"lines={lines}"
 
 
-def case_the_wizards_own_config_dir_gets_the_agent_files():
-    """`make delegate-wizard` passes --config-dir <checkout>/stow/delegate/.config
-    /delegate, and that is the catalog the agent files belong to. The path is
-    built the way the Makefile builds it, from the checkout that holds both
-    `agents/` and `stow/` (ticket 33)."""
+def case_the_live_catalog_gets_the_agent_files():
+    """The wizard's default config dir is the live catalog, ~/.config/delegate,
+    and its agent files go to ~/.claude/agents, never the repo (Orin,
+    2026-09-29). Nothing is written: this only asks where."""
     import setup
-    checkout = os.path.dirname(os.path.dirname(setup.NATIVE_AGENTS_DIR))
-    wizard_config = os.path.join(checkout, "stow", "delegate", ".config", "delegate")
-    ok = (setup.native_agents_dir(wizard_config) == setup.NATIVE_AGENTS_DIR
-          and os.path.isdir(wizard_config)
-          and os.path.isdir(setup.NATIVE_AGENTS_DIR))
-    return ok, f"checkout={checkout} config={wizard_config} -> {setup.native_agents_dir(wizard_config)}"
+    found = setup.native_agents_dir(catalog.CONFIG_DIR)
+    ok = found == os.path.expanduser("~/.claude/agents")
+    return ok, f"{catalog.CONFIG_DIR} -> {found}"
 
 
 def case_the_real_layout_saves_the_agent_files():
-    """The same layout in a temp directory, end to end: the wizard's config dir
-    under a checkout gets the new claude lanes' agent files and loses the
-    superseded ones. A copy of the layout, so the checkout's own agents/agents
-    is never written by a test."""
+    """The same layout under a temp HOME, end to end: the live config dir gets
+    the new claude lanes' agent files in ~/.claude/agents and loses the
+    superseded ones. A stow link left at a new lane's path is replaced by a
+    plain file, and the repo file it pointed at is not written."""
     import setup
     _frozen, refreshed, plan = refresh_fixture()
-    real = setup.NATIVE_AGENTS_DIR
+    real_home = os.environ.get("HOME")
     with tempfile.TemporaryDirectory() as td:
-        agents = os.path.join(td, "checkout", "agents", "agents")
-        config = os.path.join(td, "checkout", "stow", "delegate", ".config", "delegate")
+        agents = os.path.join(td, ".claude", "agents")
+        config = os.path.join(td, ".config", "delegate")
+        repo_file = os.path.join(td, "dotfiles", "agents", "agents", "lane-opus55-high.md")
         os.makedirs(agents)
         os.makedirs(config)
+        os.makedirs(os.path.dirname(repo_file))
+        with open(repo_file, "w") as f:
+            f.write("the repo's copy\n")
+        os.symlink(repo_file, os.path.join(agents, "lane-opus55-high.md"))
         for effort in ("low", "medium", "high", "xhigh", "max"):
             with open(os.path.join(agents, f"lane-opus-{effort}.md"), "w") as f:
                 f.write("superseded\n")
-        before = sorted(os.listdir(real))
-        setup.NATIVE_AGENTS_DIR = agents
+        os.environ["HOME"] = td
         try:
-            found = setup.native_agents_dir(config)
+            found = setup.native_agents_dir("~/.config/delegate")
             lines = setup.save_native_agents(plan, refreshed, found)
         finally:
-            setup.NATIVE_AGENTS_DIR = real
+            if real_home is None:
+                del os.environ["HOME"]
+            else:
+                os.environ["HOME"] = real_home
         written = sorted(os.listdir(agents))
+        with open(repo_file) as f:
+            repo_text = f.read()
         ok = (found == agents
               and written == sorted(f"lane-opus55-{e}.md"
                                     for e in ("low", "medium", "high", "xhigh", "max"))
-              and len(lines) == 10
-              # the checkout's own agent files are untouched by a test
-              and sorted(os.listdir(real)) == before)
-        return ok, f"found={found} written={written}"
+              and not os.path.islink(os.path.join(agents, "lane-opus55-high.md"))
+              and repo_text == "the repo's copy\n"
+              and len(lines) == 10)
+        return ok, f"found={found} written={written} repo={repo_text!r}"
 
 
 def case_the_refreshed_rows_reach_the_new_lanes():
@@ -1013,8 +1027,7 @@ for name, case in (
     ("native agent files follow the claude lanes",
      case_native_agent_files_follow_the_claude_lanes),
     ("a catalog elsewhere gets no agent file", case_a_catalog_elsewhere_gets_no_agent_file),
-    ("the wizard's own config dir gets the agent files",
-     case_the_wizards_own_config_dir_gets_the_agent_files),
+    ("the live catalog gets the agent files", case_the_live_catalog_gets_the_agent_files),
     ("the real layout saves the agent files", case_the_real_layout_saves_the_agent_files),
     ("the refreshed rows reach the new lanes", case_the_refreshed_rows_reach_the_new_lanes),
     ("no-discover fetches no rows", case_no_discover_fetches_no_rows),

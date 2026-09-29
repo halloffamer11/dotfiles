@@ -3,9 +3,12 @@
 Orin settled each of these. Do not reopen one without him. Each keeps its date and
 its ticket, where the reason is.
 
-- `lanes.json` and `routing.json` both ship in this public repo via `stow/delegate/`.
-  Orin ruled the subscription costs and vendor notes non-sensitive, so no split to a
-  forge and no constraint on what the pre-screen may write (2026-09-10).
+- `lanes.json`, `routing.json` and the native `lane-*.md` agents are machine-local:
+  `~/.config/delegate/` and `~/.claude/agents/`, never in the repo. Each machine keeps
+  its own preferences, and a shared catalog caused merge conflicts (Orin, 2026-09-29;
+  this replaces the 2026-09-10 rulings that the repo ships the catalog and that
+  `stow/delegate/` is its authoritative copy). The costs and vendor notes stay
+  non-sensitive, so there is still no constraint on what the pre-screen may write.
 - `trust` is gone from the design entirely. Ranking sorts
   `(tier asc, order asc, pace desc, lane name asc)`, where `order` is the lane's place
   inside its tier from the wizard's review page and a lane without one sorts after
@@ -21,9 +24,6 @@ its ticket, where the reason is.
   page: the carry page selects a model at an effort, the tier pages assign a tier,
   and no page asks a question another page already asked (Orin, 2026-09-10). TUI
   work goes to a Claude Opus agent under `/frontend-design:frontend-design`.
-- `stow/delegate/.config/delegate/lanes.json` is the authoritative catalog; the live
-  `~/.config/delegate/lanes.json` follows it, never the other way (Orin,
-  2026-09-10).
 - `ultra` lanes are generated disabled: no source scores them, and automatic task
   delegation contradicts the worker preamble (ticket 15).
 - The carry page proposes a lane off when another effort of the same model, for no

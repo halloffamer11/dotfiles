@@ -25,14 +25,10 @@ AA_MAX_AGE = 24 * 60 * 60
 AA_FIXTURE = "aa-accepted.json"
 
 # A claude lane runs as a subagent, so the lane is not live until the agent file
-# beside it is (ticket 22). Those files are `agents/agents/` in the checkout this
-# skill is part of, and `make delegate-wizard` relinks them into ~/.claude/agents
-# after the wizard exits. realpath, because the skill is reached by a stow link.
-NATIVE_AGENTS_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
-        os.path.realpath(__file__))))),
-    "agents",
-)
+# beside it is (ticket 22). The catalog is machine-local, so its agent files are
+# too: they go straight into ~/.claude/agents, beside the stowed agents, and never
+# into the repo (Orin, 2026-09-29). Expanded at call time, like catalog.CONFIG_DIR.
+NATIVE_AGENTS_DIR = "~/.claude/agents"
 NATIVE_AGENT_BODY = (
     "You are a delegate worker. Read the prompt file named in your task and follow it "
     "exactly. Your final message is the return block that the prompt asks for."
@@ -455,16 +451,13 @@ def native_agents_dir(config_dir):
     """Where a native claude lane's agent file goes, or None.
 
     The agent files and the catalog have to stay in step, so they are written
-    only when the catalog being written is this checkout's own, which is how
-    `make delegate-wizard` runs the wizard: `--config-dir
-    <checkout>/stow/delegate/.config/delegate`. A catalog somewhere else — a
-    test, a throwaway copy — gets none, because the files beside this script are
-    not that catalog's. The checkout is the directory holding both `agents/` and
-    `stow/`, which is two above the agent files.
+    only when the catalog being written is this machine's live one,
+    `catalog.CONFIG_DIR`. A catalog somewhere else — a test, a throwaway copy —
+    gets none, because ~/.claude/agents is not that catalog's.
     """
-    checkout = os.path.dirname(os.path.dirname(NATIVE_AGENTS_DIR))
     here = os.path.realpath(os.path.expanduser(config_dir or ""))
-    return NATIVE_AGENTS_DIR if here.startswith(os.path.realpath(checkout) + os.sep) else None
+    live = os.path.realpath(os.path.expanduser(catalog.CONFIG_DIR))
+    return os.path.expanduser(NATIVE_AGENTS_DIR) if here == live else None
 
 
 def save_native_agents(refresh, lanes_doc, agents_dir):
@@ -472,8 +465,9 @@ def save_native_agents(refresh, lanes_doc, agents_dir):
     one, and return the lines to print.
 
     A claude lane runs as a subagent, so a new lane is not live until its file
-    is; `make delegate-wizard` relinks them after the wizard exits, so the one
-    command stays one command (ticket 33).
+    is, and the wizard writes it before it exits (ticket 33). A link left at a
+    lane's path — the stow link of a lane file the repo used to carry — is
+    removed first, so the write never lands in the repo through it.
     """
     if not refresh:
         return []
@@ -484,7 +478,7 @@ def save_native_agents(refresh, lanes_doc, agents_dir):
         if not waiting:
             return []
         return [f"note: {len(waiting)} new claude lanes need an agent file; this catalog is "
-                "not the checkout's own, so none was written"]
+                "not the live one, so none was written"]
     lines = []
     for name in refresh.get("new") or ():
         lane = lanes.get(name)
@@ -492,6 +486,8 @@ def save_native_agents(refresh, lanes_doc, agents_dir):
             continue
         os.makedirs(agents_dir, exist_ok=True)
         path = os.path.join(agents_dir, f"lane-{name.split('@', 1)[0]}.md")
+        if os.path.islink(path):
+            os.remove(path)
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(native_agent_text(name, lane))
         lines.append(f"wrote {path}")
@@ -499,7 +495,7 @@ def save_native_agents(refresh, lanes_doc, agents_dir):
         if not name.endswith("@claude") or name in lanes:
             continue
         path = os.path.join(agents_dir, f"lane-{name.split('@', 1)[0]}.md")
-        if os.path.isfile(path):
+        if os.path.isfile(path) or os.path.islink(path):
             os.remove(path)
             lines.append(f"removed {path}")
     return lines

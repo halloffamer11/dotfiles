@@ -182,74 +182,6 @@ record(
     str(catalog.HARNESS_EFFORTS),
 )
 
-# 1f. the stowed catalog carries the three native claude lanes and validates
-import json as _json
-import os as _os
-_stowed_path = _os.path.abspath(_os.path.join(
-    _os.path.dirname(__file__), "..", "..", "..", "..",
-    "stow", "delegate", ".config", "delegate", "lanes.json"))
-with open(_stowed_path, encoding="utf-8") as _f:
-    _stowed = _json.load(_f)
-record("stowed catalog validates", catalog.validate_lanes(copy.deepcopy(_stowed)) is not None)
-# By level, never by lane name: a refresh renames a lane when its model moves on
-# (`opus-high@claude` became `opus55-high@claude` when Opus 5.5 landed), and the
-# rule is about the level being there, on the general Claude meter (ticket 33).
-sys.path.insert(0, DELEGATE_DIR)
-import discover as _discover
-_claude_lanes = {n: l for n, l in _stowed["lanes"].items() if l["harness"] == "claude"}
-_by_level = {}
-for _name, _lane in _claude_lanes.items():
-    _by_level.setdefault(_discover.model_level(_lane["model"])[0], {})[_name] = _lane
-for _level in ("claude-haiku", "claude-sonnet", "claude-opus"):
-    _at_level = _by_level.get(_level, {})
-    record(
-        f"the stowed catalog runs {_level}, on the general Claude meter",
-        bool(_at_level) and {l["meter"] for l in _at_level.values()} == {"claude-general"},
-        str({n: l["meter"] for n, l in _at_level.items()}),
-    )
-
-# 1g. ticket 19: Fable, Opus and Sonnet at every effort claude offers, each lane
-#     on its model's own meter, and every claude lane with its lane-* agent file
-_by_model = {}
-for _name, _lane in _stowed["lanes"].items():
-    _by_model.setdefault((_lane["harness"], _lane["model"]), {})[_lane["effort"]] = (_name, _lane)
-for _level in ("claude-fable", "claude-opus", "claude-sonnet"):
-    # the level's own model, whatever version the catalog is on today
-    _lanes = {e: (n, l) for n, l in _by_level.get(_level, {}).items()
-              for e in [l["effort"]]}
-    record(
-        f"stowed catalog runs {_level} at every effort claude offers, on one meter",
-        set(_lanes) == set(catalog.HARNESS_EFFORTS["claude"])
-        and len({l["model"] for _n, l in _lanes.values()}) == 1
-        and len({l["meter"] for _n, l in _lanes.values()}) == 1,
-        str({e: (n, l["meter"]) for e, (n, l) in _lanes.items()}),
-    )
-record(
-    "stowed catalog runs gemini-3.8-flash at every effort agy offers, the effort in the slug",
-    {e: l["model"] for e, (_n, l) in
-     {**_by_model.get(("agy", "gemini-3.8-flash-low"), {}),
-      **_by_model.get(("agy", "gemini-3.8-flash-medium"), {}),
-      **_by_model.get(("agy", "gemini-3.8-flash-high"), {})}.items()}
-    == {e: f"gemini-3.8-flash-{e}" for e in catalog.HARNESS_EFFORTS["agy"]},
-)
-_agents_dir = _os.path.abspath(_os.path.join(_os.path.dirname(__file__), "..", "..", "..", "agents"))
-_missing = []
-for _name, _lane in _stowed["lanes"].items():
-    if _lane["harness"] != "claude":
-        continue
-    _path = _os.path.join(_agents_dir, "lane-" + _name.split("@")[0] + ".md")
-    if not _os.path.isfile(_path):
-        _missing.append(f"{_name}: no {_path}")
-        continue
-    with open(_path, encoding="utf-8") as _f:
-        _front = _f.read().split("---")[1]
-    _fields = dict(line.split(": ", 1) for line in _front.strip().splitlines() if ": " in line)
-    # Haiku takes no effort, so its agent file names none (ticket 22)
-    if _fields.get("model") != _lane["model"] or _fields.get("effort", _lane["effort"]) != _lane["effort"]:
-        _missing.append(f"{_name}: {_fields}")
-record("every claude lane in the stowed catalog has a lane-* agent file with its model and effort",
-       not _missing, str(_missing))
-
 # 2. Rejections
 # 2.1 lane naming a missing meter
 doc = copy.deepcopy(lanes_sample)
@@ -809,11 +741,13 @@ record(
 )
 
 # 7.9 ticket 19: every Claude name an accepted rows file prints resolves to the
-#     lane model it denotes in the stowed catalog, and a Claude model that is
-#     nobody's lane resolves to none. A new Claude name in the rows fails here
-#     until someone decides which it is.
-_data_dir = _os.path.abspath(_os.path.join(
-    _os.path.dirname(__file__), "..", "..", "..", "..", ".scratch", "delegate-redesign", "_data"))
+#     lane model it denotes in a catalog, and a Claude model that is nobody's
+#     lane resolves to none. A new Claude name in the rows fails here until
+#     someone decides which it is. The catalog is machine-local (Orin,
+#     2026-09-29), so the repo has none to read: these are its Claude lanes as
+#     they stood that day, one effort each.
+_data_dir = os.path.abspath(os.path.join(
+    os.path.dirname(__file__), "..", "..", "..", "..", ".scratch", "delegate-redesign", "_data"))
 # Which model each printed name denotes. What it resolves to is that model while
 # a lane runs it, and nothing once no lane does, so this table follows the
 # catalog through a refresh instead of being rewritten after one (ticket 33).
@@ -833,16 +767,25 @@ _denotes = {
     "Claude Sonnet 4.6": "claude-sonnet-4-6",
     "Claude 4.5 Haiku": "claude-haiku-4-5-20251001",
 }
-_claude_models = {l["model"] for l in _claude_lanes.values()}
+_claude_doc = {"lanes": {
+    "fable-high@claude": {"harness": "claude", "model": "claude-fable-5-1", "effort": "high",
+                          "published_as": ["Fable 5.1"]},
+    "haiku-high@claude": {"harness": "claude", "model": "claude-haiku-4-5-20251001",
+                          "effort": "high", "published_as": ["Claude 4.5 Haiku"]},
+    "sonnet55-high@claude": {"harness": "claude", "model": "claude-sonnet-5-5", "effort": "high"},
+    "opus55-high@claude": {"harness": "claude", "model": "claude-opus-5-5", "effort": "high"},
+}}
+_claude_models = {l["model"] for l in _claude_doc["lanes"].values()}
 _claude_names = {n: (m if m in _claude_models else None) for n, m in _denotes.items()}
 _seen = set()
 for _file in ("aa-accepted.json", "tbench-accepted.json", "swerb-accepted.json"):
-    _p = _os.path.join(_data_dir, _file)
-    if _os.path.isfile(_p):
+    _p = os.path.join(_data_dir, _file)
+    if os.path.isfile(_p):
         with open(_p, encoding="utf-8") as _f:
-            _seen |= {r["model"] for r in _json.load(_f)
+            _seen |= {r["model"] for r in json.load(_f)
                       if any(w in r["model"].lower() for w in ("claude", "fable", "opus", "sonnet", "haiku"))}
-_wrong = {n: resolve(n, _stowed) for n in _claude_names if resolve(n, _stowed) != _claude_names[n]}
+_wrong = {n: resolve(n, _claude_doc) for n in _claude_names
+          if resolve(n, _claude_doc) != _claude_names[n]}
 record(
     "7.9 every Claude name in the accepted rows resolves to its lane model, and other versions to none",
     _seen and _seen <= set(_claude_names) and not _wrong,

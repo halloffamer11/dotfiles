@@ -13,7 +13,7 @@
 #   make audiotee    # build the audiotee system-audio capture binary into ~/.local/bin (Swift 5.9+, macOS 14.2+)
 #   make mictee      # build the mictee mic capture binary into ~/.local/bin (Swift)
 #   make test-recorder  # regression harness for the record-meeting rig
-#   make delegate-wizard  # the delegate catalog wizard on the repo catalog with the accepted benchmark rows; WIZARD_ARGS adds flags (e.g. --tiers-from FILE, --plain)
+#   make delegate-wizard  # the delegate catalog wizard on this machine's catalog with the accepted benchmark rows; WIZARD_ARGS adds flags (e.g. --tiers-from FILE, --plain)
 #   make delegate-dashboard  # link and open the local dashboard; DELEGATE_DASHBOARD_PLACEMENT overrides split
 #
 # The two short forms, once `make configs` has linked stow/delegate/.local/bin/delegate
@@ -23,9 +23,10 @@
 #
 # Editing:
 #   - CONFIG_PACKAGES: config packages under stow/, targeted at ~
-#   - delegate ships ~/.config/delegate/{lanes,routing}.json. One catalog serves every
-#     machine: a lane whose harness CLI is not on PATH is vetoed at rank time
-#     ("cli absent"), so the same file is correct on a box that lacks a CLI
+#   - delegate ships only the `delegate` command. ~/.config/delegate/{lanes,routing}.json
+#     and the lane-*.md agents in ~/.claude/agents are machine-local and never in the
+#     repo: each machine keeps its own preferences, and a fresh one gets a starting
+#     catalog from `make delegate-wizard`
 #   - hammerspoon is NOT in CONFIG_PACKAGES: .stowrc sets --no-folding, but Hammerspoon
 #     needs ~/.hammerspoon to be ONE whole-directory symlink (per-file links break
 #     hs.configdir and the pathwatcher auto-reload — upstream issue #830), so `configs`
@@ -107,14 +108,11 @@ mictee:
 test-recorder:
 	python3 $(CURDIR)/tools/record-meeting-tests/harness.py
 
-# Writes the repo catalog under stow/delegate, never ~/.config/delegate: setup.py
-# renames over its target, which would turn a stowed symlink into a plain file.
-# The wizard's refresh writes an agent file for each new native claude lane, so
-# the per-file agent links are restowed after it exits — the `skills` step, and
-# the reason a new lane is live with no second command (ticket 33).
+# Writes this machine's catalog, ~/.config/delegate, and the agent file of each new
+# native claude lane straight into ~/.claude/agents, so a new lane is live with no
+# second command (ticket 33). Neither is in the repo.
 delegate-wizard:
-	python3 $(CURDIR)/agents/skills/delegate/scripts/setup.py --config-dir $(CURDIR)/stow/delegate/.config/delegate $(foreach f,$(DELEGATE_ROWS),--effort-rows $(CURDIR)/$(f)) $(WIZARD_ARGS)
-	mkdir -p $(HOME)/.claude/agents && (cd $(CURDIR)/agents && stow -t $(HOME)/.claude/agents -R agents)
+	python3 $(CURDIR)/agents/skills/delegate/scripts/setup.py $(foreach f,$(DELEGATE_ROWS),--effort-rows $(CURDIR)/$(f)) $(WIZARD_ARGS)
 
 delegate-dashboard:
 	@test "$${HERDR_ENV:-}" = 1
