@@ -38,3 +38,6 @@ its ticket, where the reason is.
 - Effort is fixed per Lane, and ranking picks a Lane, never an effort. The one path
   for a different effort is a named `dispatch --effort` (Orin, 2026-09-22; the comment at
   the Pick in `rank.py`).
+- Routing reads the Meters as they are when a job is sent. No usage history and no
+  burn rate or velocity: probes are minutes apart and usage can drain fast or slow
+  between them (Orin, 2026-09-27; ticket 40).
