@@ -1,15 +1,16 @@
 # ~/dotfiles/Makefile — machine provisioning entry points.
 #
 # Usage:
-#   make bootstrap   # fresh machine: brew packages + reconciled config/skills + audiotee/mictee builds
+#   make bootstrap   # fresh machine: brew packages + herdr + reconciled config/skills + audiotee/mictee builds
 #   make brew        # install/verify Brewfile packages only
+#   make herdr       # install herdr with its own installer into ~/.local/bin; stops if another package manager owns one
 #   make apply       # reconcile configs, authored skills, and declared external skills
 #   make configs     # restow home-target config packages only
 #   make skills      # restow authored skills into each harness dir + brew-provided skill links + per-file agent links
 #   make externals   # ensure declared external skills are installed at current upstream
 #   make external-updates  # update only the external skills declared by this repo
 #   make delegate-codex-home  # delegate's own CODEX_HOME: the disposable browser and nothing else
-#   make update      # verify Brewfile packages and update declared external skills
+#   make update      # verify Brewfile packages, run `herdr update`, and update declared external skills
 #   make audiotee    # build the audiotee system-audio capture binary into ~/.local/bin (Swift 5.9+, macOS 14.2+)
 #   make mictee      # build the mictee mic capture binary into ~/.local/bin (Swift)
 #   make test-recorder  # regression harness for the record-meeting rig
@@ -43,19 +44,44 @@
 
 CONFIG_PACKAGES ?= borders claude delegate ghostty git herdr nvim starship wezterm yazi zsh
 HARNESS_SKILL_DIRS ?= $(HOME)/.claude/skills $(HOME)/.agents/skills $(HOME)/.kiro/skills
-EXTRA_BREWFILES ?= 
+EXTRA_BREWFILES ?=
+# The upstream installer's own variable and default; `make herdr` passes it through.
+HERDR_INSTALL_DIR ?= $(HOME)/.local/bin
 # Accepted benchmark rows the wizard reads (repo-relative). The pre-screen and the
 # benchmark page use AA and Terminal-Bench; swerb rows are evidence only.
 DELEGATE_ROWS ?= .scratch/delegate-redesign/_data/aa-accepted.json .scratch/delegate-redesign/_data/tbench-accepted.json
 DELEGATE_DASHBOARD_PLACEMENT ?= split
 
-.PHONY: bootstrap brew apply configs skills externals external-updates update audiotee mictee test-recorder delegate-wizard delegate-codex-home delegate-dashboard
+.PHONY: bootstrap brew herdr herdr-update apply configs skills externals external-updates update audiotee mictee test-recorder delegate-wizard delegate-codex-home delegate-dashboard
 
-bootstrap: brew apply audiotee mictee delegate-codex-home
+bootstrap: brew herdr apply audiotee mictee delegate-codex-home
 
 brew:
 	brew bundle --file=$(CURDIR)/Brewfile
 	@for f in $(EXTRA_BREWFILES); do brew bundle --file=$$f; done
+
+# One owner per machine: the server and every client must be the same build. The guard
+# changes nothing and stops while a Homebrew login service or another herdr on PATH
+# (Homebrew, mise, a distribution package) could start a different build of the server.
+# The installer is downloaded to a file first, so a failed download fails the target.
+herdr:
+	@if [ -e "$(HOME)/Library/LaunchAgents/homebrew.mxcl.herdr.plist" ]; then \
+		echo "ERROR: the Homebrew login service homebrew.mxcl.herdr starts its own herdr server. From a terminal outside Herdr:"; \
+		echo "  herdr server stop; launchctl bootout gui/$$(id -u)/homebrew.mxcl.herdr; rm ~/Library/LaunchAgents/homebrew.mxcl.herdr.plist"; \
+		exit 1; fi
+	@IFS=:; for d in $$PATH; do \
+		if [ -x "$$d/herdr" ] && [ "$$d/herdr" != "$(HERDR_INSTALL_DIR)/herdr" ]; then \
+			echo "ERROR: $$d/herdr has another owner. Remove it with that package manager, then run make herdr again."; \
+			exit 1; fi; \
+	done
+	@if [ ! -x "$(HERDR_INSTALL_DIR)/herdr" ]; then \
+		tmp="$$(mktemp)" && curl -fsSL https://herdr.dev/install.sh -o "$$tmp" && HERDR_INSTALL_DIR="$(HERDR_INSTALL_DIR)" sh "$$tmp"; \
+		rc=$$?; rm -f "$$tmp"; exit $$rc; fi
+
+# `herdr update` replaces the binary in place. The running server keeps its old build
+# until Herdr is quit and started again; `herdr status` then shows server_binary_stale: no.
+herdr-update: herdr
+	"$(HERDR_INSTALL_DIR)/herdr" update
 
 apply: configs skills externals
 
@@ -92,7 +118,7 @@ externals:
 external-updates:
 	DISABLE_TELEMETRY=1 npx -y skills@latest update -g -y herdr humanizer
 
-update: brew external-updates
+update: brew herdr-update external-updates
 
 audiotee:
 	rm -rf /tmp/audiotee-build
