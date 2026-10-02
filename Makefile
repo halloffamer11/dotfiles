@@ -4,7 +4,7 @@
 #   make bootstrap   # fresh machine: brew packages + reconciled config/skills + audiotee/mictee builds + delegate
 #   make brew        # install/verify Brewfile packages only
 #   make apply       # reconcile configs, agent links, declared skills, and the delegate install
-#   make configs     # restow home-target config packages only
+#   make configs     # restow home-target config packages and link ~/.claude/CLAUDE.md
 #   make skills      # drop stale authored-skill links + brew-provided skill links + per-file agent links
 #   make externals   # ensure declared skills (personal and third-party) are installed at current upstream
 #   make external-updates  # update only the skills declared by this repo
@@ -52,6 +52,11 @@ configs:
 	@if [ -d $(HOME)/.hammerspoon ] && [ ! -L $(HOME)/.hammerspoon ]; then \
 		echo "ERROR: ~/.hammerspoon is a real directory (Hammerspoon launched before configs?) — move it aside first"; exit 1; fi
 	ln -sfn $(CURDIR)/stow/hammerspoon/.hammerspoon $(HOME)/.hammerspoon
+	@# ~/.claude/CLAUDE.md is Orin's global steering file, kept in references/. A real
+	@# file there is someone's data: stop rather than replace it.
+	@if [ -e $(HOME)/.claude/CLAUDE.md ] && [ ! -L $(HOME)/.claude/CLAUDE.md ]; then \
+		echo "ERROR: ~/.claude/CLAUDE.md is a real file — diff it against references/CLAUDE.md, then move it aside"; exit 1; fi
+	mkdir -p $(HOME)/.claude && ln -sfn $(CURDIR)/references/CLAUDE.md $(HOME)/.claude/CLAUDE.md
 	@# stow -R unlinks before relinking; a Hyprland reload landing in that
 	@# window raises a persistent "config has errors" overlay that outlives
 	@# the restow. Reloading here clears it. No-op without hyprctl (macOS).
