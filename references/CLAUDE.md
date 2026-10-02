@@ -50,7 +50,7 @@ Before using a command-line tool you have not already inspected this session —
 
 - One `CLAUDE.md` per meaningful directory — the single orienting file. Keep it thin: say what the directory is and point to detail files; do not inline data, registries, or indexes. Do not create `AGENTS.md`, `README.md`, or `INDEX.md` as a substitute orienting file.
 - Reserve a leading `_` for non-content: generated indexes, registries, manifests, archives (`_index.md`, `_registry.md`, `_archive/`). Content folders never take a `_`.
-- Design docs and implementation plans follow the superpowers convention — `docs/superpowers/specs/` and `docs/superpowers/plans/` at the project root. One per project; no nested `docs/superpowers/`.
+- Specs and tickets live together per effort, in the local-markdown layout of mattpocock/skills: `.scratch/<effort>/spec.md` and `.scratch/<effort>/issues/<NN>-<slug>.md`. Never `docs/superpowers/`.
 - Build/process provenance (pilot reports, acquisition logs, proposals) does not live alongside delivered content.
 
 ## Model routing for workflows & agent teams

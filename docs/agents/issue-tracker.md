@@ -1,14 +1,13 @@
 # Issue tracker: Local Markdown
 
-Tickets for this repo are markdown files under `.scratch/`. Specs are under
-`docs/superpowers/specs/` (none yet: the first spec creates the directory). The GitHub repo is public and has no issues: do not
+Issues and specs for this repo are markdown files under `.scratch/`. The GitHub repo
+is public and has no issues: do not
 create issues there.
 
 ## Conventions
 
 - One effort per directory: `.scratch/<effort-slug>/`.
-- The spec is `docs/superpowers/specs/<YYYY-MM-DD>-<effort-slug>.md`, not a file
-  under `.scratch/`.
+- The spec is `.scratch/<effort-slug>/spec.md`, one per effort.
 - One file per ticket: `.scratch/<effort-slug>/issues/<NN>-<slug>.md`, numbered
   from `01`. Never one combined tickets file. A ticket inserted after another
   takes a letter suffix (`07b`).

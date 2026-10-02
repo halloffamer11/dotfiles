@@ -13,8 +13,8 @@ skills CLI) and `halloffamer11/delegate` (its own installer). They split out on
 - Delegate work happens in `~/projects/delegate` (`make delegate` clones and installs
   it). The statusline, Hammerspoon and Herdr configs here call its installed scripts.
 - `tools/` holds machine tools; each tool directory owns its own `CLAUDE.md`.
-- `references/CLAUDE.md` is a personal steering copy for the work Mac. It does not
-  load here and is not an instruction for this repo.
+- `references/CLAUDE.md` is Orin's global `~/.claude/CLAUDE.md`; `make configs` links
+  it there. Edit it here. It is not an instruction for this repo.
 
 ## Where state lives
 
@@ -36,8 +36,8 @@ skills CLI) and `halloffamer11/delegate` (its own installer). They split out on
 
 ### Issue tracker
 
-Local markdown: tickets in `.scratch/<effort>/issues/`, specs in
-`docs/superpowers/specs/` (none yet). See `docs/agents/issue-tracker.md`.
+Local markdown: each effort in `.scratch/<effort>/`, with its `spec.md` and
+`issues/`. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
