@@ -16,6 +16,9 @@ source "$OMARCHY_PATH/default/bash/rc"
 alias ll='ls --git'
 alias la='lsa'
 
+# ---- Dotfiles: pull and reconcile (same as the zsh alias) -------------------
+alias dots='git -C ~/dotfiles pull --rebase && make -C ~/dotfiles apply; git -C ~/dotfiles status --short'
+
 # ---- Editor ----------------------------------------------------------------
 # Omarchy sets EDITOR and SUDO_EDITOR to `omarchy-launch-editor --inline`,
 # which resolves to nvim via ~/.local/state/omarchy/defaults/editor.
