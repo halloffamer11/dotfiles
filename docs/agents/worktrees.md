@@ -32,9 +32,3 @@ paths from it.
 
 A worktree is a blast radius for a delegate worker (`delegate.py --write <path>`); the
 primary checkout never is.
-
-## Exception on record
-
-`worktree/delegate-monitor-herdr` holds the `.scratch/delegate-dashboard-plugin/` effort.
-The branch predates this rule and keeps its name; its checkout moved from `/private/tmp`
-to the Herdr path on 2026-09-18.

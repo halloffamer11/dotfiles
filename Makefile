@@ -1,72 +1,51 @@
 # ~/dotfiles/Makefile — machine provisioning entry points.
 #
 # Usage:
-#   make bootstrap   # fresh machine: brew packages + reconciled config/skills + audiotee/mictee builds
+#   make bootstrap   # fresh machine: brew packages + reconciled config/skills + audiotee/mictee builds + delegate
 #   make brew        # install/verify Brewfile packages only
-#   make apply       # reconcile configs, authored skills, and declared external skills
+#   make apply       # reconcile configs, agent links, and declared skills
 #   make configs     # restow home-target config packages only
-#   make skills      # restow authored skills into each harness dir + brew-provided skill links + per-file agent links
-#   make externals   # ensure declared external skills are installed at current upstream
-#   make external-updates  # update only the external skills declared by this repo
-#   make delegate-codex-home  # delegate's own CODEX_HOME: the disposable browser and nothing else
-#   make update      # verify Brewfile packages and update declared external skills
+#   make skills      # brew-provided skill links + per-file agent links
+#   make externals   # ensure declared skills (personal and third-party) are installed at current upstream
+#   make external-updates  # update only the skills declared by this repo
+#   make delegate    # clone halloffamer11/delegate into DELEGATE_DIR if absent, then run its `make install`
+#   make update      # verify Brewfile packages and update declared skills
 #   make audiotee    # build the audiotee system-audio capture binary into ~/.local/bin (Swift 5.9+, macOS 14.2+)
 #   make mictee      # build the mictee mic capture binary into ~/.local/bin (Swift)
 #   make test-recorder  # regression harness for the record-meeting rig
-#   make delegate-wizard  # the delegate catalog wizard on this machine's catalog with the accepted benchmark rows; WIZARD_ARGS adds flags (e.g. --tiers-from FILE, --plain)
-#   make delegate-dashboard  # link and open the local dashboard; DELEGATE_DASHBOARD_PLACEMENT overrides split
-#
-# The two short forms, once `make configs` has linked stow/delegate/.local/bin/delegate
-# into ~/.local/bin (ticket 34). Neither needs a checkout path:
-#   delegate global [args]   # this target, with the args as WIZARD_ARGS
-#   delegate project [args]  # the dashboard for the current directory's Git project
 #
 # Editing:
 #   - CONFIG_PACKAGES: config packages under stow/, targeted at ~
-#   - delegate ships only the `delegate` command. ~/.config/delegate/{lanes,routing}.json
-#     and the lane-*.md agents in ~/.claude/agents are machine-local and never in the
-#     repo: each machine keeps its own preferences, and a fresh one gets a starting
-#     catalog from `make delegate-wizard`
 #   - hammerspoon is NOT in CONFIG_PACKAGES: .stowrc sets --no-folding, but Hammerspoon
 #     needs ~/.hammerspoon to be ONE whole-directory symlink (per-file links break
 #     hs.configdir and the pathwatcher auto-reload — upstream issue #830), so `configs`
 #     links it explicitly instead of stowing it
-#   - HARNESS_SKILL_DIRS: which harnesses receive authored skills; add ~/.kiro/skills at work
-#   - `skills` runs stow from agents/ (not repo root) so .stowrc's --no-folding is not read:
-#     each skill stays ONE whole-directory symlink, so files added later appear without a restow.
-#     Codex reads ~/.agents/skills (follows dir symlinks); ~/.codex/skills is deprecated upstream.
+#   - This repo holds no authored skills. PERSONAL_SKILLS come from halloffamer11/skills
+#     through the skills CLI, like the third-party ones; delegate has its own repo and
+#     installer (DELEGATE_DIR), because it needs machine setup the skills CLI cannot do.
+#   - SKILL_AGENTS: which harnesses the skills CLI installs into
 #   - agents are stowed per FILE into ~/.claude/agents (the package is flat, so folding is moot) so
 #     machine-local agents can sit alongside; an agent added by a pull appears after the next `make skills`
 #   - Recipes must be indented with a literal TAB (make syntax rule)
 #   - Idempotency lives in the tools: `brew bundle` no-ops when satisfied; `stow -R` re-syncs
 -include local.mk
 
-CONFIG_PACKAGES ?= borders claude delegate ghostty git herdr nvim starship wezterm yazi zsh
-HARNESS_SKILL_DIRS ?= $(HOME)/.claude/skills $(HOME)/.agents/skills $(HOME)/.kiro/skills
-EXTRA_BREWFILES ?= 
-# Accepted benchmark rows the wizard reads (repo-relative). The pre-screen and the
-# benchmark page use AA and Terminal-Bench; swerb rows are evidence only.
-DELEGATE_ROWS ?= .scratch/delegate-redesign/_data/aa-accepted.json .scratch/delegate-redesign/_data/tbench-accepted.json
-DELEGATE_DASHBOARD_PLACEMENT ?= split
+CONFIG_PACKAGES ?= borders claude ghostty git herdr nvim starship wezterm yazi zsh
+SKILL_AGENTS ?= claude-code codex kiro-cli
+PERSONAL_SKILLS ?= facebook-marketplace fresh-context toolsmith
+DELEGATE_DIR ?= $(HOME)/projects/delegate
+EXTRA_BREWFILES ?=
+SKILLS_CLI = DISABLE_TELEMETRY=1 npx -y skills@latest
 
-.PHONY: bootstrap brew apply configs skills externals external-updates update audiotee mictee test-recorder delegate-wizard delegate-codex-home delegate-dashboard
+.PHONY: bootstrap brew apply configs skills externals external-updates update delegate audiotee mictee test-recorder
 
-bootstrap: brew apply audiotee mictee delegate-codex-home
+bootstrap: brew apply audiotee mictee delegate
 
 brew:
 	brew bundle --file=$(CURDIR)/Brewfile
 	@for f in $(EXTRA_BREWFILES); do brew bundle --file=$$f; done
 
 apply: configs skills externals
-
-delegate-codex-home:
-	mkdir -p $(HOME)/.local/share/delegate/codex-home $(HOME)/.cache/playwright-mcp
-	sed 's|@HOME@|$(HOME)|g' $(CURDIR)/agents/skills/delegate/assets/codex-home/config.toml > $(HOME)/.local/share/delegate/codex-home/config.toml
-	@if [ -f $(HOME)/.codex/auth.json ]; then \
-		ln -sfn $(HOME)/.codex/auth.json $(HOME)/.local/share/delegate/codex-home/auth.json; \
-	else \
-		echo "NOTE: ~/.codex/auth.json is absent — run 'codex login', then 'make delegate-codex-home' again"; \
-	fi
 
 configs:
 	stow -d $(CURDIR)/stow -t $(HOME) -R $(CONFIG_PACKAGES)
@@ -79,20 +58,24 @@ configs:
 	@if command -v hyprctl >/dev/null 2>&1; then hyprctl reload >/dev/null; fi
 
 skills:
-	for t in $(HARNESS_SKILL_DIRS); do mkdir -p $$t && (cd $(CURDIR)/agents && stow -t $$t -R skills); done
 	ln -sfn "$$(brew --prefix hunk)/libexec/skills/hunk-review" $(HOME)/.claude/skills/hunk-review
 	@[ -L $(HOME)/.claude/agents ] && rm $(HOME)/.claude/agents || true
 	mkdir -p $(HOME)/.claude/agents && (cd $(CURDIR)/agents && stow -t $(HOME)/.claude/agents -R agents)
 
 externals:
 	@# These declarations are desired state: add installs a missing skill and refreshes an existing one.
-	DISABLE_TELEMETRY=1 npx -y skills@latest add herdrdev/herdr --skill herdr --agent claude-code codex kiro-cli -g -y
-	DISABLE_TELEMETRY=1 npx -y skills@latest add blader/humanizer --skill humanizer --agent claude-code codex kiro-cli -g -y
+	$(SKILLS_CLI) add halloffamer11/skills --skill $(PERSONAL_SKILLS) --agent $(SKILL_AGENTS) -g -y
+	$(SKILLS_CLI) add herdrdev/herdr --skill herdr --agent $(SKILL_AGENTS) -g -y
+	$(SKILLS_CLI) add blader/humanizer --skill humanizer --agent $(SKILL_AGENTS) -g -y
 
 external-updates:
-	DISABLE_TELEMETRY=1 npx -y skills@latest update -g -y herdr humanizer
+	$(SKILLS_CLI) update -g -y herdr humanizer $(PERSONAL_SKILLS)
 
 update: brew external-updates
+
+delegate:
+	@[ -d $(DELEGATE_DIR)/.git ] || git clone https://github.com/halloffamer11/delegate.git $(DELEGATE_DIR)
+	$(MAKE) -C $(DELEGATE_DIR) install
 
 audiotee:
 	rm -rf /tmp/audiotee-build
@@ -107,17 +90,3 @@ mictee:
 
 test-recorder:
 	python3 $(CURDIR)/tools/record-meeting-tests/harness.py
-
-# Writes this machine's catalog, ~/.config/delegate, and the agent file of each new
-# native claude lane straight into ~/.claude/agents, so a new lane is live with no
-# second command (ticket 33). Neither is in the repo.
-delegate-wizard:
-	python3 $(CURDIR)/agents/skills/delegate/scripts/setup.py $(foreach f,$(DELEGATE_ROWS),--effort-rows $(CURDIR)/$(f)) $(WIZARD_ARGS)
-
-delegate-dashboard:
-	@test "$${HERDR_ENV:-}" = 1
-	@test -n "$${HERDR_PANE_ID:-}"
-	@"$${HERDR_BIN_PATH:-herdr}" plugin link "$(CURDIR)/tools/delegate-dashboard"
-	@python3 "$(CURDIR)/tools/delegate-dashboard/open.py" --placement "$(DELEGATE_DASHBOARD_PLACEMENT)" --target-pane "$${HERDR_PANE_ID}"
-
-#   references/  — reference material pulled with the repo but not provisioned by brew/stow/skills (e.g. personal CLAUDE.md for the work Mac to cherry-pick from)
