@@ -37,7 +37,7 @@ skills CLI) and `halloffamer11/delegate` (its own installer). They split out on
 ### Issue tracker
 
 Local markdown: tickets in `.scratch/<effort>/issues/`, specs in
-`docs/superpowers/specs/`. See `docs/agents/issue-tracker.md`.
+`docs/superpowers/specs/` (none yet). See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

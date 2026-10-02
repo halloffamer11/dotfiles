@@ -3,9 +3,9 @@
 # Usage:
 #   make bootstrap   # fresh machine: brew packages + reconciled config/skills + audiotee/mictee builds + delegate
 #   make brew        # install/verify Brewfile packages only
-#   make apply       # reconcile configs, agent links, and declared skills
+#   make apply       # reconcile configs, agent links, declared skills, and the delegate install
 #   make configs     # restow home-target config packages only
-#   make skills      # brew-provided skill links + per-file agent links
+#   make skills      # drop stale authored-skill links + brew-provided skill links + per-file agent links
 #   make externals   # ensure declared skills (personal and third-party) are installed at current upstream
 #   make external-updates  # update only the skills declared by this repo
 #   make delegate    # clone halloffamer11/delegate into DELEGATE_DIR if absent, then run its `make install`
@@ -45,7 +45,7 @@ brew:
 	brew bundle --file=$(CURDIR)/Brewfile
 	@for f in $(EXTRA_BREWFILES); do brew bundle --file=$$f; done
 
-apply: configs skills externals
+apply: configs skills externals delegate
 
 configs:
 	stow -d $(CURDIR)/stow -t $(HOME) -R $(CONFIG_PACKAGES)
@@ -58,6 +58,11 @@ configs:
 	@if command -v hyprctl >/dev/null 2>&1; then hyprctl reload >/dev/null; fi
 
 skills:
+	@# Before 2026-10-01 this repo stowed its own skills into the harness skill dirs. After a
+	@# pull those links dangle, and the skills CLI or delegate's installer replaces them.
+	@for t in $(HOME)/.claude/skills $(HOME)/.agents/skills $(HOME)/.kiro/skills; do for l in $$t/*; do \
+		if [ -L "$$l" ] && [ ! -e "$$l" ]; then case "$$(readlink "$$l")" in */dotfiles/agents/skills/*) rm "$$l" && echo "removed stale link $$l";; esac; fi; \
+	done; done
 	ln -sfn "$$(brew --prefix hunk)/libexec/skills/hunk-review" $(HOME)/.claude/skills/hunk-review
 	@[ -L $(HOME)/.claude/agents ] && rm $(HOME)/.claude/agents || true
 	mkdir -p $(HOME)/.claude/agents && (cd $(CURDIR)/agents && stow -t $(HOME)/.claude/agents -R agents)

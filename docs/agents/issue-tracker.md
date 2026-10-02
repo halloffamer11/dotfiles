@@ -1,7 +1,7 @@
 # Issue tracker: Local Markdown
 
 Tickets for this repo are markdown files under `.scratch/`. Specs are under
-`docs/superpowers/specs/`. The GitHub repo is public and has no issues: do not
+`docs/superpowers/specs/` (none yet: the first spec creates the directory). The GitHub repo is public and has no issues: do not
 create issues there.
 
 ## Conventions
