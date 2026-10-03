@@ -43,6 +43,9 @@ brew "duti"
 tap "FelixKratz/formulae", trusted: true # JankyBorders lives in the author's personal tap
 brew "borders", restart_service: :changed # focused-window highlight; config: stow/borders
 
+# Agent CLIs
+cask "kiro-cli"   # Kiro headless (`kiro-cli chat --no-interactive`); delegate's kiro harness; KIRO_API_KEY stays machine-local
+
 # Security and Passwords
 cask "bitwarden"
 
