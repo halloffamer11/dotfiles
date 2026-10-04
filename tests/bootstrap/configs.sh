@@ -9,6 +9,10 @@ links_into_repo() {  # every managed link under $1 resolves into the repo
   done
 }
 
+# Each path on stdin with its link target. A read loop, not xargs -I: BSD xargs
+# refuses a replacement line over 255 bytes, which macOS temp paths reach.
+links() { while IFS= read -r p; do printf '%s %s\n' "$p" "$(readlink "$p")"; done; }
+
 for profile in macos omarchy linux; do
   h=$(fresh_home)
   plan=$(make -s -C "$REPO" configs-plan PROFILE=$profile HOME="$h" 2>&1)
@@ -35,9 +39,9 @@ for profile in macos omarchy linux; do
         test ! -e "$h/.hammerspoon" -a ! -e "$h/.config/borders" -a ! -e "$h/.config/hypr" -a ! -e "$h/.bashrc" -a ! -e "$h/.zshrc"
       check "linux: the packages left out are named" has "$out" "^not selected for linux: .*hypr" ;;
   esac
-  before=$(find "$h" | sort | xargs -I{} sh -c 'printf "%s %s\n" "{}" "$(readlink "{}")"')
+  before=$(find "$h" | sort | links)
   make -s -C "$REPO" configs PROFILE=$profile HOME="$h" >/dev/null 2>&1 || bad "$profile: rerun"
-  after=$(find "$h" | sort | xargs -I{} sh -c 'printf "%s %s\n" "{}" "$(readlink "{}")"')
+  after=$(find "$h" | sort | links)
   check "$profile: a rerun changes nothing" [ "$before" = "$after" ]
   rm -rf "$h"
 done
