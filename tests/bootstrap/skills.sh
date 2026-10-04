@@ -11,6 +11,8 @@ echo "$*" >> "$STUB_LOG"
 STUB
 chmod +x "$stubs/npx"
 BASE_PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -v -e homebrew -e linuxbrew | paste -sd: -)
+# Homebrew leaves the PATH, but its stow stays: on a Mac that is the only stow.
+ln -s "$(command -v stow)" "$stubs/stow"
 
 run() {  # run HOME PATH: make skills externals, output on stdout
   STUB_LOG="$1/npx.log" HOME="$1" PATH="$2" make -s -C "$REPO" skills externals HOME="$1" 2>&1
