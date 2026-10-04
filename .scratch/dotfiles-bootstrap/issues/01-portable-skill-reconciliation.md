@@ -7,7 +7,7 @@ Homebrew-provided skill a prerequisite for the whole operation.
 
 **Blocked by:** None (can start immediately).
 
-**Status:** built 2026-10-04, waiting on Orin's merge of the PR. Since the
+**Status:** built 2026-10-04, waiting on the user's merge of the PR. Since the
 2026-10-01 split this repository owns no skills: the personal ones come from
 `halloffamer11/skills` through the skills CLI like Herdr and Humanizer, and
 delegate has its own installer, so "repository-owned skills" now means the

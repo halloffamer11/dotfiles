@@ -112,7 +112,7 @@ ifeq ($(PROFILE),macos)
 		echo "ERROR: ~/.hammerspoon is a real directory (Hammerspoon launched before configs?) — move it aside first"; exit 1; fi
 	ln -sfn $(CURDIR)/stow/hammerspoon/.hammerspoon $(HOME)/.hammerspoon
 endif
-	@# ~/.claude/CLAUDE.md is Orin's global steering file, kept in references/. A real
+	@# ~/.claude/CLAUDE.md is the user's global steering file, kept in references/. A real
 	@# file there is someone's data: stop rather than replace it.
 	@if [ -e $(HOME)/.claude/CLAUDE.md ] && [ ! -L $(HOME)/.claude/CLAUDE.md ]; then \
 		echo "ERROR: ~/.claude/CLAUDE.md is a real file — diff it against references/CLAUDE.md, then move it aside"; exit 1; fi
