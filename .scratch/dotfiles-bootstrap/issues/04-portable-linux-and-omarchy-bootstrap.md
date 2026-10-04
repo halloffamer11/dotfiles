@@ -8,18 +8,19 @@ without claiming to provision every distribution's system packages.
 **Blocked by:** 01 Portable skill reconciliation; 02 Platform-safe configuration
 profiles.
 
-**Status:** ready-for-agent
+**Status:** built 2026-10-04, waiting on Orin's merge of the PR and a first
+real run on omarchy (`make bootstrap`, which now detects the omarchy profile).
 
-- [ ] Bootstrap checks for Git, Make, GNU Stow, Node.js, and npm before changing
+- [x] Bootstrap checks for Git, Make, GNU Stow, Node.js, and npm before changing
       the home directory, and names the missing prerequisites without prescribing
-      an unverified distribution command.
-- [ ] Omarchy bootstrap reconciles the Omarchy profile, repository-owned skills,
+      an unverified distribution command (`make preflight`).
+- [x] Omarchy bootstrap reconciles the Omarchy profile, repository-owned skills,
       Claude agents, and the declared external skills.
-- [ ] Generic-Linux bootstrap reconciles the common profile and the same skill
+- [x] Generic-Linux bootstrap reconciles the common profile and the same skill
       layer without selecting Omarchy-specific configuration.
-- [ ] Neither Linux profile invokes macOS casks, Borders, Hammerspoon, Swift audio
+- [x] Neither Linux profile invokes macOS casks, Borders, Hammerspoon, Swift audio
       builds, or any other macOS-only operation.
-- [ ] The result states that Linux system-package installation remains owned by
+- [x] The result states that Linux system-package installation remains owned by
       the distribution or the operator.
-- [ ] Automated isolated-home checks prove both Linux profiles and idempotent
-      reruns.
+- [x] Automated isolated-home checks prove both Linux profiles and idempotent
+      reruns (`tests/bootstrap/bootstrap.sh`).

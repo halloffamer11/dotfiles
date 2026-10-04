@@ -1,7 +1,8 @@
 # ~/dotfiles/Makefile — machine provisioning entry points.
 #
 # Usage:
-#   make bootstrap   # fresh machine: brew packages + reconciled config/skills + audiotee/mictee builds + delegate
+#   make bootstrap   # fresh machine. macOS: brew packages + config/skills + audiotee/mictee + delegate.
+#                    # Linux (omarchy, linux): config/skills + delegate; system packages stay the distro's.
 #   make brew        # install/verify Brewfile packages only
 #   make apply       # reconcile configs, agent links, declared skills, and the delegate install
 #   make configs     # restow the profile's config packages and link ~/.claude/CLAUDE.md
@@ -67,9 +68,33 @@ DELEGATE_DIR ?= $(HOME)/projects/delegate
 EXTRA_BREWFILES ?=
 SKILLS_CLI = DISABLE_TELEMETRY=1 npx -y skills@latest
 
-.PHONY: bootstrap brew apply configs configs-plan skills externals external-updates update delegate audiotee mictee test-recorder test-bootstrap
+.PHONY: bootstrap preflight conflicts brew apply configs configs-plan skills externals external-updates update delegate audiotee mictee test-recorder test-bootstrap
 
-bootstrap: brew apply audiotee mictee delegate
+# Prerequisites run left to right. Each profile first checks what it cannot do without, so
+# a machine missing one stops before anything in the home directory changes; existing
+# files in the way stop it next, with what to do, since stow never adopts or overwrites.
+ifeq ($(PROFILE),macos)
+bootstrap: preflight brew conflicts apply audiotee mictee
+else
+bootstrap: preflight conflicts apply
+	@echo "note: Linux system packages (git, make, stow, node, npm, the tools the configs call) are the distribution's or yours; bootstrap installs none."
+endif
+
+LINUX_NEEDS := git make stow node npm
+preflight:
+ifeq ($(PROFILE),macos)
+	@command -v brew >/dev/null 2>&1 || { echo "ERROR: Homebrew is missing. Install it from https://brew.sh (after xcode-select --install), then run make bootstrap again."; exit 1; }
+else
+	@missing=""; for c in $(LINUX_NEEDS); do command -v $$c >/dev/null 2>&1 || missing="$$missing $$c"; done; \
+	if [ -n "$$missing" ]; then echo "ERROR: missing:$$missing. Install them with your distribution's package manager, then run make bootstrap again."; exit 1; fi
+endif
+
+conflicts:
+	@# A plain `make`, not $(MAKE): `make -n bootstrap` then prints this check instead of running it.
+	@plan="$$(MAKEFLAGS= make -s --no-print-directory -C $(CURDIR) configs-plan PROFILE=$(PROFILE) HOME=$(HOME) CONFIG_PACKAGES='$(CONFIG_PACKAGES)')"; \
+	found="$$(printf '%s\n' "$$plan" | grep -E 'CONFLICT|existing target' || true)"; \
+	if [ -n "$$found" ]; then printf '%s\n' "$$found"; \
+		echo "ERROR: files already at these paths would be replaced. Compare each with the repo's copy, keep what you need, move it aside (mv FILE FILE.pre-dotfiles), then run make bootstrap again."; exit 1; fi
 
 brew:
 	brew bundle --file=$(CURDIR)/Brewfile
