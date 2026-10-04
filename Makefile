@@ -12,7 +12,8 @@
 #   make externals   # ensure declared skills (personal and third-party) are installed at current upstream
 #   make external-updates  # update only the skills declared by this repo
 #   make delegate    # clone halloffamer11/delegate into DELEGATE_DIR if absent, then run its `make install`
-#   make update      # verify Brewfile packages and update declared skills
+#   make update      # macOS: Brewfile packages + declared skills; Linux: declared skills only
+#   make doctor      # read-only diagnosis: profile, prerequisites, conflicts, broken links, skills
 #   make audiotee    # build the audiotee system-audio capture binary into ~/.local/bin (Swift 5.9+, macOS 14.2+)
 #   make mictee      # build the mictee mic capture binary into ~/.local/bin (Swift)
 #   make test-recorder  # regression harness for the record-meeting rig
@@ -68,7 +69,7 @@ DELEGATE_DIR ?= $(HOME)/projects/delegate
 EXTRA_BREWFILES ?=
 SKILLS_CLI = DISABLE_TELEMETRY=1 npx -y skills@latest
 
-.PHONY: bootstrap preflight conflicts brew apply configs configs-plan skills externals external-updates update delegate audiotee mictee test-recorder test-bootstrap
+.PHONY: bootstrap preflight conflicts doctor brew apply configs configs-plan skills externals external-updates update delegate audiotee mictee test-recorder test-bootstrap
 
 # Prerequisites run left to right. Each profile first checks what it cannot do without, so
 # a machine missing one stops before anything in the home directory changes; existing
@@ -130,9 +131,11 @@ configs-plan:
 	@stow -n -v -d $(CURDIR)/stow -t $(HOME) -R $(CONFIG_PACKAGES) 2>&1 | grep -v '^WARNING: in simulation mode' || true
 ifeq ($(PROFILE),macos)
 	@if [ -e $(HOME)/.hammerspoon ] && [ ! -L $(HOME)/.hammerspoon ]; then echo "CONFLICT: ~/.hammerspoon is a real directory"; \
+		elif [ "$$(readlink $(HOME)/.hammerspoon)" = $(CURDIR)/stow/hammerspoon/.hammerspoon ]; then echo "in place: .hammerspoon"; \
 		else echo "LINK: .hammerspoon => $(CURDIR)/stow/hammerspoon/.hammerspoon"; fi
 endif
 	@if [ -e $(HOME)/.claude/CLAUDE.md ] && [ ! -L $(HOME)/.claude/CLAUDE.md ]; then echo "CONFLICT: ~/.claude/CLAUDE.md is a real file"; \
+		elif [ "$$(readlink $(HOME)/.claude/CLAUDE.md)" = $(CURDIR)/references/CLAUDE.md ]; then echo "in place: .claude/CLAUDE.md"; \
 		else echo "LINK: .claude/CLAUDE.md => $(CURDIR)/references/CLAUDE.md"; fi
 
 skills:
@@ -157,7 +160,19 @@ externals:
 external-updates:
 	$(SKILLS_CLI) update -g -y herdr humanizer $(PERSONAL_SKILLS)
 
+# Linux packages belong to the distribution, so update touches only the skills there.
+ifeq ($(PROFILE),macos)
 update: brew external-updates
+else
+update: external-updates
+	@echo "note: system packages are not updated on $(PROFILE); use the distribution's tools."
+endif
+
+# Writes nothing. Exits non-zero when it prints an ACTION line.
+doctor:
+	@PLAN="$$(MAKEFLAGS= make -s --no-print-directory -C $(CURDIR) configs-plan PROFILE=$(PROFILE) HOME=$(HOME) CONFIG_PACKAGES='$(CONFIG_PACKAGES)' 2>&1)" \
+	REPO=$(CURDIR) PROFILE=$(PROFILE) HOME=$(HOME) SKILLS="herdr humanizer $(PERSONAL_SKILLS)" \
+	NEEDS="$(if $(filter macos,$(PROFILE)),brew git make stow node npm,$(LINUX_NEEDS))" sh $(CURDIR)/scripts/doctor.sh
 
 delegate:
 	@[ -d $(DELEGATE_DIR)/.git ] || git clone https://github.com/halloffamer11/delegate.git $(DELEGATE_DIR)

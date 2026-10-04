@@ -8,6 +8,8 @@ skills CLI) and `halloffamer11/delegate` (its own installer). They split out on
 ## Start here
 
 - Read `Makefile` before changing installation or stow behavior.
+- `docs/bootstrap.md` is the operator guide (profiles, fresh machine, maintenance);
+  `make test-bootstrap` checks it in isolated homes.
 - Skills are declared in the Makefile (`externals`), not stored here. To change a
   personal skill, edit `halloffamer11/skills`, push, then `make external-updates`.
 - Delegate work happens in `~/projects/delegate` (`make delegate` clones and installs

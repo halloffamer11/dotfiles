@@ -1,0 +1,69 @@
+# Bootstrap and maintenance
+
+One clone, one command. `make` picks a profile from the machine: `macos` on Darwin,
+`omarchy` where `/usr/share/omarchy` or `~/.local/share/omarchy` exists, otherwise
+`linux`. To choose a profile yourself, pass `make PROFILE=linux <target>` or put
+`PROFILE = linux` in `local.mk`. A `CONFIG_PACKAGES` line in `local.mk` still
+overrides the profile's package list.
+
+Before any change, `make configs-plan` shows the profile, the links it would make and
+the files in their way. It writes nothing.
+
+## macOS
+
+Run these from your home directory on a new Mac:
+
+1. `xcode-select --install`
+2. Install Homebrew from https://brew.sh
+3. `git clone https://github.com/halloffamer11/dotfiles.git ~/dotfiles`
+4. `make -C ~/dotfiles bootstrap`
+
+Bootstrap stops before it changes anything if Homebrew is missing. After `brew bundle`,
+it stops if a real file sits where a link belongs. Compare that file with the repo's
+copy, move it aside (`mv ~/.zshrc ~/.zshrc.pre-dotfiles`), and run bootstrap again.
+
+You still do these by hand, because no command can:
+
+- Remap Caps Lock to Control (System Settings, Keyboard, Modifier Keys).
+- Create `~/.gitconfig.local` with this machine's git identity, and `~/.zshrc.local`
+  for anything that belongs to this machine only.
+- Run `codex login`, then `make -C ~/projects/delegate delegate-codex-home`. Bootstrap
+  reminds you if you skip it.
+- Run `gh auth login`.
+- For the meeting recorder, grant Screen & System Audio Recording and Microphone to
+  both the terminal and Hammerspoon (Privacy & Security). Without the grant, macOS
+  records silence and reports no error.
+- Delegate's catalog: `make -C ~/projects/delegate delegate-wizard`.
+
+## Omarchy
+
+Bootstrap installs no system packages. Install git, make, stow, node and npm with
+pacman first; bootstrap names any that are missing.
+
+1. `git clone https://github.com/halloffamer11/dotfiles.git ~/dotfiles`
+2. `make -C ~/dotfiles bootstrap`
+
+This links the common configuration plus Bash, Ghostty, Herdr, Hyprland and Voxtype,
+installs the declared skills and the Claude agents, and installs delegate. The by-hand
+list is the macOS one, minus Homebrew, Hammerspoon and the recording grants.
+
+## Generic Linux
+
+The steps are the Omarchy ones. Only the portable layer is linked (claude, git, nvim,
+starship, yazi), and the result names the packages it left out. The tools those
+configs call (neovim, starship, yazi and the rest) come from your distribution.
+
+## Maintenance
+
+Run these from any directory, the same on every profile:
+
+- `dots`, a shell alias in zsh and bash. It pulls `~/dotfiles`, then runs `make apply`,
+  which relinks the configuration, refreshes the declared skills from upstream and
+  reinstalls delegate.
+- `make -C ~/dotfiles update`. On macOS it reconciles the Brewfile and updates the
+  declared skills. On Linux it updates the skills only.
+- `make -C ~/dotfiles doctor`. It is read only and reports the profile, missing
+  prerequisites, files in the way, links not in place yet, broken links into the repo,
+  and declared skills that are missing. It exits non-zero when a line says `ACTION`.
+- `make -C ~/dotfiles test-bootstrap` runs the isolated-home checks for every profile.
+  It needs GNU Stow and never touches your own home.
