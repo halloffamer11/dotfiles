@@ -1,0 +1,20 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test-bootstrap:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stow
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then brew install stow; else sudo apt-get update && sudo apt-get install -y stow; fi
+      - run: make test-bootstrap
