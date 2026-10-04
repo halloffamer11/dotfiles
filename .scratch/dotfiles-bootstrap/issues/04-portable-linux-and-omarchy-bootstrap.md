@@ -8,14 +8,14 @@ without claiming to provision every distribution's system packages.
 **Blocked by:** 01 Portable skill reconciliation; 02 Platform-safe configuration
 profiles.
 
-**Status:** built 2026-10-04, waiting on the user's merge of the PR and a first
+**Status:** built and merged 2026-10-04; waiting on a first
 real run on omarchy (`make bootstrap`, which now detects the omarchy profile).
 
 - [x] Bootstrap checks for Git, Make, GNU Stow, Node.js, and npm before changing
       the home directory, and names the missing prerequisites without prescribing
       an unverified distribution command (`make preflight`).
-- [x] Omarchy bootstrap reconciles the Omarchy profile, repository-owned skills,
-      Claude agents, and the declared external skills.
+- [x] Omarchy bootstrap reconciles the Omarchy profile, the Claude agents, and
+      the declared skills.
 - [x] Generic-Linux bootstrap reconciles the common profile and the same skill
       layer without selecting Omarchy-specific configuration.
 - [x] Neither Linux profile invokes macOS casks, Borders, Hammerspoon, Swift audio

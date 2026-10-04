@@ -8,7 +8,7 @@ Codex home.
 **Blocked by:** 01 Portable skill reconciliation; 02 Platform-safe configuration
 profiles.
 
-**Status:** built 2026-10-04, waiting on the user's merge of the PR and a first
+**Status:** built and merged 2026-10-04; waiting on a first
 real run on a fresh Mac (or a new macOS user account), which no container can
 stand in for.
 

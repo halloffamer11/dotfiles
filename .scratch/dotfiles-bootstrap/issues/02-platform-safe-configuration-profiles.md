@@ -7,7 +7,7 @@ profile override for machines that cannot be identified automatically.
 
 **Blocked by:** None (can start immediately).
 
-**Status:** built 2026-10-04, waiting on the user's merge of the PR and one check
+**Status:** built and merged 2026-10-04; waiting on one check
 on omarchy: if its `local.mk` sets `CONFIG_PACKAGES`, that list still wins over
 the profile; delete the line to let the omarchy profile choose.
 
