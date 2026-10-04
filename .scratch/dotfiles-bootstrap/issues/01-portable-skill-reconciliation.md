@@ -1,19 +1,17 @@
 # 01: Portable skill reconciliation
 
 **What to build:** One supported skill reconciliation operation works on macOS
-and Linux. It installs the skills owned by this repository, the Claude agents,
-and the declared external Herdr and Humanizer skills without making an optional
-Homebrew-provided skill a prerequisite for the whole operation.
+and Linux. It installs the Claude agents and the declared skills (the personal
+ones from `halloffamer11/skills`, plus Herdr and Humanizer) without making an
+optional Homebrew-provided skill a prerequisite for the whole operation. This
+repository owns no skills since the 2026-10-01 split, and delegate has its own
+installer.
 
 **Blocked by:** None (can start immediately).
 
-**Status:** built 2026-10-04, waiting on the user's merge of the PR. Since the
-2026-10-01 split this repository owns no skills: the personal ones come from
-`halloffamer11/skills` through the skills CLI like Herdr and Humanizer, and
-delegate has its own installer, so "repository-owned skills" now means the
-Claude agents and the declared skill set.
+**Status:** built and merged 2026-10-04.
 
-- [x] One command reconciles repository-owned skills and Claude agents into the
+- [x] One command reconciles the declared skills and Claude agents into the
       supported harness locations on macOS and Linux: `make skills externals`
       (both are in `make apply`).
 - [x] Herdr and Humanizer are installed or refreshed from their declared upstream
