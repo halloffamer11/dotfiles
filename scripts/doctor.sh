@@ -27,12 +27,12 @@ pending=$(printf '%s\n' "$PLAN" | awk '/^UNLINK: /{u[$2]=1} /^LINK: /{l[$2]=1} E
 
 # A managed link is one that points into this checkout; a dangling one is a
 # file the repo no longer has (or moved).
-broken=$(for d in "$HOME" "$HOME/.config" "$HOME/.claude" "$HOME/.claude/agents" "$HOME/.claude/skills"; do
-  [ -d "$d" ] || continue
-  find "$d" -maxdepth 4 -type l 2>/dev/null | while read -r l; do
+# Home's own top level only (it holds ~/Library on a Mac); the config trees in full.
+broken=$( { find "$HOME" -maxdepth 1 -type l 2>/dev/null
+            for d in "$HOME/.config" "$HOME/.claude" "$HOME/.agents"; do
+              [ -d "$d" ] && find "$d" -maxdepth 4 -type l 2>/dev/null; done; } | while read -r l; do
     case "$(readlink "$l")" in *"$REPO"/*|*dotfiles/*) [ -e "$l" ] || echo "$l";; esac
-  done
-done | sort -u)
+  done | sort -u)
 if [ -n "$broken" ]; then
   act "broken links into the repo (make apply removes the stale skill ones; delete the rest):"
   printf '%s\n' "$broken" | sed 's/^/  /'
