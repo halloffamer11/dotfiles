@@ -31,7 +31,7 @@ pending=$(printf '%s\n' "$PLAN" | awk '/^UNLINK: /{u[$2]=1} /^LINK: /{l[$2]=1} E
 broken=$( { find "$HOME" -maxdepth 1 -type l 2>/dev/null
             for d in "$HOME/.config" "$HOME/.claude" "$HOME/.agents"; do
               [ -d "$d" ] && find "$d" -maxdepth 4 -type l 2>/dev/null; done; } | while read -r l; do
-    case "$(readlink "$l")" in *"$REPO"/*|*dotfiles/*) [ -e "$l" ] || echo "$l";; esac
+    case "$(readlink "$l")" in (*"$REPO"/*|*dotfiles/*) [ -e "$l" ] || echo "$l";; esac
   done | sort -u)
 if [ -n "$broken" ]; then
   act "broken links into the repo (make apply removes the stale skill ones; delete the rest):"
