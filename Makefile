@@ -4,7 +4,8 @@
 #   make bootstrap   # fresh machine: brew packages + reconciled config/skills + audiotee/mictee builds + delegate
 #   make brew        # install/verify Brewfile packages only
 #   make apply       # reconcile configs, agent links, declared skills, and the delegate install
-#   make configs     # restow home-target config packages and link ~/.claude/CLAUDE.md
+#   make configs     # restow the profile's config packages and link ~/.claude/CLAUDE.md
+#   make configs-plan  # dry run of configs: the profile, its links and any conflicts; writes nothing
 #   make test-bootstrap  # isolated-home checks of configs and skills (needs stow and make)
 #   make skills      # drop stale authored-skill links + brew-provided skill links + per-file agent links
 #   make externals   # ensure declared skills (personal and third-party) are installed at current upstream
@@ -16,7 +17,11 @@
 #   make test-recorder  # regression harness for the record-meeting rig
 #
 # Editing:
-#   - CONFIG_PACKAGES: config packages under stow/, targeted at ~
+#   - PROFILE: macos, omarchy or linux, detected (Darwin; Omarchy's /usr/share/omarchy or
+#     ~/.local/share/omarchy; any other Linux). Override with `make PROFILE=linux ...` or a
+#     PROFILE line in local.mk.
+#   - CONFIG_PACKAGES: config packages under stow/, targeted at ~. Each profile is
+#     COMMON_PACKAGES plus its own list; setting CONFIG_PACKAGES (local.mk) replaces the lot.
 #   - hammerspoon is NOT in CONFIG_PACKAGES: .stowrc sets --no-folding, but Hammerspoon
 #     needs ~/.hammerspoon to be ONE whole-directory symlink (per-file links break
 #     hs.configdir and the pathwatcher auto-reload — upstream issue #830), so `configs`
@@ -31,14 +36,38 @@
 #   - Idempotency lives in the tools: `brew bundle` no-ops when satisfied; `stow -R` re-syncs
 -include local.mk
 
-CONFIG_PACKAGES ?= borders claude ghostty git herdr nvim starship wezterm yazi zsh
+# The configuration every profile takes: nothing in it needs macOS or Omarchy.
+COMMON_PACKAGES := claude git nvim starship yazi
+MACOS_PACKAGES := borders ghostty herdr wezterm zsh
+OMARCHY_PACKAGES := bash ghostty herdr hypr voxtype
+LINUX_PACKAGES :=
+ifeq ($(shell uname -s),Darwin)
+DETECTED_PROFILE := macos
+else ifneq ($(wildcard /usr/share/omarchy $(HOME)/.local/share/omarchy),)
+DETECTED_PROFILE := omarchy
+else
+DETECTED_PROFILE := linux
+endif
+PROFILE ?= $(DETECTED_PROFILE)
+ifeq ($(PROFILE),macos)
+PROFILE_PACKAGES := $(MACOS_PACKAGES)
+else ifeq ($(PROFILE),omarchy)
+PROFILE_PACKAGES := $(OMARCHY_PACKAGES)
+else ifeq ($(PROFILE),linux)
+PROFILE_PACKAGES := $(LINUX_PACKAGES)
+else
+$(error PROFILE must be macos, omarchy or linux, not '$(PROFILE)')
+endif
+CONFIG_PACKAGES ?= $(sort $(COMMON_PACKAGES) $(PROFILE_PACKAGES))
+# Packages under stow/ this profile leaves out, named so a skipped one is a choice, not a surprise.
+UNSELECTED_PACKAGES = $(filter-out $(CONFIG_PACKAGES) hammerspoon,$(notdir $(wildcard $(CURDIR)/stow/*)))
 SKILL_AGENTS ?= claude-code codex kiro-cli
 PERSONAL_SKILLS ?= facebook-marketplace fresh-context toolsmith
 DELEGATE_DIR ?= $(HOME)/projects/delegate
 EXTRA_BREWFILES ?=
 SKILLS_CLI = DISABLE_TELEMETRY=1 npx -y skills@latest
 
-.PHONY: bootstrap brew apply configs skills externals external-updates update delegate audiotee mictee test-recorder test-bootstrap
+.PHONY: bootstrap brew apply configs configs-plan skills externals external-updates update delegate audiotee mictee test-recorder test-bootstrap
 
 bootstrap: brew apply audiotee mictee delegate
 
@@ -49,10 +78,14 @@ brew:
 apply: configs skills externals delegate
 
 configs:
+	@echo "profile: $(PROFILE)"
 	stow -d $(CURDIR)/stow -t $(HOME) -R $(CONFIG_PACKAGES)
+	@[ -z "$(strip $(UNSELECTED_PACKAGES))" ] || echo "not selected for $(PROFILE): $(strip $(UNSELECTED_PACKAGES))"
+ifeq ($(PROFILE),macos)
 	@if [ -d $(HOME)/.hammerspoon ] && [ ! -L $(HOME)/.hammerspoon ]; then \
 		echo "ERROR: ~/.hammerspoon is a real directory (Hammerspoon launched before configs?) — move it aside first"; exit 1; fi
 	ln -sfn $(CURDIR)/stow/hammerspoon/.hammerspoon $(HOME)/.hammerspoon
+endif
 	@# ~/.claude/CLAUDE.md is Orin's global steering file, kept in references/. A real
 	@# file there is someone's data: stop rather than replace it.
 	@if [ -e $(HOME)/.claude/CLAUDE.md ] && [ ! -L $(HOME)/.claude/CLAUDE.md ]; then \
@@ -62,6 +95,20 @@ configs:
 	@# window raises a persistent "config has errors" overlay that outlives
 	@# the restow. Reloading here clears it. No-op without hyprctl (macOS).
 	@if command -v hyprctl >/dev/null 2>&1; then hyprctl reload >/dev/null; fi
+
+# What `configs` would do, without doing it: stow's simulation lists each link it would
+# make and each existing file in the way, and the two hand-made links are checked the same way.
+configs-plan:
+	@echo "profile: $(PROFILE) (detected $(DETECTED_PROFILE))"
+	@echo "packages: $(CONFIG_PACKAGES)"
+	@[ -z "$(strip $(UNSELECTED_PACKAGES))" ] || echo "not selected: $(strip $(UNSELECTED_PACKAGES))"
+	@stow -n -v -d $(CURDIR)/stow -t $(HOME) -R $(CONFIG_PACKAGES) 2>&1 | grep -v '^WARNING: in simulation mode' || true
+ifeq ($(PROFILE),macos)
+	@if [ -e $(HOME)/.hammerspoon ] && [ ! -L $(HOME)/.hammerspoon ]; then echo "CONFLICT: ~/.hammerspoon is a real directory"; \
+		else echo "LINK: .hammerspoon => $(CURDIR)/stow/hammerspoon/.hammerspoon"; fi
+endif
+	@if [ -e $(HOME)/.claude/CLAUDE.md ] && [ ! -L $(HOME)/.claude/CLAUDE.md ]; then echo "CONFLICT: ~/.claude/CLAUDE.md is a real file"; \
+		else echo "LINK: .claude/CLAUDE.md => $(CURDIR)/references/CLAUDE.md"; fi
 
 skills:
 	@# Before 2026-10-01 this repo stowed its own skills into the harness skill dirs. After a
