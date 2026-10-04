@@ -5,6 +5,7 @@
 #   make brew        # install/verify Brewfile packages only
 #   make apply       # reconcile configs, agent links, declared skills, and the delegate install
 #   make configs     # restow home-target config packages and link ~/.claude/CLAUDE.md
+#   make test-bootstrap  # isolated-home checks of configs and skills (needs stow and make)
 #   make skills      # drop stale authored-skill links + brew-provided skill links + per-file agent links
 #   make externals   # ensure declared skills (personal and third-party) are installed at current upstream
 #   make external-updates  # update only the skills declared by this repo
@@ -37,7 +38,7 @@ DELEGATE_DIR ?= $(HOME)/projects/delegate
 EXTRA_BREWFILES ?=
 SKILLS_CLI = DISABLE_TELEMETRY=1 npx -y skills@latest
 
-.PHONY: bootstrap brew apply configs skills externals external-updates update delegate audiotee mictee test-recorder
+.PHONY: bootstrap brew apply configs skills externals external-updates update delegate audiotee mictee test-recorder test-bootstrap
 
 bootstrap: brew apply audiotee mictee delegate
 
@@ -68,7 +69,10 @@ skills:
 	@for t in $(HOME)/.claude/skills $(HOME)/.agents/skills $(HOME)/.kiro/skills; do for l in $$t/*; do \
 		if [ -L "$$l" ] && [ ! -e "$$l" ]; then case "$$(readlink "$$l")" in */dotfiles/agents/skills/*) rm "$$l" && echo "removed stale link $$l";; esac; fi; \
 	done; done
-	ln -sfn "$$(brew --prefix hunk)/libexec/skills/hunk-review" $(HOME)/.claude/skills/hunk-review
+	@# hunk-review ships inside Homebrew's hunk; without both, it is skipped and the rest goes on.
+	@hunk="$$(command -v brew >/dev/null 2>&1 && brew --prefix hunk 2>/dev/null)/libexec/skills/hunk-review"; \
+	if [ -d "$$hunk" ]; then mkdir -p $(HOME)/.claude/skills && ln -sfn "$$hunk" $(HOME)/.claude/skills/hunk-review && echo "linked hunk-review"; \
+	else echo "notice: Homebrew's hunk is not installed, so the optional hunk-review skill is skipped"; fi
 	@[ -L $(HOME)/.claude/agents ] && rm $(HOME)/.claude/agents || true
 	mkdir -p $(HOME)/.claude/agents && (cd $(CURDIR)/agents && stow -t $(HOME)/.claude/agents -R agents)
 
@@ -97,6 +101,9 @@ audiotee:
 mictee:
 	mkdir -p $(HOME)/.local/bin
 	swiftc -O -o $(HOME)/.local/bin/mictee $(CURDIR)/tools/mictee/mictee.swift
+
+test-bootstrap:
+	@for t in $(CURDIR)/tests/bootstrap/*.sh; do sh "$$t" || exit 1; done
 
 test-recorder:
 	python3 $(CURDIR)/tools/record-meeting-tests/harness.py
