@@ -15,7 +15,7 @@ skills CLI) and `halloffamer11/delegate` (its own installer). They split out on
 - Delegate work happens in `~/projects/delegate` (`make delegate` clones and installs
   it). The statusline, Hammerspoon and Herdr configs here call its installed scripts.
 - `tools/` holds machine tools; each tool directory owns its own `CLAUDE.md`.
-- `references/CLAUDE.md` is Orin's global `~/.claude/CLAUDE.md`; `make configs` links
+- `references/CLAUDE.md` is the user's global `~/.claude/CLAUDE.md`; `make configs` links
   it there. Edit it here. It is not an instruction for this repo.
 
 ## Where state lives
@@ -23,7 +23,7 @@ skills CLI) and `halloffamer11/delegate` (its own installer). They split out on
 - Bootstrap and maintenance: `.scratch/dotfiles-bootstrap/issues/`.
 - Next-generation layout (chezmoi and the rest): the planning repo
   `~/projects/dotfiles-refactor`.
-- A ticket's `**Status:**` line names each open box that waits on Orin.
+- A ticket's `**Status:**` line names each open box that waits on the user.
 - Settled decisions: `docs/adr/` (none yet). Do not reopen one.
 
 ## Standing rules

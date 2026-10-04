@@ -7,7 +7,7 @@ supported, and diagnose drift without changing the machine.
 
 **Blocked by:** 03 Fresh macOS bootstrap; 04 Portable Linux and Omarchy bootstrap.
 
-**Status:** built 2026-10-04, waiting on Orin's merge of the PR and one
+**Status:** built 2026-10-04, waiting on the user's merge of the PR and one
 `make doctor` on each machine.
 
 - [x] The `dots` workflow is available in the supported macOS and Omarchy shells

@@ -8,7 +8,7 @@ without claiming to provision every distribution's system packages.
 **Blocked by:** 01 Portable skill reconciliation; 02 Platform-safe configuration
 profiles.
 
-**Status:** built 2026-10-04, waiting on Orin's merge of the PR and a first
+**Status:** built 2026-10-04, waiting on the user's merge of the PR and a first
 real run on omarchy (`make bootstrap`, which now detects the omarchy profile).
 
 - [x] Bootstrap checks for Git, Make, GNU Stow, Node.js, and npm before changing
