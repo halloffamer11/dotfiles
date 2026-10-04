@@ -4,6 +4,7 @@ brew "stow"    # symlink manager — everything in Makefile's configs/skills tar
 brew "hunk"    # diff viewer; ships the hunk-review skill (linked by `make skills`)
 brew "herdr"   # agent multiplexer; installs its own agent-state hooks on first launch
 brew "jq"      # the Claude Code statusline (stow/claude) parses its stdin JSON with it
+brew "node"    # npx runs the skills CLI (`make externals`); npm comes with it
 cask "hammerspoon" # hotkey/menubar orchestrator for the record-meeting rig
 
 # Shell & prompt - .zshrc sources/evals all of these
