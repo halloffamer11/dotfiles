@@ -4,7 +4,17 @@
 # it reconciles. Every run here uses a throwaway HOME.
 . "$(dirname "$0")/lib.sh"
 
-live_before=$(ls -la "$HOME" "$HOME/.config" "$HOME/.claude" 2>/dev/null | md5sum)
+# What these targets would write in a live home: the managed links and the
+# skill dirs. Their targets, not the directories' mtimes, which a running
+# Claude or editor session changes on its own.
+live_state() {
+  for p in .zshrc .bashrc .gitconfig .hammerspoon .claude/CLAUDE.md .claude/statusline.sh \
+           .config/nvim .config/starship.toml .config/git/ignore; do
+    printf '%s %s\n' "$p" "$(readlink "$HOME/$p" 2>/dev/null || { [ -e "$HOME/$p" ] && echo real || echo absent; })"
+  done
+  ls "$HOME/.claude/agents" "$HOME/.claude/skills" "$HOME/.agents/skills" 2>/dev/null
+}
+live_before=$(live_state)
 
 for profile in macos omarchy linux; do
   h=$(fresh_home)
@@ -53,5 +63,5 @@ check "make apply refreshes the external skills (externals is in apply)" \
 check "the operator guide covers all three profiles" \
   sh -c 'for w in "## macOS" "## Omarchy" "## Generic Linux" "## Maintenance"; do grep -q "$w" "$1" || exit 1; done' _ "$REPO/docs/bootstrap.md"
 check "the runner's live home is untouched" \
-  [ "$live_before" = "$(ls -la "$HOME" "$HOME/.config" "$HOME/.claude" 2>/dev/null | md5sum)" ]
+  [ "$live_before" = "$(live_state)" ]
 finish
