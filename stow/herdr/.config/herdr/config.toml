@@ -75,4 +75,4 @@ type = "popup"
 # and .zshrc, and without them every Tier reads "no eligible lane".
 command = '''/bin/zsh -lic 'python3 "$HOME/.agents/skills/delegate/scripts/report.py" statusline --popup; printf "\nPress Enter to close"; read -r _''''
 width = "85%"
-height = "40%"
+height = "60%"
