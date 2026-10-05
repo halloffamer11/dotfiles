@@ -22,6 +22,8 @@ Run:  make test-meeting-notes    (--keep leaves the work folder for inspection)
 """
 import array, json, os, pathlib, platform, shutil, subprocess, sys, tempfile
 
+sys.dont_write_bytecode = True  # no __pycache__ under ~/.hammerspoon
+
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 CLI = ROOT / "stow/hammerspoon/.hammerspoon/bin/meeting-notes"
 ADAPTER = pathlib.Path.home() / ".local/bin/meeting-asr"
@@ -100,8 +102,8 @@ def words(text):
 
 def short_merge_case():
     """A 2 s third speaker joins the speaker with the most similar embedding."""
-    from importlib.machinery import SourceFileLoader
-    mn = SourceFileLoader("meeting_notes", str(CLI)).load_module()
+    sys.path.insert(0, str(CLI.parent.parent))
+    from meeting_notes import transcribe as mn
     a, b, c = [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.1, 0.9, 0.1]
     diar = [{"speaker": "A", "start": 0, "end": 6, "embedding": a}, {"speaker": "B", "start": 6, "end": 12, "embedding": b},
             {"speaker": "C", "start": 12, "end": 14, "embedding": c}]

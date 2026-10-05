@@ -1,0 +1,35 @@
+# Example ~/.config/meeting-notes/config.toml (machine-local; never commit the real one).
+# Every key is optional; these are the defaults unless noted. See
+# stow/hammerspoon/.hammerspoon/meeting_notes/common.py (DEFAULTS).
+
+[paths]
+recordings = "~/Recordings"
+adapter = "~/.local/bin/meeting-asr"
+
+[models]
+asr_dir = "~/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2-coreml"
+asr_version = "v2"
+models_root = "~/Library/Application Support/FluidAudio/Models"
+
+[transcribe]
+max_speakers = 0          # 0 = automatic; a matched meeting's invitees + 1 is used when 0
+min_speaker_s = 3.0
+echo_min_words = 3
+no_network = true         # meeting-asr runs in a no-network sandbox
+
+[match]
+source = "none"           # none | ics_file | ics_url (file:// only)
+path = ""                 # e.g. "~/Calendars/work.ics" for ics_file
+min_overlap = 0.5
+
+[notes]                   # off until endpoint and model are both set
+endpoint = ""             # loopback only, e.g. "http://127.0.0.1:11434"
+model = ""                # e.g. a model name the local server lists
+api = "ollama"            # ollama | openai
+chunk_chars = 12000
+
+[run]
+auto_run = false          # true: Hammerspoon runs the pipeline after each recording
+match = true
+transcribe = true
+notes = true

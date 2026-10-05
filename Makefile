@@ -19,7 +19,7 @@
 #   make mictee      # build the mictee mic capture binary into ~/.local/bin (Swift)
 #   make test-recorder  # regression harness for the record-meeting rig
 #   make meeting-notes  # build meeting-asr (FluidAudio 0.17.5 adapter) into ~/.local/bin; build dir outside the repo
-#   make test-meeting-notes  # offline transcribe test on a synthetic recording (macOS; skips without meeting-asr)
+#   make test-meeting-notes  # meeting-notes stages on synthetic recordings and a stub local LLM (model parts macOS only)
 #
 # Editing:
 #   - PROFILE: macos, omarchy or linux, detected (Darwin; Omarchy's /usr/share/omarchy or
@@ -213,6 +213,7 @@ test-bootstrap:
 
 test-meeting-notes:
 	python3 $(CURDIR)/tools/meeting-notes/tests/transcribe_test.py
+	python3 $(CURDIR)/tools/meeting-notes/tests/pipeline_test.py
 
 test-recorder:
 	python3 $(CURDIR)/tools/record-meeting-tests/finalize_test.py
