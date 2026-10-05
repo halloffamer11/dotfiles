@@ -18,6 +18,10 @@ package choices, credentials) goes in machine-local files that git ignores or th
 live outside the repo: `local.mk`, `~/.gitconfig.local` and `~/.zshrc.local`. Never
 commit them, and never name the site or machine in a commit, ticket or doc.
 
+`~/.gitconfig.local` is read last, so what it sets (the machine's git identity first)
+wins over the repo's defaults. `~/.zshrc.local` is sourced at the end of `.zshrc`, and
+`local.mk` is read before the Makefile sets its defaults.
+
 ## macOS
 
 Run these from your home directory on a new Mac:
@@ -42,7 +46,11 @@ You still do these by hand, because no command can:
 - For the meeting recorder, grant Screen & System Audio Recording and Microphone to
   both the terminal and Hammerspoon (Privacy & Security). Without the grant, macOS
   records silence and reports no error.
+- Delegate's relays: `sh ~/projects/delegate/agents/skills/delegate/scripts/ads.sh install`.
+  No make target runs it.
 - Delegate's catalog: `make -C ~/projects/delegate delegate-wizard`.
+
+`make -C ~/dotfiles doctor` then lists whatever is still missing.
 
 ## Omarchy
 
@@ -79,6 +87,18 @@ commit if it finds a secret. Then each hook runs the repository's own copy from
   these hooks. The `pre-commit` framework refuses to install while a global
   `core.hooksPath` is set.
 
+## Bring an existing machine up to date
+
+Nothing updates itself, and `make delegate` clones delegate only when it is absent; it
+never pulls. So pull both checkouts before you apply, delegate first, because
+`make apply` reinstalls it:
+
+1. `git -C ~/projects/delegate pull` (run `git status` there first and keep any local edits)
+2. `dots`
+3. `sh ~/projects/delegate/agents/skills/delegate/scripts/ads.sh install`, which a pull
+   needs when it moved the relay pin.
+4. `make -C ~/dotfiles doctor`, and fix each `ACTION` line it prints.
+
 ## Maintenance
 
 Run these from any directory, the same on every profile:
@@ -90,6 +110,9 @@ Run these from any directory, the same on every profile:
   declared skills. On Linux it updates the skills only.
 - `make -C ~/dotfiles doctor`. It is read only and reports the profile, missing
   prerequisites, files in the way, links not in place yet, broken links into the repo,
-  and declared skills that are missing. It exits non-zero when a line says `ACTION`.
+  declared skills that are missing, gitleaks, the delegate checkout, relays and catalog,
+  and a dotfiles or delegate checkout that is behind its upstream `main` (it asks the
+  remote; `make doctor DOCTOR_UPSTREAM=` skips that). It exits non-zero when a line
+  says `ACTION`.
 - `make -C ~/dotfiles test-bootstrap` runs the isolated-home checks for every profile.
   It needs GNU Stow and never touches your own home.
