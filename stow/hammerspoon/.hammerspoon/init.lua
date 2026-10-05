@@ -29,8 +29,12 @@ end
 local function onExit(exitCode, stdOut, stdErr)
 	stopUI()
 	recorder.task = nil
+	local dir = (stdOut or ""):gsub("%s+$", "")
 	if exitCode == 0 then
-		hs.alert.show("Saved: " .. (stdOut or ""):gsub("%s+$", ""))
+		hs.alert.show("Saved: " .. dir)
+	elseif exitCode == 3 then -- partial: one leg missing or cut short, see recording.json
+		hs.alert.show("Saved PARTIAL (a capture leg is missing): " .. dir)
+		print("record-meeting stderr: " .. (stdErr or ""))
 	else
 		hs.alert.show("Recording FAILED — open Hammerspoon console")
 		print("record-meeting stderr: " .. (stdErr or ""))

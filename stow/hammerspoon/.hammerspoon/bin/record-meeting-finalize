@@ -1,0 +1,310 @@
+#!/usr/bin/python3
+"""record-meeting-finalize — clock, watcher and mux helper for record-meeting.
+
+Subcommands (stdlib only; one clock everywhere: CLOCK_UPTIME_RAW nanoseconds,
+the same clock as mictee's host times):
+
+  now                 print the clock and the wall clock: "<mono_ns> <epoch_ns>"
+  watch FILE          wait until FILE has data; print "<mono_ns> <bytes>" at that
+                      moment (the system leg's first-data time; audiotee itself
+                      reports no timing)
+  finalize ...        turn the raw legs in --tmp into one recording directory:
+                        master.caf     48 kHz float, ch0 = mic, ch1 = system,
+                                       both legs on one timeline: start offsets
+                                       aligned, gaps and missing legs as silence
+                        listen.m4a     the listening mix, derived from master.caf
+                        recording.json format_version 1 (see build_meta)
+                      Exit 0 = recorded, 3 = partial (a leg is missing or ended
+                      early; files are written), 1 = failed (raw legs and logs
+                      stay in --tmp; recording.json says why).
+
+Raw legs in --tmp: system.raw (s16le) with system.first (watch output), and
+mic.raw (f32le) with mictee.log (mictee's timing lines). Both are 48 kHz mono.
+"""
+import argparse, datetime, json, os, re, subprocess, sys, time
+
+RATE = 48000
+FORMAT_VERSION = 1
+CHUNK = 1 << 20
+TRUNCATED_S = 2.0      # a leg that ends this much before the others counts as truncated
+FFMPEG = os.environ.get("RECORD_MEETING_FFMPEG", "/opt/homebrew/bin/ffmpeg")
+FFPROBE = os.path.join(os.path.dirname(FFMPEG), "ffprobe")
+LEGS = (  # (name, channel, raw file, bytes per sample, ffmpeg raw format)
+    ("mic", 0, "mic.raw", 4, "f32le"),
+    ("system", 1, "system.raw", 2, "s16le"),
+)
+
+
+def mono_ns():
+    return time.clock_gettime_ns(time.CLOCK_UPTIME_RAW)
+
+
+def cmd_now(_):
+    print(mono_ns(), time.time_ns())
+
+
+def cmd_watch(a):
+    parent = os.getppid()
+    while os.getppid() == parent:  # a hard-killed record-meeting must not leave this polling
+        try:
+            size = os.path.getsize(a.file)
+        except OSError:
+            size = 0
+        if size > 0:
+            print(mono_ns(), size, flush=True)
+            return
+        time.sleep(0.002)
+
+
+def iso(epoch_ns):
+    if epoch_ns is None:
+        return None
+    t = datetime.datetime.fromtimestamp(epoch_ns / 1e9, datetime.timezone.utc)
+    return t.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def read_mictee_log(path):
+    """First-sample time, gaps and last-sample time from mictee's stderr."""
+    first, last, gaps = None, None, []
+    try:
+        text = open(path, errors="replace").read()
+    except OSError:
+        return first, last, gaps
+    for line in text.splitlines():
+        m = re.search(r"first-sample host_ns=(\d+)", line)
+        if m:
+            first = int(m.group(1))
+        m = re.search(r"gap at_sample=(\d+) samples=(\d+)", line)
+        if m:
+            gaps.append({"at_sample": int(m.group(1)), "samples": int(m.group(2))})
+        m = re.search(r"last-sample host_ns=(\d+) samples=(\d+)", line)
+        if m:
+            last = {"host_ns": int(m.group(1)), "samples": int(m.group(2))}
+    return first, last, gaps
+
+
+def leg_info(a, name, raw, width):
+    """What is known about one leg before alignment."""
+    path = os.path.join(a.tmp, raw)
+    size = os.path.getsize(path) if os.path.exists(path) else 0
+    info = {"present": size > 0, "samples": size // width, "exit_status": None,
+            "first_sample_ns": None, "timing": None, "gaps": [], "drift_ppm": None}
+    info["exit_status"] = a.mic_rc if name == "mic" else a.sys_rc
+    if name == "mic":
+        first, last, gaps = read_mictee_log(os.path.join(a.tmp, "mictee.log"))
+        info["gaps"] = gaps
+        if first is not None:
+            info["first_sample_ns"], info["timing"] = first, "host-time"
+        if first is not None and last and last["samples"] > RATE:
+            span = (last["host_ns"] - first) / 1e9 * RATE
+            counted = last["samples"] + sum(g["samples"] for g in gaps)
+            info["drift_ppm"] = round((counted - span) / span * 1e6, 1)
+    else:
+        try:
+            ns, nbytes = (int(x) for x in open(os.path.join(a.tmp, "system.first")).read().split()[:2])
+            # The watcher saw the first write land; that write held nbytes of audio.
+            info["first_sample_ns"] = ns - int(nbytes // width / RATE * 1e9)
+            info["timing"] = "first-data-estimate"
+        except (OSError, ValueError):
+            pass
+    if info["present"] and info["first_sample_ns"] is None:
+        info["first_sample_ns"], info["timing"] = a.spawn_ns, "spawn-time-fallback"
+    return info
+
+
+def write_aligned(src, dst, width, offset, gaps, total):
+    """Copy one raw leg onto the shared timeline: offset samples of silence, the
+    leg's samples with each gap filled by silence, then silence (or a cut) to
+    exactly total samples. Byte-level, so it streams hours of audio."""
+    written = 0
+
+    def put(f, data):
+        nonlocal written
+        room = total - written
+        if room <= 0:
+            return
+        data = data[: room * width]
+        f.write(data)
+        written += len(data) // width
+
+    def silence(f, n):
+        while n > 0 and written < total:
+            k = min(n, CHUNK)
+            put(f, b"\0" * (k * width))
+            n -= k
+
+    with open(dst, "wb") as out:
+        silence(out, offset)
+        pos = 0
+        pending = sorted(gaps, key=lambda g: g["at_sample"])
+        if os.path.exists(src):
+            with open(src, "rb") as f:
+                while True:
+                    upto = pending[0]["at_sample"] if pending else None
+                    want = CHUNK if upto is None else min(CHUNK, upto - pos)
+                    if want > 0:
+                        data = f.read(want * width)
+                        if not data:
+                            break
+                        put(out, data)
+                        pos += len(data) // width
+                    if pending and pos >= pending[0]["at_sample"]:
+                        silence(out, pending.pop(0)["samples"])
+        silence(out, total - written)
+    return written
+
+
+def run(cmd, log):
+    with open(log, "ab") as f:
+        return subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=f).returncode == 0
+
+
+def probe(path):
+    r = subprocess.run([FFPROBE, "-v", "error", "-show_entries", "stream=channels,sample_rate:format=duration",
+                        "-of", "json", path], capture_output=True, text=True)
+    try:
+        j = json.loads(r.stdout)
+        s = j["streams"][0]
+        return int(s["channels"]), int(s["sample_rate"]), float(j["format"]["duration"])
+    except (ValueError, KeyError, IndexError):
+        return None
+
+
+def write_json(path, obj):
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(obj, f, indent=2)
+        f.write("\n")
+    os.replace(tmp, path)
+
+
+def cmd_finalize(a):
+    os.makedirs(a.out, mode=0o700, exist_ok=True)
+    legs = {name: leg_info(a, name, raw, width) for name, _, raw, width, _ in LEGS}
+    present = {n: l for n, l in legs.items() if l["present"]}
+    meta = {
+        "format_version": FORMAT_VERSION,
+        "id": a.id,
+        "layout": "mic-system-2ch",
+        "channels": {"0": "mic", "1": "system"},
+        "clock": "CLOCK_UPTIME_RAW",
+        "requested": {"start": iso(a.start_epoch_ns), "end": iso(a.stop_epoch_ns)},
+        "actual": {"start": None, "end": None, "duration_s": None},
+        "files": {"master": "master.caf", "listen": "listen.m4a"},
+        "legs": legs,
+        "state": "failed",
+        "problems": [],
+    }
+    meta_path = os.path.join(a.out, "recording.json")
+
+    if not present:
+        meta["problems"].append(f"both capture legs are empty; raw legs and logs kept in {a.tmp}")
+        write_json(meta_path, meta)
+        print(f"record-meeting: {meta['problems'][-1]}", file=sys.stderr)
+        return 1
+
+    # One timeline: t0 is the earliest first sample of a present leg.
+    t0 = min(l["first_sample_ns"] for l in present.values())
+    ends = {}
+    for name, l in present.items():
+        l["start_offset_s"] = round((l["first_sample_ns"] - t0) / 1e9, 4)
+        span = l["samples"] + sum(g["samples"] for g in l["gaps"])
+        ends[name] = l["first_sample_ns"] + int(span / RATE * 1e9)
+    end_ns = max(ends.values())
+    if a.stop_ns:
+        end_ns = min(end_ns, a.stop_ns)  # trim the laggard leg's after-stop tail
+    total = max(0, int(round((end_ns - t0) / 1e9 * RATE)))
+
+    state = "recorded"
+    for name, l in legs.items():
+        if not l["present"]:
+            state = "partial"
+            meta["problems"].append(f"{name} leg is empty; its channel is silence")
+        elif (end_ns - ends[name]) / 1e9 > TRUNCATED_S:
+            state = "partial"
+            l["truncated"] = True
+            meta["problems"].append(f"{name} leg ended {(end_ns - ends[name]) / 1e9:.1f} s early; padded with silence")
+
+    log = os.path.join(a.tmp, "finalize.log")
+    inputs = []
+    for name, ch, raw, width, fmt in LEGS:
+        l = legs[name]
+        dst = os.path.join(a.tmp, f"{name}.aligned")
+        offset = int(round(l.get("start_offset_s", 0) * RATE)) if l["present"] else total
+        write_aligned(os.path.join(a.tmp, raw), dst, width, offset, l["gaps"], total)
+        inputs += ["-f", fmt, "-ar", str(RATE), "-ac", "1", "-i", dst]
+
+    master = os.path.join(a.out, "master.caf")
+    listen = os.path.join(a.out, "listen.m4a")
+    ok = run([FFMPEG, "-hide_banner", "-nostdin", "-loglevel", "error", "-y", *inputs,
+              "-filter_complex", "[0:a][1:a]join=inputs=2:channel_layout=stereo:map=0.0-FL|1.0-FR[m]",
+              "-map", "[m]", "-c:a", "pcm_f32le", "-f", "caf", master + ".tmp"], log)
+    if ok:
+        os.replace(master + ".tmp", master)
+        # Listening mix: the current quality chain (+6 dB mic, limiter, 256k AAC).
+        # A missing leg is left out, not mixed in as silence, so the level holds.
+        mix = {
+            (True, True): "[0:a]channelsplit=channel_layout=stereo[m][s];[m]volume=6dB[mv];"
+                          "[s][mv]amix=inputs=2:duration=longest,alimiter=limit=0.97,aformat=channel_layouts=mono[o]",
+            (True, False): "[0:a]pan=mono|c0=c0,volume=6dB,alimiter=limit=0.97,aformat=channel_layouts=mono[o]",
+            (False, True): "[0:a]pan=mono|c0=c1,alimiter=limit=0.97,aformat=channel_layouts=mono[o]",
+        }[(legs["mic"]["present"], legs["system"]["present"])]
+        ok = run([FFMPEG, "-hide_banner", "-nostdin", "-loglevel", "error", "-y", "-i", master,
+                  "-filter_complex", mix, "-map", "[o]", "-c:a", "aac", "-b:a", "256k",
+                  "-f", "mp4", listen + ".tmp"], log)
+        if ok:
+            os.replace(listen + ".tmp", listen)
+
+    # Validate before anything raw is deleted.
+    expect_s = total / RATE
+    pm, pl = (probe(master), probe(listen)) if ok else (None, None)
+    if not ok:
+        meta["problems"].append(f"ffmpeg failed; see {log}")
+    elif not pm or pm[0] != 2 or pm[1] != RATE or abs(pm[2] - expect_s) > 0.05:
+        meta["problems"].append(f"master.caf failed validation: {pm} vs 2 ch, {RATE} Hz, {expect_s:.2f} s")
+    elif not pl or abs(pl[2] - expect_s) > 0.5:
+        meta["problems"].append(f"listen.m4a failed validation: {pl} vs {expect_s:.2f} s")
+    else:
+        meta["state"] = state
+        offset_ns = a.start_epoch_ns - a.start_mono_ns  # wall clock = mono + offset
+        meta["actual"] = {"start": iso(t0 + offset_ns), "end": iso(t0 + offset_ns + int(expect_s * 1e9)),
+                          "duration_s": round(expect_s, 3)}
+    for name in legs:
+        try:
+            os.remove(os.path.join(a.tmp, f"{name}.aligned"))
+        except OSError:
+            pass
+    write_json(meta_path, meta)
+    if meta["state"] == "failed":
+        print(f"record-meeting: {'; '.join(meta['problems'])}; raw legs and logs kept in {a.tmp}", file=sys.stderr)
+        return 1
+    for p in meta["problems"]:
+        print(f"record-meeting: warning: {p}", file=sys.stderr)
+    return 3 if meta["state"] == "partial" else 0
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("now").set_defaults(fn=cmd_now)
+    w = sub.add_parser("watch")
+    w.add_argument("file")
+    w.set_defaults(fn=cmd_watch)
+    f = sub.add_parser("finalize")
+    f.add_argument("--tmp", required=True)
+    f.add_argument("--out", required=True)
+    f.add_argument("--id", required=True)
+    f.add_argument("--start-mono-ns", type=int, required=True)
+    f.add_argument("--start-epoch-ns", type=int, required=True)
+    f.add_argument("--spawn-ns", type=int, required=True)
+    f.add_argument("--stop-ns", type=int, default=0)
+    f.add_argument("--stop-epoch-ns", type=int, default=None)
+    f.add_argument("--sys-rc", type=int, default=None)
+    f.add_argument("--mic-rc", type=int, default=None)
+    f.set_defaults(fn=cmd_finalize)
+    a = ap.parse_args()
+    sys.exit(a.fn(a) or 0)
+
+
+if __name__ == "__main__":
+    main()
