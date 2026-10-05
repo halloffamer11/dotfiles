@@ -46,8 +46,6 @@ You still do these by hand, because no command can:
 - For the meeting recorder, grant Screen & System Audio Recording and Microphone to
   both the terminal and Hammerspoon (Privacy & Security). Without the grant, macOS
   records silence and reports no error.
-- Delegate's relays: `sh ~/projects/delegate/agents/skills/delegate/scripts/ads.sh install`.
-  No make target runs it.
 - Delegate's catalog: `make -C ~/projects/delegate delegate-wizard`.
 
 `make -C ~/dotfiles doctor` then lists whatever is still missing.
@@ -89,23 +87,22 @@ commit if it finds a secret. Then each hook runs the repository's own copy from
 
 ## Bring an existing machine up to date
 
-Nothing updates itself, and `make delegate` clones delegate only when it is absent; it
-never pulls. So pull both checkouts before you apply, delegate first, because
-`make apply` reinstalls it:
+`dots` does it all: it pulls `~/dotfiles`, and `make apply` then pulls delegate
+(`make delegate` fast-forwards `~/projects/delegate` when it is on `main` with no local
+changes), reinstalls it, and fetches its relays at the pinned commit.
 
-1. `git -C ~/projects/delegate pull` (run `git status` there first and keep any local edits)
-2. `dots`
-3. `sh ~/projects/delegate/agents/skills/delegate/scripts/ads.sh install`, which a pull
-   needs when it moved the relay pin.
-4. `make -C ~/dotfiles doctor`, and fix each `ACTION` line it prints.
+1. `dots`
+2. `make -C ~/dotfiles doctor`, and fix each `ACTION` line it prints. A delegate
+   checkout on another branch or with local edits is not pulled; doctor reports it as
+   behind, and you pull it yourself.
 
 ## Maintenance
 
 Run these from any directory, the same on every profile:
 
 - `dots`, a shell alias in zsh and bash. It pulls `~/dotfiles`, then runs `make apply`,
-  which relinks the configuration, refreshes the declared skills from upstream and
-  reinstalls delegate.
+  which relinks the configuration, refreshes the declared skills from upstream, and
+  pulls and reinstalls delegate.
 - `make -C ~/dotfiles update`. On macOS it reconciles the Brewfile and updates the
   declared skills. On Linux it updates the skills only.
 - `make -C ~/dotfiles doctor`. It is read only and reports the profile, missing

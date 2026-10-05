@@ -11,7 +11,7 @@
 #   make skills      # drop stale authored-skill links + brew-provided skill links + per-file agent links
 #   make externals   # ensure declared skills (personal and third-party) are installed at current upstream
 #   make external-updates  # update only the skills declared by this repo
-#   make delegate    # clone halloffamer11/delegate into DELEGATE_DIR if absent, then run its `make install`
+#   make delegate    # clone halloffamer11/delegate into DELEGATE_DIR if absent (else pull a clean main), then run its `make install`
 #   make update      # macOS: Brewfile packages + declared skills; Linux: declared skills only
 #   make doctor      # read-only diagnosis: profile, prerequisites, conflicts, broken links, skills,
 #                    # gitleaks, delegate (checkout, relays, catalog) and checkouts behind upstream
@@ -178,8 +178,14 @@ doctor:
 	DELEGATE_DIR=$(DELEGATE_DIR) UPSTREAM="$(DOCTOR_UPSTREAM)" \
 	NEEDS="$(if $(filter macos,$(PROFILE)),brew git make stow node npm,$(LINUX_NEEDS))" sh $(CURDIR)/scripts/doctor.sh
 
+# Clones delegate when absent. A checkout that is on main with no local changes is
+# fast-forwarded first, so `dots` installs current delegate; any other checkout is
+# left as it is, with a notice. A failed pull (offline) installs what is there.
 delegate:
-	@[ -d $(DELEGATE_DIR)/.git ] || git clone https://github.com/halloffamer11/delegate.git $(DELEGATE_DIR)
+	@if [ ! -d $(DELEGATE_DIR)/.git ]; then git clone https://github.com/halloffamer11/delegate.git $(DELEGATE_DIR); \
+	elif [ "$$(git -C $(DELEGATE_DIR) symbolic-ref --short -q HEAD 2>/dev/null)" != main ]; then echo "notice: $(DELEGATE_DIR) is not on main, so it is not pulled"; \
+	elif [ -n "$$(git -C $(DELEGATE_DIR) status --porcelain 2>/dev/null)" ]; then echo "notice: $(DELEGATE_DIR) has local changes, so it is not pulled"; \
+	else git -C $(DELEGATE_DIR) pull -q --ff-only || echo "notice: could not pull $(DELEGATE_DIR); installing it as it is"; fi
 	$(MAKE) -C $(DELEGATE_DIR) install
 
 audiotee:
