@@ -92,6 +92,27 @@ out=$(DOCTOR_UPSTREAM=delegate PATH="$stub:$PATH" make -s -C "$REPO" doctor PROF
 check "doctor reports a delegate checkout behind upstream main" has "$out" "ACTION: delegate is behind upstream main: git -C $d pull"
 rm -rf "$h"
 
+# make delegate pulls a clean checkout on main, and leaves any other one alone.
+h=$(fresh_home); git init -q --bare "$h/upstream.git"
+git clone -q "$h/upstream.git" "$h/seed" 2>/dev/null
+printf 'install:\n\t@echo installed\n' > "$h/seed/Makefile"
+git -C "$h/seed" add Makefile; git -C "$h/seed" -c user.email=t@t -c user.name=t commit -q -m one
+git -C "$h/seed" push -q origin HEAD:refs/heads/main 2>/dev/null
+git clone -q -b main "$h/upstream.git" "$h/delegate" 2>/dev/null
+git -C "$h/seed" -c user.email=t@t -c user.name=t commit -q --allow-empty -m two
+git -C "$h/seed" push -q origin HEAD:refs/heads/main 2>/dev/null
+make -s -C "$REPO" delegate HOME="$h" DELEGATE_DIR="$h/delegate" >/dev/null 2>&1
+check "make delegate fast-forwards a clean checkout on main" \
+  [ "$(git -C "$h/delegate" rev-parse HEAD)" = "$(git -C "$h/seed" rev-parse HEAD)" ]
+git -C "$h/seed" -c user.email=t@t -c user.name=t commit -q --allow-empty -m three
+git -C "$h/seed" push -q origin HEAD:refs/heads/main 2>/dev/null
+echo edit > "$h/delegate/local.txt"
+out=$(make -s -C "$REPO" delegate HOME="$h" DELEGATE_DIR="$h/delegate" 2>&1)
+check "make delegate leaves a checkout with local changes unpulled and still installs" \
+  sh -c '[ "$1" != "$2" ] && printf "%s\n" "$3" | grep -q "has local changes" && printf "%s\n" "$3" | grep -q installed' _ \
+  "$(git -C "$h/delegate" rev-parse HEAD)" "$(git -C "$h/seed" rev-parse HEAD)" "$out"
+rm -rf "$h"
+
 h=$(fresh_home); mkdir -p "$h/.claude"; echo mine > "$h/.claude/CLAUDE.md"
 out=$(make -s -C "$REPO" doctor PROFILE=linux HOME="$h" 2>&1)
 check "doctor reports a file in the way of a managed link" has "$out" "CONFLICT: ~/.claude/CLAUDE.md"
