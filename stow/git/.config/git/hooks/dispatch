@@ -1,0 +1,31 @@
+#!/bin/sh
+# Global git hooks (core.hooksPath in ~/.gitconfig points here). Every hook name
+# in this directory is a link to this script.
+#
+# pre-commit runs gitleaks on the staged changes, so a secret never reaches a
+# commit in any repository. Skip it once with `git commit --no-verify`, or with
+# SKIP_GITLEAKS=1 to keep the repository's own hooks.
+#
+# core.hooksPath replaces each repository's .git/hooks, so every hook then runs
+# the repository's own copy when it has one. A repository that sets its own
+# core.hooksPath (Husky, for example) bypasses this directory entirely.
+hook=$(basename "$0")
+gitleaks=${GITLEAKS:-gitleaks}  # the command to run; tests point it elsewhere
+
+if [ "$hook" = pre-commit ] && [ "${SKIP_GITLEAKS:-0}" != 1 ]; then
+  if command -v "$gitleaks" >/dev/null 2>&1; then
+    "$gitleaks" git --pre-commit --staged --redact --verbose --no-banner --log-level warn || {
+      echo "gitleaks: possible secret in the staged changes (see above)." >&2
+      echo "gitleaks: a false positive goes in the repository's .gitleaksignore; skip once with SKIP_GITLEAKS=1." >&2
+      exit 1
+    }
+  else
+    echo "gitleaks: not installed, so staged changes were not scanned for secrets." >&2
+  fi
+fi
+
+local_hook="$(git rev-parse --git-common-dir)/hooks/$hook"
+if [ -x "$local_hook" ]; then
+  exec "$local_hook" "$@"
+fi
+exit 0

@@ -1,5 +1,8 @@
 [include]
 	path = ~/.gitconfig.local
+[core]
+	# Global hooks: gitleaks before each commit, then the repository's own hook.
+	hooksPath = ~/.config/git/hooks
 [pull]
 	rebase = true
 [rebase]

@@ -1,0 +1,4 @@
+# gitleaks false positives (one fingerprint per line).
+# aa.packet.txt is a saved Artificial Analysis page: a public Ahrefs analytics key and content hashes.
+ba1a84dd1c7a4e88bc8376a7114338b769d87f07:.scratch/delegate-redesign/_data/aa.packet.txt:generic-api-key:33
+ba1a84dd1c7a4e88bc8376a7114338b769d87f07:.scratch/delegate-redesign/_data/aa.packet.txt:generic-api-key:91
