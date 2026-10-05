@@ -9,6 +9,7 @@ sine during a test recording); on speech/music, treat spike counts as relative.
 Usage:
   python3 fidelity.py <file> [s16|f32]     raw PCM (48k mono assumed)
   python3 fidelity.py <file.m4a>           decoded via ffmpeg first
+  python3 fidelity.py <master.caf> mic|system   one channel of a two-channel master
 
 History: this analysis exonerated audiotee (0 spikes) and convicted ffmpeg's
 avfoundation mic input (221 spikes at 512-sample spacing, 75% buffer loss) —
@@ -20,10 +21,12 @@ import numpy as np
 RATE = 48000
 
 def load(path, fmt):
-    if path.endswith((".m4a", ".wav", ".mp3", ".aac", ".flac")):
+    if path.endswith((".m4a", ".wav", ".mp3", ".aac", ".flac", ".caf")):
         tmp = tempfile.NamedTemporaryFile(suffix=".raw", delete=False)
+        # master.caf: ch0 = mic, ch1 = system; pick one so a leg is judged alone
+        pick = {"mic": ["-af", "pan=mono|c0=c0"], "system": ["-af", "pan=mono|c0=c1"]}.get(fmt, ["-ac", "1"])
         subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-                        "-i", path, "-f", "s16le", "-ar", str(RATE), "-ac", "1", tmp.name],
+                        "-i", path, *pick, "-f", "s16le", "-ar", str(RATE), tmp.name],
                        check=True)
         return np.fromfile(tmp.name, dtype=np.int16).astype(np.float64)
     dtype = np.float32 if fmt == "f32" else np.int16

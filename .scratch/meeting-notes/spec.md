@@ -4,9 +4,9 @@ Phase 2 of the meeting recorder. Phase 1 (⌥⌘R → `bin/record-meeting` → m
 sidecar in `~/Recordings`) is built. This effort turns a recording into a transcript
 and notes on the machine. No audio, transcript or notes leave it.
 
-**Status:** spec accepted by the user 2026-10-05, revised the same day after an
-independent review (`research/2026-10-05-review.md`). Next: the provisioning probe
-(Phase A) before any pipeline code.
+**Status:** spec accepted 2026-10-05 and revised after an independent review
+(`research/2026-10-05-review.md`). Phase A passed for v2 (`research/2026-10-05-phase-a-probe.md`).
+Next: diarizer provisioning and the recorder changes (Phase B).
 
 ## Goals
 

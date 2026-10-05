@@ -1,14 +1,23 @@
 #!/bin/bash
 # record-meeting — one meeting recording: system audio (Core Audio tap, via
 # audiotee) + default mic (mictee, our AVAudioEngine capturer — ffmpeg's
-# avfoundation input drops mic buffers under load, measured 58-75% loss),
-# mixed to a single m4a in ~/Recordings with a JSON sidecar (start/end times)
-# for the downstream transcription pipeline.
+# avfoundation input drops mic buffers under load, measured 58-75% loss).
+# Output: one directory per recording, ~/Recordings/meeting-<ts>/ (mode 700):
+#   master.caf      lossless 48 kHz float, ch0 = mic, ch1 = system, one timeline
+#   listen.m4a      listening mix derived from master.caf (+6dB mic, limiter, 256k AAC)
+#   recording.json  format_version 1: id, requested/actual times, channel roles,
+#                   per-leg health (exit status, samples, start offset, gaps), state
+# Stdout: the recording directory. Exit status:
+#   0  recorded — both legs captured
+#   3  partial  — one leg empty or ended early; its channel is silence (files written)
+#   1  failed   — preflight, or nothing usable; raw legs and logs kept in $TMPDIR
+# Older recordings are flat meeting-<ts>.m4a + .json files; nothing here touches them.
 # Runs standalone (Ctrl-C to stop) or under Hammerspoon (hs.task:interrupt()).
 # Both legs record headerless raw PCM (system: s16le, mic: f32le; 48k mono):
 # valid at any truncation point, so late/duplicate signals cannot corrupt them.
-# Quality chain: float mic all the way to the mux, +6dB mic balance, transparent
-# limiter, 256k AAC.
+# Sync: the legs are separate processes, so record-meeting-finalize puts both on
+# one CLOCK_UPTIME_RAW timeline — mictee logs its first-sample host time and any
+# gaps; the system leg's start is estimated from when its first data lands.
 set -u
 # Job control: each background child gets its own process group, so a group-wide
 # SIGINT (hs.task interrupt / terminal Ctrl-C) reaches only this script and the
@@ -20,15 +29,16 @@ REC_DIR="${RECORDINGS_DIR:-$HOME/Recordings}"
 AUDIOTEE="$HOME/.local/bin/audiotee"
 MICTEE="$HOME/.local/bin/mictee"
 FFMPEG="/opt/homebrew/bin/ffmpeg"
-BASE="$REC_DIR/meeting-$(date +%Y-%m-%d-%H%M%S)"
-SYS_FMT=(-f s16le -ar 48000 -ac 1)
-MIC_FMT=(-f f32le -ar 48000 -ac 1)
+HELPER="$(cd "$(dirname "$0")" && pwd)/record-meeting-finalize"
+ID="meeting-$(date +%Y-%m-%d-%H%M%S)"
+OUT="$REC_DIR/$ID"
 
 # Preflight: fail fast and loud, not at the end of a meeting. A missing binary
 # must not degrade into a silent one-leg recording via the salvage path.
 [ -x "$AUDIOTEE" ] || { echo "record-meeting: $AUDIOTEE missing — run 'make audiotee' in ~/dotfiles" >&2; exit 1; }
 [ -x "$MICTEE" ] || { echo "record-meeting: $MICTEE missing — run 'make mictee' in ~/dotfiles" >&2; exit 1; }
 [ -x "$FFMPEG" ] || { echo "record-meeting: $FFMPEG missing — brew install ffmpeg" >&2; exit 1; }
+[ -x "$HELPER" ] || { echo "record-meeting: $HELPER missing" >&2; exit 1; }
 
 # Concurrency guard: a second simultaneous recording would crisscross capture
 # streams. If another record-meeting script is alive, refuse; if capture legs
@@ -50,29 +60,33 @@ fi
 find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'record-meeting.*' -type d -mtime +7 -exec rm -rf {} + 2>/dev/null
 mkdir -p "$REC_DIR" || { echo "record-meeting: cannot create $REC_DIR" >&2; exit 1; }
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/record-meeting.XXXXXX")" || { echo "record-meeting: mktemp failed" >&2; exit 1; }
-START_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-START_EPOCH=$(date +%s)
-CAP_DUR=86400  # cap mux at stop-time when stop is requested; 24h runaway guard otherwise
+read -r START_MONO START_EPOCH < <("$HELPER" now)
 
 # First signal: forward SIGINT once to each live leg, then ignore further
 # INT/TERM so a stray repeat can't kill this script during the mux. AudioTee
 # intermittently misses SIGINT, so escalate — one TERM at 2s, KILL at 6s. Raw
 # output plus per-packet flush keep both legs valid at any truncation point,
-# and the mux trims to the requested stop time, so a laggard leg costs nothing.
+# and finalize trims to the stop time, so a laggard leg costs nothing.
 # Known limit: SIGKILL of this script orphans both legs (untrappable; children
 # are in their own process groups by design) — recover via Activity Monitor.
 AT_PID=""
 FF_PID=""
 STOP_AT=""
+STOP_MONO=0
+STOP_EPOCH=""
 stop() {
   trap '' INT TERM
   STOP_AT=$SECONDS
-  CAP_DUR=$(( $(date +%s) - START_EPOCH ))
   [ -n "$AT_PID" ] && kill -INT "$AT_PID" 2>/dev/null
   [ -n "$FF_PID" ] && kill -INT "$FF_PID" 2>/dev/null
+  read -r STOP_MONO STOP_EPOCH < <("$HELPER" now)
 }
 trap stop INT TERM  # installed BEFORE the spawns: no window where a stop orphans the legs
 
+: > "$TMP/system.raw"
+"$HELPER" watch "$TMP/system.raw" > "$TMP/system.first" 2>/dev/null &
+WATCH_PID=$!
+read -r SPAWN_MONO _ < <("$HELPER" now)
 "$AUDIOTEE" --sample-rate 48000 > "$TMP/system.raw" 2> "$TMP/audiotee.log" &
 AT_PID=$!
 "$MICTEE" > "$TMP/mic.raw" 2> "$TMP/mictee.log" &
@@ -96,38 +110,19 @@ while kill -0 "$AT_PID" 2>/dev/null || kill -0 "$FF_PID" 2>/dev/null; do
     wait "$AT_PID" "$FF_PID" 2>/dev/null
   fi
 done
-wait "$AT_PID" "$FF_PID" 2>/dev/null
+wait "$AT_PID" 2>/dev/null; AT_RC=$?
+wait "$FF_PID" 2>/dev/null; FF_RC=$?
+kill "$WATCH_PID" 2>/dev/null; wait "$WATCH_PID" 2>/dev/null
 
-END_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-
-have_sys=$([ -s "$TMP/system.raw" ] && echo 1 || echo 0)
-have_mic=$([ -s "$TMP/mic.raw" ] && echo 1 || echo 0)
-
-mux_ok=0
-if [ "$have_sys" = 1 ] && [ "$have_mic" = 1 ]; then
-  "$FFMPEG" -hide_banner -nostdin -loglevel error \
-    "${SYS_FMT[@]}" -i "$TMP/system.raw" "${MIC_FMT[@]}" -i "$TMP/mic.raw" \
-    -filter_complex "[1:a]volume=6dB[mic];[0:a][mic]amix=inputs=2:duration=longest[mix];[mix]alimiter=limit=0.97[out]" \
-    -map "[out]" -t "$CAP_DUR" -c:a aac -b:a 256k "$BASE.m4a" 2> "$TMP/ffmpeg-mux.log" && mux_ok=1
-elif [ "$have_sys" = 1 ] || [ "$have_mic" = 1 ]; then
-  # Salvage: one leg died — keep the other rather than losing the meeting
-  if [ "$have_sys" = 1 ]; then
-    SOLE="$TMP/system.raw"; SOLE_FMT=("${SYS_FMT[@]}"); SOLE_AF="alimiter=limit=0.97"
-  else
-    SOLE="$TMP/mic.raw"; SOLE_FMT=("${MIC_FMT[@]}"); SOLE_AF="volume=6dB,alimiter=limit=0.97"
-  fi
-  "$FFMPEG" -hide_banner -nostdin -loglevel error \
-    "${SOLE_FMT[@]}" -i "$SOLE" -af "$SOLE_AF" -t "$CAP_DUR" -c:a aac -b:a 256k "$BASE.m4a" \
-    2> "$TMP/ffmpeg-mux.log" && mux_ok=1
-  echo "warning: one capture leg was empty (system=$have_sys mic=$have_mic); saved the other" >&2
-fi
-
-if [ "$mux_ok" = 1 ]; then
-  printf '{\n  "audio": "%s",\n  "started": "%s",\n  "ended": "%s",\n  "system_leg": %s,\n  "mic_leg": %s\n}\n' \
-    "$BASE.m4a" "$START_ISO" "$END_ISO" "$have_sys" "$have_mic" > "$BASE.json"
-  rm -rf "$TMP"
-  echo "$BASE.m4a"
-else
-  echo "recording failed; intermediates kept in $TMP" >&2
-  exit 1
-fi
+# Align, mux, validate, write recording.json. Raw legs go only after that passes.
+"$HELPER" finalize --tmp "$TMP" --out "$OUT" --id "$ID" \
+  --start-mono-ns "$START_MONO" --start-epoch-ns "$START_EPOCH" --spawn-ns "$SPAWN_MONO" \
+  --stop-ns "$STOP_MONO" ${STOP_EPOCH:+--stop-epoch-ns "$STOP_EPOCH"} \
+  --sys-rc "$AT_RC" --mic-rc "$FF_RC"
+RC=$?
+case "$RC" in
+  0) rm -rf "$TMP"; echo "$OUT" ;;
+  3) mkdir -p "$OUT/logs" && cp "$TMP"/*.log "$OUT/logs/" 2>/dev/null; rm -rf "$TMP"; echo "$OUT" ;;
+  *) echo "recording failed; intermediates kept in $TMP" >&2; exit 1 ;;
+esac
+exit "$RC"

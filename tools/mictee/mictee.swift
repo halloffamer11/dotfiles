@@ -4,9 +4,24 @@
 // Diagnostics go to stderr. SIGINT/SIGTERM stop cleanly; output is raw PCM, so
 // the file is valid at any truncation point. Companion to audiotee in the
 // record-meeting rig: mic leg only — system audio is audiotee's job.
+//
+// Timing lines on stderr (the stdout contract is unchanged), all on the
+// CLOCK_UPTIME_RAW nanosecond clock (= mach_absolute_time, AVAudioTime's host
+// time) so record-meeting can align this leg with the system leg:
+//   mictee: first-sample host_ns=<ns>
+//   mictee: gap at_sample=<output samples written before it> samples=<lost> host_ns=<ns>
+//   mictee: last-sample host_ns=<end of last buffer> samples=<total output samples>
+// A gap is any jump of more than GAP_NS between where a tap buffer should start
+// and where it does: dropped buffers, or the restart after a device change.
 import AVFoundation
+import Darwin
 
 let TARGET_RATE = 48000.0
+let GAP_NS: Int64 = 5_000_000
+
+var timebase = mach_timebase_info_data_t()
+mach_timebase_info(&timebase)
+func hostNs(_ t: UInt64) -> Int64 { Int64(t) * Int64(timebase.numer) / Int64(timebase.denom) }
 
 func log(_ msg: String) {
     FileHandle.standardError.write(("mictee: " + msg + "\n").data(using: .utf8)!)
@@ -14,6 +29,8 @@ func log(_ msg: String) {
 
 let engine = AVAudioEngine()
 var bytesOut: UInt64 = 0
+var firstNs: Int64? = nil
+var nextNs: Int64 = 0  // where the next tap buffer should start, if no samples are lost
 
 func startCapture() {
     let input = engine.inputNode
@@ -31,7 +48,16 @@ func startCapture() {
     }
     log("capturing: \(inFmt.sampleRate) Hz \(inFmt.channelCount) ch -> 48000 Hz mono f32")
 
-    input.installTap(onBus: 0, bufferSize: 4800, format: inFmt) { buffer, _ in
+    input.installTap(onBus: 0, bufferSize: 4800, format: inFmt) { buffer, when in
+        let startNs = when.isHostTimeValid ? hostNs(when.hostTime) : Int64(clock_gettime_nsec_np(CLOCK_UPTIME_RAW))
+        if firstNs == nil {
+            firstNs = startNs
+            log("first-sample host_ns=\(startNs)")
+        } else if startNs - nextNs > GAP_NS {
+            let lost = Int64((Double(startNs - nextNs) / 1e9 * TARGET_RATE).rounded())
+            log("gap at_sample=\(bytesOut / 4) samples=\(lost) host_ns=\(startNs)")
+        }
+        nextNs = startNs + Int64(Double(buffer.frameLength) / inFmt.sampleRate * 1e9)
         let capacity = AVAudioFrameCount(Double(buffer.frameLength) * TARGET_RATE / inFmt.sampleRate) + 64
         guard let out = AVAudioPCMBuffer(pcmFormat: outFmt, frameCapacity: capacity) else { return }
         var err: NSError?
@@ -77,6 +103,7 @@ func installStop(_ sig: Int32) -> DispatchSourceSignal {
     src.setEventHandler {
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
+        if firstNs != nil { log("last-sample host_ns=\(nextNs) samples=\(bytesOut / 4)") }
         log(String(format: "stopped; captured %.2f s", Double(bytesOut) / (TARGET_RATE * 4.0)))
         exit(0)
     }

@@ -13,11 +13,19 @@ and validates the failure modes that have actually bitten:
   6. orphan-recovery   SIGKILL leaves capture legs running; next run must reap
                        them and record successfully (the "crisscross" case)
 
+Each saved recording must be a meeting-<ts>/ directory with a 2-channel
+48 kHz master.caf, a listen.m4a and a recording.json in state "recorded".
+
 Run:  make test-recorder     (or: python3 tools/record-meeting-tests/harness.py)
+      --system-only          the host process has no microphone permission, so
+                             expect state "partial" (exit 3) with an empty mic leg
 Recordings go to a throwaway temp dir; nothing touches ~/Recordings.
+Alignment, padding and partial states without devices: finalize_test.py.
 For sample-level fidelity analysis (needs numpy + audible tone), see fidelity.py.
 """
 import json, os, pathlib, shutil, signal, subprocess, sys, tempfile, time
+
+SYSTEM_ONLY = "--system-only" in sys.argv[1:]
 
 SCRIPT = pathlib.Path(__file__).resolve().parents[2] / "stow/hammerspoon/.hammerspoon/bin/record-meeting"
 WORK = pathlib.Path(tempfile.mkdtemp(prefix="rm-harness."))
@@ -46,12 +54,16 @@ def finish(p, timeout=30):
         return None, None
 
 def new_recordings(before):
-    return set(REC.glob("meeting-*.m4a")) - before
+    return set(REC.glob("meeting-*")) - before
 
-def duration_of(m4a):
-    r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
-                        "-of", "csv=p=0", str(m4a)], capture_output=True, text=True)
-    return float(r.stdout.strip() or 0)
+def probe(path):
+    r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=channels:format=duration",
+                        "-of", "json", str(path)], capture_output=True, text=True)
+    try:
+        j = json.loads(r.stdout)
+        return j["streams"][0]["channels"], float(j["format"]["duration"])
+    except (ValueError, KeyError, IndexError):
+        return 0, 0.0
 
 def legs_alive():
     out = subprocess.run(["pgrep", "-x", "audiotee"], capture_output=True, text=True).stdout
@@ -60,20 +72,25 @@ def legs_alive():
 
 def check_saved(name, p, out, err, before, run_secs):
     new = new_recordings(before)
-    if p.returncode != 0 or not new:
+    want_rc, want_state = (3, "partial") if SYSTEM_ONLY else (0, "recorded")
+    if p.returncode != want_rc or len(new) != 1:
         print(f"[{name}] FAIL rc={p.returncode} files={sorted(f.name for f in new)} stderr={(err or '').strip()[:200]}")
         return False
-    m4a = new.pop()
-    dur = duration_of(m4a)
-    meta = json.loads(m4a.with_suffix(".json").read_text())
-    ok = dur > max(0.5, run_secs - 4) and dur < run_secs + 2 \
-        and meta["system_leg"] == 1 and meta["mic_leg"] == 1
-    print(f"[{name}] {'PASS' if ok else 'FAIL'} dur={dur:.1f}s (ran {run_secs}s) "
-          f"legs=sys:{meta['system_leg']} mic:{meta['mic_leg']}")
+    d = new.pop()
+    meta = json.loads((d / "recording.json").read_text())
+    ch, dur = probe(d / "master.caf")
+    _, listen = probe(d / "listen.m4a")
+    legs = {n: meta["legs"][n]["present"] for n in ("mic", "system")}
+    ok = ch == 2 and dur > max(0.5, run_secs - 4) and dur < run_secs + 2 and abs(listen - dur) < 0.5 \
+        and meta["state"] == want_state and legs["system"] and legs["mic"] != SYSTEM_ONLY \
+        and (out or "").strip() == str(d)
+    print(f"[{name}] {'PASS' if ok else 'FAIL'} dur={dur:.1f}s (ran {run_secs}s) ch={ch} "
+          f"state={meta['state']} legs=sys:{legs['system']} mic:{legs['mic']} "
+          f"mic-offset={meta['legs']['mic'].get('start_offset_s')}s")
     return ok
 
 def signal_case(name, run_secs, n_int, gap=0.15):
-    before = set(REC.glob("meeting-*.m4a"))
+    before = set(REC.glob("meeting-*"))
     p = spawn()
     time.sleep(run_secs)
     group_int(p, n_int, gap)
@@ -85,7 +102,7 @@ def signal_case(name, run_secs, n_int, gap=0.15):
 
 def concurrent_case():
     name = "concurrent-refused"
-    before = set(REC.glob("meeting-*.m4a"))
+    before = set(REC.glob("meeting-*"))
     a = spawn()
     time.sleep(3)
     b = spawn()
@@ -109,7 +126,7 @@ def orphan_case():
     if not orphans:
         print(f"[{name}] FAIL: expected orphaned legs after SIGKILL, found none")
         return False
-    before = set(REC.glob("meeting-*.m4a"))
+    before = set(REC.glob("meeting-*"))
     q = spawn()
     time.sleep(6)
     group_int(q)

@@ -203,4 +203,5 @@ test-bootstrap:
 	@for t in $(CURDIR)/tests/bootstrap/*.sh; do sh "$$t" || exit 1; done
 
 test-recorder:
+	python3 $(CURDIR)/tools/record-meeting-tests/finalize_test.py
 	python3 $(CURDIR)/tools/record-meeting-tests/harness.py
