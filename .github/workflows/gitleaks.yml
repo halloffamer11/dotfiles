@@ -27,4 +27,5 @@ jobs:
           tar -xzf gitleaks.tar.gz -C "$RUNNER_TEMP" gitleaks
           rm gitleaks.tar.gz
       - name: Scan the full history
-        run: "$RUNNER_TEMP/gitleaks" git --redact --no-banner --verbose .
+        run: |
+          "$RUNNER_TEMP/gitleaks" git --redact --no-banner --verbose .
