@@ -1,5 +1,3 @@
-[include]
-	path = ~/.gitconfig.local
 [core]
 	# Global hooks: gitleaks before each commit, then the repository's own hook.
 	hooksPath = ~/.config/git/hooks
@@ -12,3 +10,7 @@
 [user]
 	name = dreiss
 	email = ojhall11@gmail.com
+# Last, so a machine's own settings (its identity first) win over the defaults above:
+# git keeps the last value it reads for a key.
+[include]
+	path = ~/.gitconfig.local

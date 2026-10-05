@@ -13,7 +13,8 @@
 #   make external-updates  # update only the skills declared by this repo
 #   make delegate    # clone halloffamer11/delegate into DELEGATE_DIR if absent, then run its `make install`
 #   make update      # macOS: Brewfile packages + declared skills; Linux: declared skills only
-#   make doctor      # read-only diagnosis: profile, prerequisites, conflicts, broken links, skills
+#   make doctor      # read-only diagnosis: profile, prerequisites, conflicts, broken links, skills,
+#                    # gitleaks, delegate (checkout, relays, catalog) and checkouts behind upstream
 #   make audiotee    # build the audiotee system-audio capture binary into ~/.local/bin (Swift 5.9+, macOS 14.2+)
 #   make mictee      # build the mictee mic capture binary into ~/.local/bin (Swift)
 #   make test-recorder  # regression harness for the record-meeting rig
@@ -67,6 +68,8 @@ SKILL_AGENTS ?= claude-code codex kiro-cli
 PERSONAL_SKILLS ?= facebook-marketplace fresh-context toolsmith
 DELEGATE_DIR ?= $(HOME)/projects/delegate
 EXTRA_BREWFILES ?=
+# Checkouts `make doctor` compares with their upstream main (it asks the remote, writes nothing).
+DOCTOR_UPSTREAM ?= dotfiles delegate
 SKILLS_CLI = DISABLE_TELEMETRY=1 npx -y skills@latest
 
 .PHONY: bootstrap preflight conflicts doctor brew apply configs configs-plan skills externals external-updates update delegate audiotee mictee test-recorder test-bootstrap
@@ -172,6 +175,7 @@ endif
 doctor:
 	@PLAN="$$(MAKEFLAGS= make -s --no-print-directory -C $(CURDIR) configs-plan PROFILE=$(PROFILE) HOME=$(HOME) CONFIG_PACKAGES='$(CONFIG_PACKAGES)' 2>&1)" \
 	REPO=$(CURDIR) PROFILE=$(PROFILE) HOME=$(HOME) SKILLS="herdr humanizer $(PERSONAL_SKILLS)" \
+	DELEGATE_DIR=$(DELEGATE_DIR) UPSTREAM="$(DOCTOR_UPSTREAM)" \
 	NEEDS="$(if $(filter macos,$(PROFILE)),brew git make stow node npm,$(LINUX_NEEDS))" sh $(CURDIR)/scripts/doctor.sh
 
 delegate:
