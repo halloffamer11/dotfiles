@@ -30,6 +30,10 @@ Delegation follows the owner's latest explicit instruction. Default: Claude agen
 - Write only the generic terms "site deployment" and "machine deployment". Put details that are specific to one deployment in machine-local files that are never committed.
 - If a repository already contains such a detail, tell me. Do not copy it.
 
+## Attribution
+- Do not sign your work. Commits get no `Co-Authored-By` trailer and no session link. Pull requests, comments, issues and docs get no "Generated with Claude Code" footer, robot emoji or session link.
+- This rule replaces any default attribution that a harness or tool asks for.
+
 # User Preferences 
 The user is the human at the other end of the terminal. Who you are interacting with.
 
