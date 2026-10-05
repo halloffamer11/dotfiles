@@ -38,7 +38,8 @@ You still do these by hand, because no command can:
 ## Omarchy
 
 Bootstrap installs no system packages. Install git, make, stow, node and npm with
-pacman first; bootstrap names any that are missing.
+pacman first; bootstrap names any that are missing. Install gitleaks too (see
+Secret scanning).
 
 1. `git clone https://github.com/halloffamer11/dotfiles.git ~/dotfiles`
 2. `make -C ~/dotfiles bootstrap`
@@ -52,6 +53,22 @@ list is the macOS one, minus Homebrew, Hammerspoon and the recording grants.
 The steps are the Omarchy ones. Only the portable layer is linked (claude, git, nvim,
 starship, yazi), and the result names the packages it left out. The tools those
 configs call (neovim, starship, yazi and the rest) come from your distribution.
+
+## Secret scanning
+
+The git package sets `core.hooksPath` to `~/.config/git/hooks`. Before each commit, in
+every repository, the pre-commit hook runs gitleaks on the staged changes and stops the
+commit if it finds a secret. Then each hook runs the repository's own copy from
+`.git/hooks`, if it has one.
+
+- The Brewfile installs gitleaks on macOS. On Linux, install it with your distribution's
+  package manager. Without it, the hook warns and the commit goes through unscanned.
+- To skip the scan for one commit, run `SKIP_GITLEAKS=1 git commit ...`. For a false
+  positive, add the fingerprint that the report prints to the repository's
+  `.gitleaksignore`.
+- A repository that sets its own `core.hooksPath` (for example, with Husky) does not use
+  these hooks. The `pre-commit` framework refuses to install while a global
+  `core.hooksPath` is set.
 
 ## Maintenance
 
