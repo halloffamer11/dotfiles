@@ -9,6 +9,15 @@ overrides the profile's package list.
 Before any change, `make configs-plan` shows the profile, the links it would make and
 the files in their way. It writes nothing.
 
+## Site and machine deployments
+
+Each machine that runs this repo is a machine deployment; a group of machines that
+share settings is a site deployment. The repo holds only the generic layer: profiles
+and packages. Anything specific to one site or one machine (identity, hosts, paths,
+package choices, credentials) goes in machine-local files that git ignores or that
+live outside the repo: `local.mk`, `~/.gitconfig.local` and `~/.zshrc.local`. Never
+commit them, and never name the site or machine in a commit, ticket or doc.
+
 ## macOS
 
 Run these from your home directory on a new Mac:
