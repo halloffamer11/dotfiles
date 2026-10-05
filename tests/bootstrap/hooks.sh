@@ -35,13 +35,9 @@ g reset -q --hard
 SKIP_GITLEAKS=1 PATH="$stubs:$PATH" commit FAKE_SECRET >/dev/null 2>&1
 check "hooks: SKIP_GITLEAKS=1 lets it through" [ "$(g rev-list --count HEAD)" = 2 ]
 
-# No gitleaks on PATH: warn and commit. A PATH of only the tools the hook needs,
-# since gitleaks may share a directory with git (Homebrew on the macOS runner).
-bare=$(mktemp -d)
-for c in sh basename; do ln -s "$(command -v $c)" "$bare/$c"; done
-# A wrapper, not a link: Homebrew's git finds its helpers relative to its own path.
-printf '#!/bin/sh\nexec "%s" "$@"\n' "$(command -v git)" > "$bare/git"; chmod +x "$bare/git"
-nogl=$(PATH="$bare" commit unscanned 2>&1)
+# No gitleaks: warn and commit. Named by GITLEAKS, since hiding it from PATH is not
+# enough: git puts its own directory on the hook's PATH, and Homebrew keeps gitleaks there.
+nogl=$(GITLEAKS="$h/no-gitleaks" commit unscanned 2>&1)
 if [ "$(g rev-list --count HEAD)" = 3 ] && has "$nogl" "not installed"; then
   ok "hooks: without gitleaks the commit goes through with a warning"
 else
