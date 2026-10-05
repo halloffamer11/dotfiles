@@ -30,7 +30,8 @@ end
 -- runs in the background. It does nothing (exit 5) unless [run] auto_run = true in
 -- ~/.config/meeting-notes/config.toml. At load, `meeting-notes queue --if-enabled` runs
 -- once to catch recordings a reload or crash interrupted. Menu bar "✎ notes…" while
--- it works; an alert when notes or a transcript are ready, or when it failed.
+-- it works; an alert when notes or a transcript are ready, or when it failed. The
+-- notes come from the agent CLI set in [notes] command; without it, a transcript only.
 local NOTES = os.getenv("HOME") .. "/.hammerspoon/bin/meeting-notes"
 local pipeline = { tasks = {}, menubar = nil }
 
@@ -62,6 +63,8 @@ local function startPipeline(args, label)
 			print("meeting-notes stderr: " .. (stdErr or ""))
 		elseif last:find("notes%-ready") then
 			hs.alert.show("Notes ready: " .. label)
+		elseif last:find("notes%-unstructured") then
+			hs.alert.show("Notes saved, but not in the expected sections: " .. label)
 		elseif last:find("transcribed") then
 			hs.alert.show("Transcript ready: " .. label)
 		elseif last:find("^queue:") and not last:find("^queue: 0 processed") then

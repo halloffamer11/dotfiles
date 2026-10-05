@@ -2,7 +2,8 @@
 
 Phase 2 of the meeting recorder. Phase 1 (⌥⌘R → `bin/record-meeting` → m4a + JSON
 sidecar in `~/Recordings`) is built. This effort turns a recording into a transcript
-and notes on the machine. No audio, transcript or notes leave it.
+on the machine (no audio or transcript leaves it during transcription), then hands
+the transcript to the agent CLI the machine already has for notes.
 
 **Status:** spec accepted 2026-10-05 and revised after an independent review
 (`research/2026-10-05-review.md`). Phase A passed for v2 (`research/2026-10-05-phase-a-probe.md`).
@@ -14,7 +15,7 @@ Next: diarizer provisioning and the recorder changes (Phase B).
 - Reuse the speech models VoiceInk already downloaded when the SDK can load them as
   they are; never silently download a second copy.
 - Small stages with versioned file contracts, safe to rerun.
-- Nothing site-specific in the repo. Folders, calendar source, notes model and
+- Nothing site-specific in the repo. Folders, calendar source, notes command and
   retention are machine-local settings.
 
 ## What VoiceInk does (source, 2026-10-05)
@@ -53,16 +54,24 @@ names (`-coreml` stripped) and different v3 files than the installed cache has.
 
 ```
 ~/Recordings/<id>/recording.json + master.caf (+ listen.m4a)
-  └─ transcribe    → transcript.json   (FluidAudio, offline, per channel)
-  └─ match-meeting → meeting.json      (calendar, read-only, optional)
-  └─ make-notes    → notes.md          (local LLM, off until configured)
+  └─ match       → meeting.json      (local calendar file, optional)
+  └─ transcribe  → transcript.json   (FluidAudio, offline, per channel)
+  └─ notes       → notes.md          (hand-off to the machine's agent CLI)
 ```
 
-- Start from FluidAudio's own `fluidaudiocli transcribe` and `process --mode
-  offline`. Write only a thin adapter for what they lack: offline loading,
-  per-channel processing and the stable JSON below. The adapter is a SwiftPM
-  package built by `make meeting-notes`; the `mictee` single-file `swiftc` pattern
-  cannot build a package with dependencies.
+- The only model work in scope is the speech stack (VoiceInk's Parakeet models and
+  the FluidAudio diarizer) producing the transcript. There is no language model of
+  our own: no Ollama, no on-device LLM, no HTTP LLM backend.
+- Transcription: a thin adapter, `meeting-asr` (SwiftPM package, `make
+  meeting-notes`), over FluidAudio. `fluidaudiocli` is not used: its `process`
+  command has no offline switch, and its load path deletes and re-downloads the
+  diarizer cache after a failed load.
+- Notes: `[notes] command` is an argv template for the agent CLI already on the
+  machine (for example `claude -p`, or `codex exec` with `-o {output}`). The
+  prompt (versioned in the repo, or a machine-local override) and the transcript
+  as plain text go to its stdin; it runs in the recording folder with a timeout;
+  its answer becomes notes.md. Unset by default, so a machine deployment can leave
+  notes off and keep transcripts only.
 - Alternatives if FluidAudio fails Phase A: WhisperKit or whisper.cpp (own weights
   plus a separate diarizer), sherpa-onnx (more integration work), pyannote
   (accuracy reference, needs Python).
@@ -96,8 +105,10 @@ time overlap. Calendar invitees are context for the notes, never speaker names.
   raw text; a derived view with filler words removed; fingerprints of input audio,
   model and SDK version.
 - `meeting.json`: matched event or `unmatched`. Ties and ambiguity stay unmatched.
-- `notes.md`: the notes, with a header naming the transcript fingerprint, model and
-  prompt version.
+- `notes.md`: the agent CLI's answer, with a header naming the transcript
+  fingerprint, the command and the prompt version. An answer without the four
+  sections (Summary, Decisions, Action items, Open questions) is saved and the
+  state is notes-unstructured.
 - Writes are atomic (temp file + rename); one lock per recording; a stage reruns
   only when its input fingerprints change; a file the user edited by hand is never
   overwritten (it keeps a hash of what was generated).
@@ -107,7 +118,8 @@ time overlap. Calendar invitees are context for the notes, never speaker names.
 Hammerspoon starts the pipeline from `onExit` of a successful recording, after
 `recording.json` validates, not at the stop key. The queue is files on disk, so a
 reload loses nothing and a recording runs once. States: recorded, processing,
-partial, failed, notes-ready; the menubar shows them.
+partial, failed, transcribed, notes-ready, notes-unstructured; the menubar shows
+them. Off until `[run] auto_run = true`.
 
 ## Long meetings
 
@@ -117,19 +129,23 @@ trigger is enabled.
 
 ## Privacy, enforced
 
-- The notes stage is off until a local model is configured. Only loopback
-  endpoints are accepted; redirects and remote hosts are refused.
-- SDK telemetry and any cloud fallback are off.
+- The local-only rule covers transcription: every `meeting-asr` call runs in a
+  no-network sandbox, and the speech models load from disk only.
+- The notes command is the user's own agent CLI and runs with normal network
+  access. Configuring it is the decision to send the transcript to it; a machine
+  deployment that must keep transcripts local leaves it unset.
+- SDK telemetry and any cloud fallback in the speech stack are off.
 - Recording folders are mode 700; no transcript text in logs; the output folder
   must not be a synced folder (checked by `doctor`).
-- An egress test runs the whole pipeline with the network blocked.
+- An egress test runs match and transcribe with the network fully blocked.
 - Recordings, transcripts, logs and models never enter a repo checkout. Tests use
   synthetic fixtures only.
 
 ## Machine-local settings
 
 `~/.config/meeting-notes/config.toml` (never committed): model variant, model
-directory, notes endpoint and model, calendar source, output folder, retention.
+directory, notes command and prompt, calendar source, output folder, retention.
+`tools/meeting-notes/config.example.toml` lists every key.
 
 ## Build order
 
@@ -137,15 +153,15 @@ A. Provisioning probe: pin FluidAudio, load v2 offline from the VoiceInk cache (
    provision), diarizer provisioned, `doctor`.
 B. Recorder: channel contract, sync, health, `recording.json`.
 C. `transcribe` adapter and file contracts, tested on synthetic two-channel audio.
-D. `match-meeting`, `make-notes` behind the local-only checks.
+D. `match`, `notes` (agent CLI hand-off), `run` and `queue`.
 E. Trigger, states, long-meeting and egress tests; then enable.
 
 ## Open questions
 
-- Local notes model and server (default: Ollama on the same machine).
+- Which agent CLI each machine deployment uses for notes (or none).
 - Maximum meeting length and retention period.
 
 ## Out of scope
 
 - Live transcription during the meeting.
-- Any cloud transcription or cloud notes model.
+- Any cloud transcription, and any language model of our own for notes.

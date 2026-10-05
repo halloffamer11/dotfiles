@@ -1,30 +1,35 @@
-"""notes: transcript.json -> notes.md with a local LLM. Off until configured.
+"""notes: hand transcript.json to the agent CLI on this machine -> notes.md.
 
-[notes] in config.toml:
-  endpoint     base URL of a server on THIS machine, e.g. http://127.0.0.1:11434
-  model        the model name the server knows
-  api          ollama (POST /api/chat) or openai (POST /v1/chat/completions)
-  chunk_chars  transcript characters per request (default 12000)
+No model of our own: the notes come from whatever agent CLI the machine already
+has. Off until [notes] command is set in config.toml (there is no default):
 
-Local only, enforced: the endpoint host must be 127.0.0.1, ::1 or localhost, and
-every address it resolves to must be loopback; the request goes to the resolved
-loopback address. Proxies from the environment are ignored and redirects are
-refused. Anything else is an error before any connection is made.
+  command      argv template, e.g. ["claude", "-p"] or
+               ["codex", "exec", "--skip-git-repo-check", "-o", "{output}"]
+               "{output}": the CLI writes its answer to that file; without it,
+               the answer is the CLI's stdout. A bare program name is looked up
+               on PATH plus ~/.local/bin, /opt/homebrew/bin and /usr/local/bin
+               (Hammerspoon starts tasks with a minimal PATH).
+  prompt_file  optional; default prompts/notes-v1.md (versioned in the repo)
+  timeout_s    default 900; the whole process group is killed after it
 
-Map-reduce, no truncation: the transcript is cut into chunks of at most
-chunk_chars (a single over-long segment is split by words), each chunk becomes
-partial notes (prompts/notes-v1-map.md), and the partials are combined
-(prompts/notes-v1-reduce.md) — in rounds, when they are themselves too long.
-The model must return the four headings; otherwise the stage fails.
+Hand-off: stdin = the prompt, then the transcript as plain text between
+<transcript> tags, one line per segment: [time] SPEAKER (source): text. The CLI
+runs in the recording folder with the user's normal network access; it is the
+user's own tool. (The no-network rule covers transcription only.)
+
+The answer should have the four headings (Summary, Decisions, Action items,
+Open questions). It is saved either way; without them the stage reports
+"unstructured" and the pipeline state is notes-unstructured.
 """
-import ipaddress, json, os, socket, urllib.error, urllib.parse, urllib.request
+import json, os, shutil, signal, subprocess, tempfile
 
 from .common import guard, now_iso, read_recording, record_output, recording_lock, sha256_file, sha256_text, \
     write_text
 
 PROMPT_VERSION = "notes-v1"
-PROMPTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts")
+DEFAULT_PROMPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts", f"{PROMPT_VERSION}.md")
 HEADINGS = ("## Summary", "## Decisions", "## Action items", "## Open questions")
+EXTRA_PATH = ("~/.local/bin", "/opt/homebrew/bin", "/usr/local/bin")
 
 
 class NotesError(RuntimeError):
@@ -32,60 +37,14 @@ class NotesError(RuntimeError):
 
 
 def enabled(cfg):
-    return bool(cfg["notes"]["endpoint"] and cfg["notes"]["model"])
+    return bool(cfg["notes"]["command"])
 
 
-def check_loopback(endpoint):
-    """Returns the URL rewritten to a loopback IP; raises ValueError otherwise."""
-    u = urllib.parse.urlparse(endpoint)
-    if u.scheme not in ("http", "https") or not u.hostname:
-        raise ValueError(f"notes endpoint must be an http(s) URL; got {endpoint!r}")
-    if u.username or u.password:
-        raise ValueError("notes endpoint must not carry credentials")
-    host = u.hostname
-    if host not in ("127.0.0.1", "::1", "localhost"):
-        raise ValueError(f"notes endpoint host must be 127.0.0.1, ::1 or localhost; got {host!r} (local only)")
-    port = u.port or (443 if u.scheme == "https" else 80)
-    addrs = {ai[4][0] for ai in socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)}
-    if not addrs or not all(ipaddress.ip_address(a.split("%")[0]).is_loopback for a in addrs):
-        raise ValueError(f"{host} resolves to {sorted(addrs)}, not only loopback; refusing")
-    ip = sorted(addrs)[0]
-    netloc = (f"[{ip}]" if ":" in ip else ip) + f":{port}"
-    return urllib.parse.urlunparse((u.scheme, netloc, u.path.rstrip("/"), "", "", ""))
-
-
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise NotesError(f"notes endpoint answered with a redirect ({code} to {newurl}); refusing")
-
-
-_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
-
-
-def chat(cfg, base, system, user):
-    n = cfg["notes"]
-    if n["api"] == "ollama":
-        url, body = base + "/api/chat", {"model": n["model"], "stream": False, "options": {"temperature": 0.2},
-                                         "messages": [{"role": "system", "content": system},
-                                                      {"role": "user", "content": user}]}
-    elif n["api"] == "openai":
-        url, body = base + "/v1/chat/completions", {"model": n["model"], "temperature": 0.2,
-                                                    "messages": [{"role": "system", "content": system},
-                                                                 {"role": "user", "content": user}]}
-    else:
-        raise ValueError(f"notes api must be ollama or openai; got {n['api']!r}")
-    req = urllib.request.Request(url, data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
-    try:
-        with _OPENER.open(req, timeout=n["timeout_s"]) as r:
-            data = json.loads(r.read())
-    except urllib.error.HTTPError as e:
-        raise NotesError(f"notes endpoint returned HTTP {e.code}") from None
-    except urllib.error.URLError as e:
-        raise NotesError(f"notes endpoint not reachable: {e.reason}") from None
-    try:
-        return data["message"]["content"] if n["api"] == "ollama" else data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError):
-        raise NotesError("notes endpoint returned an unexpected response") from None
+def resolve(program):
+    if os.path.isabs(program):
+        return program if os.access(program, os.X_OK) else None
+    path = os.pathsep.join([os.environ.get("PATH", "")] + [os.path.expanduser(p) for p in EXTRA_PATH])
+    return shutil.which(program, path=path)
 
 
 def mmss(t):
@@ -93,38 +52,13 @@ def mmss(t):
     return f"{t // 3600}:{t // 60 % 60:02d}:{t % 60:02d}" if t >= 3600 else f"{t // 60:02d}:{t % 60:02d}"
 
 
-def transcript_lines(transcript, budget):
-    """One line per segment; a line longer than the budget is split by words."""
-    lines = []
-    for s in transcript["segments"]:
-        prefix = f"[{mmss(s['start'])}] {s['speaker']} ({s['source']}): "
-        words, cur = (s.get("text_clean") or s["text"]).split(), ""
-        for w in words:
-            if cur and len(prefix) + len(cur) + 1 + len(w) > budget:
-                lines.append(prefix + cur)
-                cur = w
-            else:
-                cur = (cur + " " + w).strip()
-        if cur:
-            lines.append(prefix + cur)
-    return lines
+def render(transcript):
+    return "\n".join(f"[{mmss(s['start'])}] {s['speaker']} ({s['source']}): {s.get('text_clean') or s['text']}"
+                     for s in transcript["segments"])
 
 
-def pack(items, budget, sep="\n"):
-    """Consecutive items in groups whose joined length fits the budget (an item is never cut)."""
-    groups, cur = [], []
-    for it in items:
-        if cur and len(sep.join(cur + [it])) > budget:
-            groups.append(cur)
-            cur = []
-        cur.append(it)
-    if cur:
-        groups.append(cur)
-    return groups
-
-
-def context_text(rec, transcript):
-    lines = [f"Speakers: " + ", ".join(f"{s['id']} ({s['source']})" for s in transcript["speakers"])]
+def context(rec, transcript):
+    lines = ["Speakers: " + ", ".join(f"{s['id']} ({s['source']})" for s in transcript["speakers"])]
     path = os.path.join(rec, "meeting.json")
     if os.path.exists(path):
         m = json.load(open(path))
@@ -136,70 +70,74 @@ def context_text(rec, transcript):
     return "\n".join(lines)
 
 
-def check_sections(text):
-    missing = [h for h in HEADINGS if h not in text]
-    if missing:
-        raise NotesError(f"the model's answer lacks {', '.join(missing)}")
-    return text[text.index(HEADINGS[0]):].strip()
+def structured(text):
+    return all(h in text for h in HEADINGS)
+
+
+def call(argv, stdin, cwd, timeout):
+    """Run the CLI in its own process group; kill the whole group on timeout."""
+    p = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         text=True, start_new_session=True)
+    try:
+        out, err = p.communicate(stdin, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        os.killpg(p.pid, signal.SIGKILL)
+        p.communicate()
+        raise NotesError(f"notes command timed out after {timeout} s") from None
+    if p.returncode != 0:
+        raise NotesError(f"notes command exited {p.returncode}: {err.strip()[-300:]}")
+    return out
 
 
 def run(rec, cfg, force=False):
-    """Returns (path, "written" | "unchanged" | "off")."""
+    """Returns (path, "written" | "unstructured" | "unchanged" | "off")."""
+    n = cfg["notes"]
     if not enabled(cfg):
         return None, "off"
-    base = check_loopback(cfg["notes"]["endpoint"])
+    template = n["command"] if isinstance(n["command"], list) else [n["command"]]
+    program = resolve(template[0])
+    if not program:
+        raise NotesError(f"notes command {template[0]!r} not found")
+    prompt_path = os.path.expanduser(n["prompt_file"]) if n["prompt_file"] else DEFAULT_PROMPT
+    prompt = open(prompt_path).read()
     with recording_lock(rec):
         meta = read_recording(rec)
         tpath = os.path.join(rec, "transcript.json")
         if not os.path.exists(tpath):
             raise NotesError("no transcript.json; run transcribe first")
         out = os.path.join(rec, "notes.md")
-        map_prompt = open(os.path.join(PROMPTS, f"{PROMPT_VERSION}-map.md")).read()
-        reduce_prompt = open(os.path.join(PROMPTS, f"{PROMPT_VERSION}-reduce.md")).read()
         mpath = os.path.join(rec, "meeting.json")
-        n = cfg["notes"]
         fingerprints = {"transcript_sha256": sha256_file(tpath),
                         "meeting_sha256": sha256_file(mpath) if os.path.exists(mpath) else None,
-                        "model": n["model"], "api": n["api"], "endpoint": n["endpoint"],
-                        "chunk_chars": n["chunk_chars"], "prompt": PROMPT_VERSION,
-                        "prompt_sha256": sha256_text(map_prompt + reduce_prompt)}
+                        "command": template, "prompt_sha256": sha256_text(prompt)}
         if guard(rec, "notes", out, fingerprints, force) == "unchanged":
-            return out, "unchanged"
+            return out, "unchanged" if structured(open(out).read()) else "unstructured"
 
         transcript = json.load(open(tpath))
-        ctx = context_text(rec, transcript)
-        budget = int(n["chunk_chars"])
-        chunks = pack(transcript_lines(transcript, budget), budget)
-        partials = []
-        for i, chunk in enumerate(chunks):
-            user = f"{ctx}\n\nTranscript part {i + 1} of {len(chunks)}:\n" + "\n".join(chunk)
-            partials.append(check_sections(chat(cfg, base, map_prompt, user)))
-        rounds = 0
-        while True:  # reduce in rounds until one call holds every partial
-            rounds += 1
-            groups = pack(partials, budget, sep="\n\n---\n\n")
-            if len(groups) == len(partials) > 1:  # each partial alone fills the budget: pair them anyway
-                groups = [partials[i:i + 2] for i in range(0, len(partials), 2)]
-            outs = []
-            for g in groups:
-                user = f"{ctx}\n\nPartial notes, in order:\n\n" + "\n\n---\n\n".join(g)
-                outs.append(check_sections(chat(cfg, base, reduce_prompt, user)))
-            partials = outs
-            if len(groups) == 1:
-                break
-            if rounds > 20:
-                raise NotesError("reduce did not converge; raise chunk_chars")
+        stdin = f"{prompt}\n\n{context(rec, transcript)}\n\n<transcript>\n{render(transcript)}\n</transcript>\n"
+        with tempfile.TemporaryDirectory(dir=rec, prefix=".notes-") as tmp:
+            answer_file = os.path.join(tmp, "answer.md")
+            argv = [program] + [a.replace("{output}", answer_file) for a in template[1:]]
+            stdout = call(argv, stdin, rec, n["timeout_s"])
+            uses_file = any("{output}" in a for a in template)
+            answer = (open(answer_file).read() if os.path.exists(answer_file) else "") if uses_file else stdout
+        answer = answer.strip()
+        if not answer:
+            raise NotesError("notes command returned nothing")
+        ok = structured(answer)
         title = (json.load(open(mpath)).get("event") or {}).get("title") if os.path.exists(mpath) else None
         header = "\n".join([
             f"# Notes: {title or meta.get('id')}",
             "",
             f"- Recording: {meta.get('id')}",
             f"- Transcript: sha256 {fingerprints['transcript_sha256'][:16]}",
-            f"- Model: {n['model']} ({n['api']} API, {n['endpoint']})",
-            f"- Prompt: {PROMPT_VERSION} (sha256 {fingerprints['prompt_sha256'][:16]})",
-            f"- Generated: {now_iso()}; {len(chunks)} transcript chunk(s), {rounds} reduce round(s)",
+            f"- Written by: {' '.join(template)}",
+            f"- Prompt: {PROMPT_VERSION if not n['prompt_file'] else prompt_path} "
+            f"(sha256 {fingerprints['prompt_sha256'][:16]})",
+            f"- Generated: {now_iso()}" + ("" if ok else "; the answer lacks the expected headings"),
             "- Speaker labels are from the transcript; mic is assumed to be the user.",
             "", ""])
-        write_text(out, header + partials[0] + "\n")
+        body = answer[answer.index(HEADINGS[0]):] if ok else answer
+        write_text(out, header + body + "\n")
         record_output(rec, "notes", out, fingerprints)
-        return out, "written"
+        return out, "written" if ok else "unstructured"

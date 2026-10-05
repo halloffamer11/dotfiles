@@ -1,66 +1,53 @@
 #!/usr/bin/env python3
-"""Tests for match, notes, run and queue (stdlib; a stub LLM server on loopback).
+"""Tests for match, notes, run and queue (stdlib; a stub agent CLI).
 
-notes   chunked map-reduce with no truncation (ollama API), openai API, header,
-        skip on unchanged fingerprints and rerun on a changed transcript,
-        refusal of a non-loopback endpoint and of a redirect, a malformed answer,
-        a hand-edited notes.md kept
+notes   command unset -> off; the hand-off on stdin holds the prompt and the
+        whole transcript; header; stdout and {output} answers; skip on unchanged
+        fingerprints and rerun on a changed transcript; a hand-edited notes.md
+        kept; timeout -> error; an answer without the headings is saved as
+        unstructured; a command that is not found
 match   a matched event with invitees, a tie (unmatched), source none, a weekly
         recurring event with TZID and EXDATE, an ics_url that is not file://
 run     state transitions (notes-ready, failed with reason), --if-enabled,
         queue picks new and stale recordings, skips failed unless --retry
 egress  (macOS, models present) the whole `run` (match, transcribe with the real
-        models, notes) inside a sandbox that allows only localhost; a request to
+        models) inside a sandbox that denies all network access; a request to
         the internet from the same sandbox fails
 
 Run:  make test-meeting-notes
 """
-import http.server, json, os, pathlib, platform, shutil, subprocess, sys, tempfile, threading
+import json, os, pathlib, platform, shutil, subprocess, sys, tempfile
 
 sys.dont_write_bytecode = True  # no __pycache__ under ~/.hammerspoon
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 CLI = ROOT / "stow/hammerspoon/.hammerspoon/bin/meeting-notes"
 WORK = pathlib.Path(tempfile.mkdtemp(prefix="mn-pipeline."))
-SECTIONS = "## Summary\n- {tag}\n\n## Decisions\n- None.\n\n## Action items\n- [S1] send the quote\n\n## Open questions\n- None.\n"
-LOCAL_ONLY = ('(version 1)(allow default)(deny network*)'
-              '(allow network-outbound (remote ip "localhost:*"))(allow network-outbound (remote unix-socket))')
+NO_NETWORK = "(version 1)(allow default)(deny network*)"
+STUB = WORK / "agent-stub"
+STUB_LOG = WORK / "agent-stub.log"
+STUB.write_text(f"""#!/usr/bin/python3
+# Stand-in for an agent CLI: records argv, cwd and stdin; answers per STUB_MODE.
+import json, os, sys, time
+data = sys.stdin.read()
+with open({str(STUB_LOG)!r}, "a") as f:
+    f.write(json.dumps({{"argv": sys.argv[1:], "cwd": os.getcwd(), "stdin": data}}) + "\\n")
+mode = os.environ.get("STUB_MODE", "ok")
+if mode == "sleep":
+    time.sleep(30)
+notes = "Here you go." if mode == "unstructured" else (
+    "Sure!\\n\\n## Summary\\n- schedule\\n\\n## Decisions\\n- None.\\n\\n"
+    "## Action items\\n- [S1] send the quote\\n\\n## Open questions\\n- None.\\n")
+if "-o" in sys.argv:
+    open(sys.argv[sys.argv.index("-o") + 1], "w").write(notes)
+    print("progress chatter that is not the answer")
+else:
+    print(notes)
+""")
+STUB.chmod(0o755)
 
 
-class Stub(http.server.BaseHTTPRequestHandler):
-    """Speaks /api/chat (ollama) and /v1/chat/completions (openai); records each request."""
-    log, mode = [], "ok"
-
-    def log_message(self, *a):
-        pass
-
-    def do_POST(self):
-        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-        Stub.log.append({"path": self.path, "body": body})
-        if Stub.mode == "redirect":
-            self.send_response(302)
-            self.send_header("Location", f"http://127.0.0.1:{PORT}/followed")  # loopback: a followed redirect stays local
-            self.end_headers()
-            return
-        if Stub.mode == "error":
-            self.send_response(500)
-            self.end_headers()
-            return
-        system = body["messages"][0]["content"]
-        tag = "reduce" if "combine partial" in system else "map"
-        content = "Sure! Here are notes." if Stub.mode == "bad" else SECTIONS.format(tag=tag)
-        reply = {"message": {"role": "assistant", "content": content}} if self.path == "/api/chat" else \
-            {"choices": [{"message": {"role": "assistant", "content": content}}]}
-        data = json.dumps(reply).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
-
-
-SERVER = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Stub)
-threading.Thread(target=SERVER.serve_forever, daemon=True).start()
-PORT = SERVER.server_port
+def stub_calls():
+    return [json.loads(l) for l in STUB_LOG.read_text().splitlines()] if STUB_LOG.exists() else []
 
 
 def config(path, **sections):
@@ -68,7 +55,7 @@ def config(path, **sections):
     for sec, vals in sections.items():
         lines.append(f"[{sec}]")
         for k, v in vals.items():
-            lines.append(f'{k} = {json.dumps(v) if isinstance(v, (str, bool)) else v}')
+            lines.append(f'{k} = {json.dumps(v) if isinstance(v, (str, bool, list)) else v}')
     path.write_text("\n".join(lines) + "\n")
     return dict(os.environ, MEETING_NOTES_CONFIG=str(path))
 
@@ -119,61 +106,62 @@ def pipeline_state(rec):
 
 def notes_cases():
     res = []
-    rec = make_rec("notes-a")
-    env = config(WORK / "n1.toml", notes={"endpoint": f"http://127.0.0.1:{PORT}", "model": "stub", "api": "ollama",
-                                          "chunk_chars": 200})
-    Stub.log.clear()
-    rc, out = cli(env, "notes", str(rec))
-    maps = [r for r in Stub.log if "combine partial" not in r["body"]["messages"][0]["content"]]
-    reduces = [r for r in Stub.log if "combine partial" in r["body"]["messages"][0]["content"]]
-    sent = "\n".join(r["body"]["messages"][1]["content"] for r in maps)
-    every_text = all(all(w in sent for w in t.split()) for _, _, t in SEGMENTS)
-    within = all(len(r["body"]["messages"][1]["content"].split("Transcript part", 1)[1]) < 200 + 40 for r in maps)
-    notes = (rec / "notes.md").read_text() if (rec / "notes.md").exists() else ""
-    header = all(x in notes for x in ("# Notes: notes-a", "- Transcript: sha256", "- Model: stub (ollama API",
-                                       "- Prompt: notes-v1", "## Action items"))
-    mode = oct((rec / "notes.md").stat().st_mode & 0o777) if notes else None
-    res.append(report("notes-chunked", rc == 0 and len(maps) >= 3 and len(reduces) >= 1 and every_text and within
-                      and header and mode == "0o600",
-                      f"maps={len(maps)} reduces={len(reduces)} all-text-sent={every_text} mode={mode}"))
+    rec = make_rec("notes-off")
+    rc, out = cli(config(WORK / "n0.toml"), "notes", str(rec))
+    res.append(report("notes-off", rc == 5 and "off" in out and not (rec / "notes.md").exists()))
 
-    Stub.log.clear()
+    rec = make_rec("notes-a")
+    env = config(WORK / "n1.toml", notes={"command": [str(STUB), "-p"]})
+    STUB_LOG.unlink(missing_ok=True)
     rc, out = cli(env, "notes", str(rec))
-    res.append(report("notes-skip", rc == 0 and "unchanged" in out and not Stub.log))
+    calls = stub_calls()
+    notes = (rec / "notes.md").read_text() if (rec / "notes.md").exists() else ""
+    sent = calls[0]["stdin"] if calls else ""
+    handoff = len(calls) == 1 and "Use exactly these four headings" in sent and "<transcript>" in sent \
+        and all(t in sent for _, _, t in SEGMENTS) and "] S2 (system): " in sent \
+        and calls[0]["argv"] == ["-p"] and os.path.realpath(calls[0]["cwd"]) == os.path.realpath(rec)
+    header = all(x in notes for x in ("# Notes: notes-a", "- Transcript: sha256", f"- Written by: {STUB} -p",
+                                       "- Prompt: notes-v1", "## Action items")) and "Sure!" not in notes
+    mode = oct((rec / "notes.md").stat().st_mode & 0o777) if notes else None
+    res.append(report("notes-handoff", rc == 0 and handoff and header and mode == "0o600",
+                      f"calls={len(calls)} mode={mode}"))
+    st = json.loads((rec / ".meeting-notes-state.json").read_text())["notes"]["fingerprints"]
+    res.append(report("notes-fingerprint", set(st) >= {"transcript_sha256", "command", "prompt_sha256"}))
+
+    STUB_LOG.unlink(missing_ok=True)
+    rc, out = cli(env, "notes", str(rec))
+    res.append(report("notes-skip", rc == 0 and "unchanged" in out and not stub_calls()))
     t = json.loads((rec / "transcript.json").read_text())
     t["segments"][0]["text"] = t["segments"][0]["text_clean"] = "A changed first sentence about the schedule."
     (rec / "transcript.json").write_text(json.dumps(t))
-    Stub.log.clear()
     rc, out = cli(env, "notes", str(rec))
-    res.append(report("notes-rerun", rc == 0 and len(Stub.log) > 0))
+    res.append(report("notes-rerun", rc == 0 and len(stub_calls()) == 1
+                      and "A changed first sentence" in stub_calls()[0]["stdin"]))
 
     (rec / "notes.md").write_text((rec / "notes.md").read_text() + "\nmy own line\n")
     rc, out = cli(env, "notes", str(rec), "--force")
     res.append(report("notes-hand-edit", rc == 4 and "edited by hand" in out))
 
-    rec = make_rec("notes-b")
-    env2 = config(WORK / "n2.toml", notes={"endpoint": f"http://localhost:{PORT}", "model": "stub", "api": "openai"})
-    Stub.log.clear()
-    rc, out = cli(env2, "notes", str(rec))
-    res.append(report("notes-openai", rc == 0 and [r["path"] for r in Stub.log] == ["/v1/chat/completions"] * 2,
-                      f"calls={[r['path'] for r in Stub.log]}"))
+    rec = make_rec("notes-file")
+    envf = config(WORK / "n2.toml", notes={"command": [str(STUB), "exec", "-o", "{output}"]})
+    rc, out = cli(envf, "notes", str(rec))
+    notes = (rec / "notes.md").read_text() if (rec / "notes.md").exists() else ""
+    res.append(report("notes-output-file", rc == 0 and "## Summary" in notes and "chatter" not in notes
+                      and not list(rec.glob(".notes-*"))))
 
-    rec = make_rec("notes-c")
-    for name, endpoint in (("notes-refuse-remote", "http://192.0.2.10:11434"),
-                           ("notes-refuse-name", "http://example.com:11434")):
-        env3 = config(WORK / "n3.toml", notes={"endpoint": endpoint, "model": "stub"})
-        rc, out = cli(env3, "notes", str(rec))
-        res.append(report(name, rc == 1 and "local only" in out and not (rec / "notes.md").exists(), out.strip()[-90:]))
+    rec = make_rec("notes-slow")
+    envs = config(WORK / "n3.toml", notes={"command": [str(STUB)], "timeout_s": 2})
+    rc, out = cli(dict(envs, STUB_MODE="sleep"), "notes", str(rec))
+    res.append(report("notes-timeout", rc == 1 and "timed out" in out and not (rec / "notes.md").exists()))
 
-    Stub.mode = "redirect"
-    rc, out = cli(env, "notes", str(rec))
-    res.append(report("notes-refuse-redirect", rc == 1 and "redirect" in out and not (rec / "notes.md").exists()))
-    Stub.mode = "bad"
-    rc, out = cli(env, "notes", str(rec))
-    res.append(report("notes-bad-answer", rc == 1 and "lacks" in out and not (rec / "notes.md").exists()))
-    Stub.mode = "ok"
-    rc, out = cli(config(WORK / "n4.toml"), "notes", str(rec))
-    res.append(report("notes-off", rc == 5 and "off" in out))
+    rec = make_rec("notes-plain")
+    rc, out = cli(dict(env, STUB_MODE="unstructured"), "notes", str(rec))
+    notes = (rec / "notes.md").read_text() if (rec / "notes.md").exists() else ""
+    res.append(report("notes-unstructured", rc == 0 and "unstructured" in out and "Here you go." in notes
+                      and "lacks the expected headings" in notes))
+
+    rc, out = cli(config(WORK / "n4.toml", notes={"command": ["no-such-agent-cli", "-p"]}), "notes", str(rec), "--force")
+    res.append(report("notes-missing-command", rc == 1 and "not found" in out))
     return res
 
 
@@ -240,19 +228,20 @@ def run_cases():
     res = []
     root = WORK / "rec"
     base = {"paths": {"recordings": str(root)}, "run": {"auto_run": True, "transcribe": False},
-            "notes": {"endpoint": f"http://127.0.0.1:{PORT}", "model": "stub"}}
+            "notes": {"command": [str(STUB), "-p"], "timeout_s": 2}}
     env = config(WORK / "r1.toml", **base)
     rec = make_rec("run-ok")
     rc, out = cli(env, "run", str(rec))
     res.append(report("run-notes-ready", rc == 0 and pipeline_state(rec).get("state") == "notes-ready", out.strip()[-80:]))
 
     rec = make_rec("run-fail")
-    Stub.mode = "error"
-    rc, out = cli(env, "run", str(rec))
+    rc, out = cli(dict(env, STUB_MODE="sleep"), "run", str(rec))
     st = pipeline_state(rec)
-    res.append(report("run-failed", rc == 1 and st.get("state") == "failed" and "HTTP 500" in (st.get("reason") or ""),
+    res.append(report("run-failed", rc == 1 and st.get("state") == "failed" and "timed out" in (st.get("reason") or ""),
                       str(st)))
-    Stub.mode = "ok"
+    rec = make_rec("run-plain")
+    rc, out = cli(dict(env, STUB_MODE="unstructured"), "run", str(rec))
+    res.append(report("run-notes-unstructured", rc == 0 and pipeline_state(rec).get("state") == "notes-unstructured"))
 
     off = config(WORK / "r2.toml", **dict(base, run={"auto_run": False, "transcribe": False}))
     rc, out = cli(off, "run", str(make_rec("run-off")), "--if-enabled")
@@ -264,7 +253,7 @@ def run_cases():
     meta["pipeline"] = {"state": "processing"}
     (stale / "recording.json").write_text(json.dumps(meta))
     for p in root.iterdir():  # leave only the folders this case is about
-        if p.name not in ("run-ok", "run-fail", "run-stale", "run-off"):
+        if p.name not in ("run-ok", "run-fail", "run-stale", "run-off", "run-plain"):
             shutil.rmtree(p)
     rc, out = cli(env, "queue")
     res.append(report("queue", rc == 0 and pipeline_state(stale).get("state") == "notes-ready"
@@ -303,17 +292,15 @@ def egress_case():
     cal = work / "cal.ics"
     cal.write_text(ics(vevent("e", "Bracket review", "20261005T150000Z", "20261005T153000Z", ["Alpha"])))
     # no_network = false: the outer sandbox below covers every process; sandboxes cannot nest
-    env = config(work / "e.toml", transcribe={"no_network": False},
-                 match={"source": "ics_file", "path": str(cal)},
-                 notes={"endpoint": f"http://127.0.0.1:{PORT}", "model": "stub"})
-    rc, out = cli(env, "run", str(rec), sandbox=LOCAL_ONLY)
+    env = config(work / "e.toml", transcribe={"no_network": False}, match={"source": "ics_file", "path": str(cal)})
+    rc, out = cli(env, "run", str(rec), sandbox=NO_NETWORK)
     st = pipeline_state(rec)
     t = json.loads((rec / "transcript.json").read_text()) if (rec / "transcript.json").exists() else {}
-    probe = subprocess.run(["/usr/bin/sandbox-exec", "-p", LOCAL_ONLY, "/usr/bin/python3", "-c",
+    probe = subprocess.run(["/usr/bin/sandbox-exec", "-p", NO_NETWORK, "/usr/bin/python3", "-c",
                             "import urllib.request; urllib.request.urlopen('https://example.com', timeout=5)"],
                            capture_output=True, text=True)
     sys_speakers = sorted({s["speaker"] for s in t.get("segments", []) if s["source"] == "system"})
-    return report("egress", rc == 0 and st.get("state") == "notes-ready" and probe.returncode != 0
+    return report("egress", rc == 0 and st.get("state") == "transcribed" and probe.returncode != 0
                   and t.get("max_speakers", {}).get("from") == "meeting.json invitees + 1",
                   f"state={st.get('state')} internet-blocked={probe.returncode != 0} speakers={sys_speakers} "
                   f"bound={t.get('max_speakers')} {out.strip()[-120:] if rc else ''}")
@@ -323,7 +310,6 @@ if __name__ == "__main__":
     try:
         results = notes_cases() + match_cases() + run_cases() + [config_case(), egress_case()]
     finally:
-        SERVER.shutdown()
         if "--keep" in sys.argv[1:]:
             print(f"kept: {WORK}")
         else:

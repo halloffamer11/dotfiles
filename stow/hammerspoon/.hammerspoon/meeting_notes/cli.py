@@ -12,7 +12,7 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name, helptext in (("match", "find the calendar event -> meeting.json"),
                            ("transcribe", "speech to text and speakers -> transcript.json"),
-                           ("notes", "local LLM notes -> notes.md"),
+                           ("notes", "hand the transcript to this machine's agent CLI -> notes.md"),
                            ("run", "match, transcribe, notes in order")):
         p = sub.add_parser(name, help=helptext)
         p.add_argument("dir")
@@ -24,8 +24,8 @@ def main(argv=None):
     q.add_argument("--if-enabled", action="store_true", help="do nothing (exit 5) unless auto_run = true")
     sub.add_parser("doctor", help="read-only health check")
     a = ap.parse_args(argv)
-    cfg = settings()
     try:
+        cfg = settings()
         if getattr(a, "if_enabled", False) and not cfg["run"]["auto_run"]:
             print("meeting-notes: auto_run is off ([run] auto_run = true in config.toml turns it on)")
             return EXIT_DISABLED
@@ -41,9 +41,10 @@ def main(argv=None):
             return 0
         path, how = {"match": match.run, "transcribe": transcribe.run, "notes": notes.run}[a.cmd](rec, cfg, a.force)
         if how == "off":
-            print("meeting-notes: notes are off ([notes] endpoint and model in config.toml)")
+            print("meeting-notes: notes are off ([notes] command in config.toml)")
             return EXIT_DISABLED
-        print(f"meeting-notes: unchanged, skipped: {path}" if how == "unchanged" else path)
+        print(f"meeting-notes: unchanged, skipped: {path}" if how == "unchanged" else
+              f"{path} (unstructured: the answer lacks the expected headings)" if how == "unstructured" else path)
         return 0
     except Refused as e:
         print(f"meeting-notes: {e}", file=sys.stderr)

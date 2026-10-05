@@ -1,9 +1,9 @@
 #!/usr/bin/python3
-"""meeting-notes — recording directory -> meeting.json, transcript.json, notes.md, on this machine only.
+"""meeting-notes — recording directory -> meeting.json, transcript.json (offline), notes.md (via the agent CLI).
 
   meeting-notes match <dir>        calendar event (local .ics only)      meeting_notes/match.py
   meeting-notes transcribe <dir>   speech to text + speakers, offline    meeting_notes/transcribe.py
-  meeting-notes notes <dir>        notes from a loopback-only local LLM  meeting_notes/notes.py
+  meeting-notes notes <dir>        hand off to this machine's agent CLI  meeting_notes/notes.py
   meeting-notes run <dir>          match -> transcribe -> notes          meeting_notes/pipeline.py
   meeting-notes queue              run every recording not yet processed
   meeting-notes doctor             read-only health check
@@ -15,7 +15,7 @@ input fingerprints are unchanged, and never overwrites an output edited by hand
 (the hash of what it wrote is kept in .meeting-notes-state.json).
 
 Exit: 0 done or unchanged, 1 error, 4 refused (hand-edited output), 5 off
-(notes not configured, or auto_run off with --if-enabled), 75 busy (locked).
+(notes command not set, or auto_run off with --if-enabled), 75 busy (locked).
 
 Settings: ~/.config/meeting-notes/config.toml (or $MEETING_NOTES_CONFIG), never
 committed. Only simple `key = value` lines under [section] headers are read;

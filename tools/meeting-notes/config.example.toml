@@ -22,11 +22,11 @@ source = "none"           # none | ics_file | ics_url (file:// only)
 path = ""                 # e.g. "~/Calendars/work.ics" for ics_file
 min_overlap = 0.5
 
-[notes]                   # off until endpoint and model are both set
-endpoint = ""             # loopback only, e.g. "http://127.0.0.1:11434"
-model = ""                # e.g. a model name the local server lists
-api = "ollama"            # ollama | openai
-chunk_chars = 12000
+[notes]                   # off until command is set; there is no default
+# command = ["claude", "-p"]                                          # answer on stdout
+# command = ["codex", "exec", "--skip-git-repo-check", "-o", "{output}"]  # answer in {output}
+# prompt_file = "~/.config/meeting-notes/prompt.md"   # default: the versioned repo prompt
+timeout_s = 900
 
 [run]
 auto_run = false          # true: Hammerspoon runs the pipeline after each recording

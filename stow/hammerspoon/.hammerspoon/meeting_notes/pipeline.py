@@ -3,10 +3,12 @@
 Order: match -> transcribe -> notes. match goes first because a matched meeting's
 invitee count bounds the diarizer's speaker count. Each stage is optional in
 [run] (match, transcribe, notes = true|false); match also needs a calendar
-source and notes an endpoint and model, else they are skipped.
+source and notes a [notes] command, else they are skipped.
 
-pipeline.state: processing, then transcribed (no notes stage), notes-ready, or
-failed with a reason. A hand-edited output is kept and the run goes on.
+pipeline.state: processing, then transcribed (no notes stage), notes-ready,
+notes-unstructured (the notes command answered without the four headings; its
+answer is saved), or failed with a reason. A hand-edited output is kept and the
+run goes on.
 
 queue runs every recording folder whose capture state is recorded or partial
 and whose pipeline state is missing, or processing with a free lock (a run that
@@ -33,15 +35,19 @@ def run(rec, cfg, force=False, log=print):
                 steps.append(("transcribe", transcribe.run))
             if r["notes"] and notes.enabled(cfg):
                 steps.append(("notes", notes.run))
+            final = None
             for name, fn in steps:
                 try:
                     path, how = fn(rec, cfg, force)
                     log(f"{name}: {how} {path or ''}".rstrip())
+                    if name == "notes":
+                        final = "notes-unstructured" if how == "unstructured" else "notes-ready"
                 except Refused as e:
                     log(f"{name}: kept as edited ({e})")
-            final = "notes-ready" if any(n == "notes" for n, _ in steps) and os.path.exists(
-                os.path.join(rec, "notes.md")) else "transcribed" if os.path.exists(
-                os.path.join(rec, "transcript.json")) else "processed"
+                    if name == "notes":
+                        final = "notes-ready"
+            if final is None:
+                final = "transcribed" if os.path.exists(os.path.join(rec, "transcript.json")) else "processed"
             set_pipeline(rec, final)
             return final
         except Exception as e:

@@ -12,7 +12,7 @@ DEFAULTS = {
                "models_root": MODELS_ROOT, "diarizer_folder": "speaker-diarization"},
     "transcribe": {"pause_s": 1.0, "min_speaker_s": 3.0, "echo_min_words": 3, "max_speakers": 0,
                    "num_speakers": 0, "no_network": True},
-    "notes": {"endpoint": "", "model": "", "api": "ollama", "chunk_chars": 12000, "timeout_s": 900},
+    "notes": {"command": [], "prompt_file": "", "timeout_s": 900},
     "match": {"source": "none", "path": "", "min_overlap": 0.5},
     "run": {"auto_run": False, "match": True, "transcribe": True, "notes": True},
 }
@@ -31,7 +31,7 @@ class Busy(Exception):
 # ---------- settings ----------
 
 def parse_toml_subset(text):
-    """[section] headers and key = "string" | number | true/false lines; # comments."""
+    """[section] headers and key = "string" | ["string", ...] | number | true/false lines; # comments."""
     out = {}
     section = out
     for raw in text.splitlines():
@@ -41,6 +41,10 @@ def parse_toml_subset(text):
         m = re.fullmatch(r"\[([A-Za-z0-9_.-]+)\]\s*(#.*)?", line)
         if m:
             section = out.setdefault(m.group(1), {})
+            continue
+        m = re.fullmatch(r'([A-Za-z0-9_-]+)\s*=\s*\[((?:\s*"[^"]*"\s*,?)*)\]\s*(#.*)?', line)
+        if m:
+            section[m.group(1)] = re.findall(r'"([^"]*)"', m.group(2))
             continue
         m = re.fullmatch(r'([A-Za-z0-9_-]+)\s*=\s*(?:"([^"]*)"|([^#\s]+))\s*(#.*)?', line)
         if not m:

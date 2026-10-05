@@ -41,15 +41,15 @@ def run(cfg):
             if os.path.isdir(p) and os.path.exists(os.path.join(p, "recording.json")) and os.stat(p).st_mode & 0o077:
                 line(False, f"recording folder {p} is readable by others")
     n = cfg["notes"]
-    if n["endpoint"] or n["model"]:
-        from .notes import check_loopback
-        try:
-            check_loopback(n["endpoint"])
-            line(bool(n["model"]), f"notes endpoint {n['endpoint']} is loopback; model {n['model'] or '(not set)'}")
-        except ValueError as e:
-            line(False, f"notes endpoint: {e}")
+    if n["command"]:
+        from .notes import resolve
+        cmd = n["command"] if isinstance(n["command"], list) else [n["command"]]
+        found = resolve(cmd[0])
+        line(bool(found), f"notes command {cmd[0]} ({found or 'not found'})")
+        if n["prompt_file"]:
+            line(os.path.exists(os.path.expanduser(n["prompt_file"])), f"notes prompt_file {n['prompt_file']}")
     else:
-        print("off   notes (notes endpoint and model not set)")
+        print("off   notes ([notes] command not set)")
     print(f"{'on  ' if cfg['run']['auto_run'] else 'off '}  auto_run (Hammerspoon starts the pipeline after a recording)")
     print("ALL OK" if ok else "PROBLEMS FOUND")
     return 0 if ok else 1
