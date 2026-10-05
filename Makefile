@@ -18,6 +18,8 @@
 #   make audiotee    # build the audiotee system-audio capture binary into ~/.local/bin (Swift 5.9+, macOS 14.2+)
 #   make mictee      # build the mictee mic capture binary into ~/.local/bin (Swift)
 #   make test-recorder  # regression harness for the record-meeting rig
+#   make meeting-notes  # build meeting-asr (FluidAudio 0.17.5 adapter) into ~/.local/bin; build dir outside the repo
+#   make test-meeting-notes  # offline transcribe test on a synthetic recording (macOS; skips without meeting-asr)
 #
 # Editing:
 #   - PROFILE: macos, omarchy or linux, detected (Darwin; Omarchy's /usr/share/omarchy or
@@ -72,7 +74,7 @@ EXTRA_BREWFILES ?=
 DOCTOR_UPSTREAM ?= dotfiles delegate
 SKILLS_CLI = DISABLE_TELEMETRY=1 npx -y skills@latest
 
-.PHONY: bootstrap preflight conflicts doctor brew apply configs configs-plan skills externals external-updates update delegate audiotee mictee test-recorder test-bootstrap
+.PHONY: bootstrap preflight conflicts doctor brew apply configs configs-plan skills externals external-updates update delegate audiotee mictee meeting-notes test-recorder test-meeting-notes test-bootstrap
 
 # Prerequisites run left to right. Each profile first checks what it cannot do without, so
 # a machine missing one stops before anything in the home directory changes; existing
@@ -199,8 +201,18 @@ mictee:
 	mkdir -p $(HOME)/.local/bin
 	swiftc -O -o $(HOME)/.local/bin/mictee $(CURDIR)/tools/mictee/mictee.swift
 
+# Debug on purpose: a release build of FluidAudio takes over 20 minutes; Core ML does the work.
+MEETING_NOTES_BUILD = $(HOME)/.cache/meeting-notes/build
+meeting-notes:
+	mkdir -p $(HOME)/.local/bin
+	swift build -c debug --package-path $(CURDIR)/tools/meeting-notes --scratch-path $(MEETING_NOTES_BUILD)
+	install $(MEETING_NOTES_BUILD)/out/Products/Debug/meeting-asr $(HOME)/.local/bin/meeting-asr
+
 test-bootstrap:
 	@for t in $(CURDIR)/tests/bootstrap/*.sh; do sh "$$t" || exit 1; done
+
+test-meeting-notes:
+	python3 $(CURDIR)/tools/meeting-notes/tests/transcribe_test.py
 
 test-recorder:
 	python3 $(CURDIR)/tools/record-meeting-tests/finalize_test.py
