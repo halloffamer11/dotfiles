@@ -35,8 +35,11 @@ g reset -q --hard
 SKIP_GITLEAKS=1 PATH="$stubs:$PATH" commit FAKE_SECRET >/dev/null 2>&1
 check "hooks: SKIP_GITLEAKS=1 lets it through" [ "$(g rev-list --count HEAD)" = 2 ]
 
-# No gitleaks on PATH: warn and commit.
-nogl=$(PATH=$(printf '%s' "$PATH" | tr ':' '\n' | while read -r d; do [ -x "$d/gitleaks" ] || printf '%s:' "$d"; done); commit unscanned 2>&1)
+# No gitleaks on PATH: warn and commit. A PATH of only the tools the hook needs,
+# since gitleaks may share a directory with git (Homebrew on the macOS runner).
+bare=$(mktemp -d)
+for c in git sh basename; do ln -s "$(command -v $c)" "$bare/$c"; done
+nogl=$(PATH="$bare" commit unscanned 2>&1)
 check "hooks: without gitleaks the commit goes through with a warning" \
   sh -c '[ "$1" = 3 ] && printf "%s\n" "$2" | grep -q "not installed"' _ "$(g rev-list --count HEAD)" "$nogl"
 
