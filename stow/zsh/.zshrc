@@ -54,7 +54,7 @@ eval "$(zoxide init zsh)"
 # --- WezTerm shell integration (OSC 7 cwd + OSC 133 prompt zones) ---
 # Must come after starship init: both register precmd hooks, and this one
 # needs to run last so it wraps the prompt starship just generated.
-# Guarded: silently a no-op on machines without the file (e.g. work laptop).
+# Guarded: silently a no-op on machine deployments without the file.
 if [ -f "$HOME/.config/wezterm/shell-integration.sh" ]; then
   source "$HOME/.config/wezterm/shell-integration.sh"
 fi

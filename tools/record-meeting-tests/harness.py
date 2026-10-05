@@ -11,7 +11,7 @@ and validates the failure modes that have actually bitten:
   4. triple-INT        signal hammering
   5. concurrent        second invocation must refuse, first must survive
   6. orphan-recovery   SIGKILL leaves capture legs running; next run must reap
-                       them and record successfully (work-laptop "crisscross")
+                       them and record successfully (the "crisscross" case)
 
 Run:  make test-recorder     (or: python3 tools/record-meeting-tests/harness.py)
 Recordings go to a throwaway temp dir; nothing touches ~/Recordings.

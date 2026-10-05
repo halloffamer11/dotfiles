@@ -24,6 +24,12 @@ The user is a highly educated mechanical and aerospace engineer. I have speciali
 ## Delegation
 Delegation follows the owner's latest explicit instruction. Default: Claude agents; a stronger model for drafting, legal, tax and verification; a lighter one for extraction. Other vendors only when the owner names them.
 
+## Deployment Privacy
+- Each machine I use is a machine deployment. A group of machines with shared settings is a site deployment.
+- Do not name, describe or refer to the organization, site or machine that a deployment serves in anything that leaves the session: commits, branch names, pull requests, comments, tickets, docs, code, test fixtures and sample configs.
+- Write only the generic terms "site deployment" and "machine deployment". Put details that are specific to one deployment in machine-local files that are never committed.
+- If a repository already contains such a detail, tell me. Do not copy it.
+
 # User Preferences 
 The user is the human at the other end of the terminal. Who you are interacting with.
 

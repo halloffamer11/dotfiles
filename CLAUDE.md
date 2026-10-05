@@ -31,6 +31,10 @@ skills CLI) and `halloffamer11/delegate` (its own installer). They split out on
 - Never stow or commit `~/.config/delegate/` or the `lane-*.md` agents; they are
   machine-local (see the delegate repo).
 - A project's `.delegate/` policy never goes to main.
+- Keep the repo generic. Name no organization, site or machine that a deployment
+  serves. Call a target a site deployment or a machine deployment; its specific
+  settings stay in machine-local files (`local.mk`, `~/.gitconfig.local`,
+  `~/.zshrc.local`) that are never committed.
 - Preserve unrelated working-tree changes.
 - Validate the smallest affected surface before committing.
 
