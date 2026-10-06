@@ -18,9 +18,11 @@ enhance     off by default; skipped (with the reason) when VoiceInk's mode has i
 run         (macOS, models present) transcribed with the skip reason recorded,
             enhanced, failed with a reason, --if-enabled; queue picks new and
             stale recordings and retries failed ones only with --retry
-master      master.caf is removed after a transcript once listen.m4a is stereo
-            and as long (an old mono listen.m4a is re-made in stereo first),
-            never with keep_master = true; the folder then reads from listen.m4a
+master      master.caf is removed after a transcript once <id>.m4a is stereo
+            and as long (an old mono one is re-made in stereo first), never
+            with keep_master = true; the folder then reads from <id>.m4a
+names       old generic names (listen.m4a, transcript.md, transcript.json,
+            enhanced.md) are renamed to <id>.* and recording.json follows
 egress      (macOS, models present) the whole run inside a sandbox that denies
             all network access; a request to the internet from it fails
 
@@ -105,13 +107,13 @@ def cli(e, *args, sandbox=None):
 
 
 def text_rec(name):
-    """A recording folder with a transcript.md only (enough for enhance)."""
+    """A recording folder with a <id>.md transcript only (enough for enhance)."""
     rec = WORK / "rec" / name
     rec.mkdir(parents=True, mode=0o700)
     (rec / "master.caf").write_bytes(b"stand-in")
     (rec / "recording.json").write_text(json.dumps({"format_version": 1, "id": name, "state": "recorded",
                                                     "legs": {"mic": {"present": True}, "system": {"present": True}}}))
-    (rec / "transcript.md").write_text("# Transcript: x\n\n- Model: m\n\n---\n\n"
+    (rec / f"{name}.md").write_text("# Transcript: x\n\n- Model: m\n\n---\n\n"
                                        "**[00:01] System:** um the supplier confirmed a delay\n\n"
                                        "**[00:05] Mic:** please send the quote before Wednesday\n")
     return rec
@@ -175,7 +177,7 @@ def enhance_cases():
              "first connected provider"),
             ("enhance-no-template", env("e4", plist("p4", template=""), enhance={"enabled": True}), "template is empty")):
         rc, out = cli(e, "enhance", str(rec))
-        res.append(report(name, rc == 5 and want in out and not (rec / "enhanced.md").exists(), out.strip()[-100:]))
+        res.append(report(name, rc == 5 and want in out and not (rec / f"{rec.name}.enhanced.md").exists(), out.strip()[-100:]))
 
     rec = text_rec("enh-arg")
     e = env("e5", plist("p5"), enhance={"enabled": True})
@@ -185,23 +187,23 @@ def enhance_cases():
     c = calls[0] if calls else {"argv": [], "env": {}, "stdin": "", "cwd": ""}
     system, user, full = (c["env"].get(k, "") for k in ("VOICEINK_SYSTEM_PROMPT", "VOICEINK_USER_PROMPT",
                                                         "VOICEINK_FULL_PROMPT"))
-    body = (rec / "enhanced.md").read_text() if (rec / "enhanced.md").exists() else ""
+    body = (rec / f"{rec.name}.enhanced.md").read_text() if (rec / f"{rec.name}.enhanced.md").exists() else ""
     ok = (rc == 0 and len(calls) == 1 and c["argv"] == [full] and c["stdin"] == ""
           and system == FAKE_TEMPLATE.replace("%@", "Clean up the transcript.")
           and user == "\n<TRANSCRIPT>\n[00:01] System: um the supplier confirmed a delay\n"
                       "[00:05] Mic: please send the quote before Wednesday\n</TRANSCRIPT>"
           and "<SYSTEM_MESSAGE>" in full and "<USER_MESSAGE_PAYLOAD>" in full
           and os.path.realpath(c["cwd"]) != os.path.realpath(rec) and "The enhanced transcript." in body
-          and oct((rec / "enhanced.md").stat().st_mode & 0o777) == "0o600")
+          and oct((rec / f"{rec.name}.enhanced.md").stat().st_mode & 0o777) == "0o600")
     res.append(report("enhance-argument", ok, f"calls={len(calls)}"))
     st = pipeline_state(rec)
     rc, out = cli(e, "enhance", str(rec))
     res.append(report("enhance-skip", rc == 0 and "unchanged" in out and len(stub_calls()) == 1))
-    (rec / "transcript.md").write_text("# Transcript: x\n\n---\n\n**[00:01] System:** a changed line\n")
+    (rec / f"{rec.name}.md").write_text("# Transcript: x\n\n---\n\n**[00:01] System:** a changed line\n")
     rc, out = cli(e, "enhance", str(rec))
     res.append(report("enhance-rerun", rc == 0 and len(stub_calls()) == 2 and "a changed line" in
                       stub_calls()[-1]["env"]["VOICEINK_USER_PROMPT"]))
-    (rec / "enhanced.md").write_text(body + "my edit\n")
+    (rec / f"{rec.name}.enhanced.md").write_text(body + "my edit\n")
     rc, out = cli(e, "enhance", str(rec), "--force")
     res.append(report("enhance-hand-edit", rc == 4 and "edited by hand" in out))
 
@@ -216,7 +218,7 @@ def enhance_cases():
     rec = text_rec("enh-slow")
     rc, out = cli(dict(env("e7", plist("p7"), enhance={"enabled": True, "timeout_s": 2}), STUB_MODE="sleep"),
                   "enhance", str(rec))
-    res.append(report("enhance-timeout", rc == 1 and "timed out" in out and not (rec / "enhanced.md").exists()))
+    res.append(report("enhance-timeout", rc == 1 and "timed out" in out and not (rec / f"{rec.name}.enhanced.md").exists()))
     return res
 
 
@@ -246,14 +248,14 @@ def run_cases():
     rc, out = cli(plain, "run", str(rec))
     st = pipeline_state(rec)
     res.append(report("run-transcribed", rc == 0 and st.get("state") == "transcribed"
-                      and (st.get("enhancement") or "").startswith("skipped: off") and (rec / "transcript.md").exists(),
+                      and (st.get("enhancement") or "").startswith("skipped: off") and (rec / f"{rec.name}.md").exists(),
                       str(st)))
 
     enh = env("r1", plist("q1"), enhance={"enabled": True}, **base)
     rec = recording("enhanced")
     rc, out = cli(enh, "run", str(rec))
     res.append(report("run-enhanced", rc == 0 and pipeline_state(rec).get("state") == "enhanced"
-                      and (rec / "enhanced.md").exists()))
+                      and (rec / f"{rec.name}.enhanced.md").exists()))
 
     rec = recording("fails")
     rc, out = cli(dict(env("r2", plist("q2"), enhance={"enabled": True, "timeout_s": 2}, **base), STUB_MODE="sleep"),
@@ -308,9 +310,9 @@ def master_cases():
         subprocess.run([ffmpeg, "-loglevel", "error", "-y", *two, "-ar", "48000", "-c:a", "pcm_f32le", "-f", "caf",
                         str(rec / "master.caf")], check=True)
         subprocess.run([ffmpeg, "-loglevel", "error", "-y", "-i", str(rec / "master.caf"), "-ac", str(listen_ch),
-                        "-c:a", "aac", "-b:a", "256k", "-f", "mp4", str(rec / "listen.m4a")], check=True)
+                        "-c:a", "aac", "-b:a", "256k", "-f", "mp4", str(rec / f"{name}.m4a")], check=True)
         (rec / "recording.json").write_text(json.dumps({"format_version": 1, "id": name, "state": "recorded",
-                                                        "files": {"master": "master.caf", "listen": "listen.m4a"}}))
+                                                        "files": {"master": "master.caf", "listen": f"{name}.m4a"}}))
         return rec
 
     res = []
@@ -320,14 +322,25 @@ def master_cases():
     common.read_recording(str(rec))
     res.append(report("master-removed", removed and not (rec / "master.caf").exists()
                       and meta["files"]["master"] is None and "master_removed" in meta
-                      and common.audio_source(str(rec)).endswith("listen.m4a")))
+                      and common.audio_source(str(rec)).endswith("stereo.m4a")))
     rec = rec_with("mono-listen", 1)
     removed = transcribe.remove_master(rec, cfg)
     res.append(report("master-old-mono-listen", removed and not (rec / "master.caf").exists()
-                      and common.probe(str(rec / "listen.m4a"))[0] == 2))
+                      and common.probe(str(rec / "mono-listen.m4a"))[0] == 2))
     rec = rec_with("keep", 2)
     keep = dict(cfg, transcribe=dict(cfg["transcribe"], keep_master=True))
     res.append(report("master-kept-keep_master", not transcribe.remove_master(rec, keep) and (rec / "master.caf").exists()))
+    rec = rec_with("old-names", 2)
+    (rec / "old-names.m4a").rename(rec / "listen.m4a")
+    for old in ("transcript.md", "transcript.json", "enhanced.md"):
+        (rec / old).write_text(old)
+    common.read_recording(str(rec))
+    meta = json.loads((rec / "recording.json").read_text())
+    res.append(report("names-migrated", all((rec / f"old-names{ext}").read_text() == old for ext, old in
+                                            ((".md", "transcript.md"), (".json", "transcript.json"),
+                                             (".enhanced.md", "enhanced.md")))
+                      and (rec / "old-names.m4a").exists() and not (rec / "listen.m4a").exists()
+                      and meta["files"]["listen"] == "old-names.m4a"))
     return res
 
 

@@ -1,4 +1,4 @@
-"""enhance: transcript.md -> enhanced.md, the way VoiceInk enhances a transcript
+"""enhance: <id>.md -> <id>.enhanced.md, the way VoiceInk enhances a transcript
 with its "Local CLI" AI provider. Optional, on top of transcription.
 
 Runs only when all of these hold; otherwise it is skipped and the reason is kept
@@ -17,7 +17,7 @@ VOICEINK_SYSTEM_PROMPT, VOICEINK_USER_PROMPT and VOICEINK_FULL_PROMPT in the
 environment; the full prompt also goes to stdin unless the template passes
 $VOICEINK_FULL_PROMPT as an argument; the answer is stdout. System prompt = the
 mode's prompt text inside VoiceInk's template; user prompt = the transcript lines
-of transcript.md (below its "---" rule, as plain "[mm:ss] Speaker: text") in
+of the <id>.md transcript (below its "---" rule, as plain "[mm:ss] Speaker: text") in
 <TRANSCRIPT> tags. Timeout: [enhance] timeout_s, else VoiceInk's
 localCLITimeoutSeconds. It runs in an empty temporary folder. Not mirrored:
 VoiceInk's custom vocabulary block (in its own database).
@@ -25,7 +25,7 @@ VoiceInk's custom vocabulary block (in its own database).
 import os, signal, subprocess, tempfile
 
 from . import voiceink
-from .common import guard, now_iso, read_recording, record_output, recording_lock, sha256_file, sha256_text, \
+from .common import guard, names, now_iso, read_recording, record_output, recording_lock, sha256_file, sha256_text, \
     write_text
 
 EXTRA_PATH = ("~/.local/bin", "/opt/homebrew/bin", "/usr/local/bin")
@@ -90,7 +90,7 @@ def call(template, system, user, timeout):
 
 
 def transcript_lines(md):
-    """The segment lines of transcript.md as plain text, one per line."""
+    """The segment lines of the <id>.md transcript as plain text, one per line."""
     body = md.split("\n---\n", 1)[1] if "\n---\n" in md else md
     return "\n".join(l.replace("**", "", 2) for l in body.splitlines() if l.strip())
 
@@ -103,10 +103,9 @@ def run(rec, cfg, force=False):
         return None, f"skipped: {s}"
     with recording_lock(rec):
         meta = read_recording(rec)
-        src = os.path.join(rec, "transcript.md")
+        src, out = names(rec)["transcript"], names(rec)["enhanced"]
         if not os.path.exists(src):
-            raise RuntimeError("no transcript.md; run transcribe first")
-        out = os.path.join(rec, "enhanced.md")
+            raise RuntimeError(f"no {os.path.basename(src)}; run transcribe first")
         timeout = float(cfg["enhance"]["timeout_s"] or e["cli_timeout_s"])
         fingerprints = {"transcript_sha256": sha256_file(src), "template": e["cli_template"],
                         "system_sha256": sha256_text(system), "timeout_s": timeout}

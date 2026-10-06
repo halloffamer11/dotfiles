@@ -1,8 +1,8 @@
 #!/usr/bin/python3
 """meeting-notes — transcribe a recording folder the way VoiceInk transcribes a dropped file.
 
-  meeting-notes transcribe <dir>   VoiceInk's model, offline -> transcript.json + .md    meeting_notes/transcribe.py
-  meeting-notes enhance <dir>      VoiceInk's Local CLI enhancement -> enhanced.md       meeting_notes/enhance.py
+  meeting-notes transcribe <dir>   VoiceInk's model, offline -> <id>.json + <id>.md    meeting_notes/transcribe.py
+  meeting-notes enhance <dir>      VoiceInk's Local CLI enhancement -> <id>.enhanced.md  meeting_notes/enhance.py
   meeting-notes run <dir>          transcribe, then enhance                               meeting_notes/pipeline.py
   meeting-notes queue              run every recording not yet processed
   meeting-notes doctor             read-only health check, incl. VoiceInk's settings
