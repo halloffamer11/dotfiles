@@ -3,7 +3,7 @@
 
 Builds raw legs the way record-meeting leaves them in its temp dir, with a click
 at one known instant in each leg, runs finalize, and checks master.caf,
-listen.m4a and recording.json:
+<id>.m4a and recording.json:
 
   1. aligned          mic starts 100 ms after system; clicks coincide in master.caf
   2. mic-gap          mictee logs a gap; the silence keeps the mic click aligned
@@ -112,7 +112,7 @@ def case_aligned():
         "timing": meta and meta["legs"]["mic"]["timing"] == "host-time"
         and meta["legs"]["system"]["timing"] == "first-data-estimate",
         "length": abs(len(sysc) - 10 * RATE) <= 1,
-        "listen-stereo": listen_channels(out / "listen.m4a") == 2,
+        "listen-stereo": listen_channels(out / f"{out.parent.name}.m4a") == 2,
         "json": meta and meta["format_version"] == 1 and meta["channels"] == {"0": "mic", "1": "system"},
         "mode700": oct(out.stat().st_mode & 0o777) == "0o700",
     })
@@ -136,7 +136,7 @@ def case_missing_mic():
         "rc3": rc == 3, "state": meta and meta["state"] == "partial",
         "ch0-silent": max(abs(v) for v in mic) == 0, "length": abs(len(mic) - 6 * RATE) <= 1,
         "marked": meta and meta["legs"]["mic"]["present"] is False,
-        "listen": (out / "listen.m4a").exists(),
+        "listen": (out / f"{out.parent.name}.m4a").exists(),
     })
 
 

@@ -198,11 +198,40 @@ def record_output(rec, stage, out, fingerprints):
     write_json(_state_path(rec), state)
 
 
+def names(rec):
+    """The files a user keeps are named after the recording (its folder name, such
+    as meeting-2026-10-06-081106), so each still says which meeting it is when
+    copied into a flat folder: <id>.m4a (stereo audio), <id>.md (transcript),
+    <id>.json (transcript details) and <id>.enhanced.md."""
+    base = os.path.basename(os.path.normpath(rec))
+    return {"audio": os.path.join(rec, f"{base}.m4a"), "transcript": os.path.join(rec, f"{base}.md"),
+            "details": os.path.join(rec, f"{base}.json"), "enhanced": os.path.join(rec, f"{base}.enhanced.md")}
+
+
+LEGACY_NAMES = {"audio": "listen.m4a", "transcript": "transcript.md", "details": "transcript.json",
+                "enhanced": "enhanced.md"}
+
+
+def migrate_names(rec):
+    """Rename a recording's files from the old generic names (listen.m4a,
+    transcript.md, transcript.json, enhanced.md) to the named ones."""
+    new = names(rec)
+    for key, old in LEGACY_NAMES.items():
+        path = os.path.join(rec, old)
+        if os.path.exists(path) and not os.path.exists(new[key]):
+            os.replace(path, new[key])
+            if key == "audio":
+                meta_path = os.path.join(rec, "recording.json")
+                meta = json.load(open(meta_path))
+                meta.setdefault("files", {})["listen"] = os.path.basename(new[key])
+                write_json(meta_path, meta)
+
+
 def audio_source(rec):
     """master.caf while it exists; after transcription it is removed and the stereo
-    listen.m4a (ch0 = mic, ch1 = system) is the recording."""
+    <id>.m4a (ch0 = mic, ch1 = system) is the recording."""
     master = os.path.join(rec, "master.caf")
-    return master if os.path.exists(master) else os.path.join(rec, "listen.m4a")
+    return master if os.path.exists(master) else names(rec)["audio"]
 
 
 def probe(path):
@@ -218,9 +247,12 @@ def probe(path):
 
 
 def read_recording(rec):
+    """recording.json, after migrate_names (callers hold the recording lock)."""
     path = os.path.join(rec, "recording.json")
+    if os.path.exists(path):
+        migrate_names(rec)
     if not (os.path.exists(path) and os.path.exists(audio_source(rec))):
-        raise ValueError(f"{rec} has no recording.json + master.caf or listen.m4a "
+        raise ValueError(f"{rec} has no recording.json + master.caf or .m4a "
                          "(older flat recordings are not supported)")
     meta = json.load(open(path))
     if meta.get("format_version") != 1 or meta.get("state") not in ("recorded", "partial"):

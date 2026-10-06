@@ -10,8 +10,8 @@ EXIT_DISABLED, EXIT_REFUSED, EXIT_BUSY = 5, 4, 75
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="meeting-notes")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name, helptext in (("transcribe", "VoiceInk's model, offline -> transcript.json + transcript.md"),
-                           ("enhance", "VoiceInk's Local CLI enhancement -> enhanced.md (optional)"),
+    for name, helptext in (("transcribe", "VoiceInk's model, offline -> <id>.json + <id>.md"),
+                           ("enhance", "VoiceInk's Local CLI enhancement -> <id>.enhanced.md (optional)"),
                            ("run", "transcribe, then enhance")):
         p = sub.add_parser(name, help=helptext)
         p.add_argument("dir")

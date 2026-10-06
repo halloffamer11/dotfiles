@@ -1,10 +1,10 @@
-"""transcribe: master.caf (or the stereo listen.m4a) -> transcript.json + transcript.md, offline, the way
+"""transcribe: master.caf (or the stereo <id>.m4a) -> <id>.json + <id>.md, offline, the way
 VoiceInk transcribes a file dragged onto it.
 
 Model: VoiceInk's selected model (voiceink.py), or [transcribe] model in
 config.toml. When it cannot run offline here (a cloud model, a model this tool
 does not support, or missing files), the next of voiceink.FALLBACKS that loads
-is used; transcript.json "model" records what was asked for, what was used, and
+is used; <id>.json "model" records what was asked for, what was used, and
 why each skipped one was skipped. Every meeting-asr call runs in a no-network
 sandbox (no_network = true).
 
@@ -32,18 +32,18 @@ Not mirrored: VoiceInk's VAD setting.
              dropped; only when the system copy is weaker (mean word confidence
              lower by more than 0.1) is the mic run kept instead, as source=mic
              with echo_of_system=true, and the system words dropped.
-  fingerprints  sha256 of listen.m4a (master.caf when there is none), the model used (and a manifest hash of its
+  fingerprints  sha256 of <id>.m4a (master.caf when there is none), the model used (and a manifest hash of its
              folder), the adapter and FluidAudio versions, and the settings.
              Unchanged fingerprints: the run is skipped.
 
-transcript.md: a short header (recording, recorded times, model, channel roles),
+<id>.md (the transcript): a short header (recording, recorded times, model, channel roles),
 a "---" rule, then the segments in time order, one paragraph each:
 "**[mm:ss] Speaker:** text".
 """
 import json, math, os, platform, re, subprocess, tempfile, time
 
 from . import voiceink
-from .common import (FFMPEG, FORMAT_VERSION, adapter, audio_source, probe, guard, manifest, now_iso, read_recording, record_output,
+from .common import (FFMPEG, FORMAT_VERSION, adapter, audio_source, names, probe, guard, manifest, now_iso, read_recording, record_output,
                      recording_lock, sha256_file, sha256_text, write_json, write_text)
 
 
@@ -237,8 +237,7 @@ def run(rec, cfg, force=False):
     with recording_lock(rec):
         meta = read_recording(rec)
         src = audio_source(rec)
-        listen = os.path.join(rec, "listen.m4a")
-        out = os.path.join(rec, "transcript.json")
+        listen, out = names(rec)["audio"], names(rec)["details"]
         t = cfg["transcribe"]
         vi = voiceink.settings()
         fillers = vi["filler_words"]
@@ -355,14 +354,14 @@ def run(rec, cfg, force=False):
                                             "confidence", "words")}
                          | ({"echo_of_system": True} if s.get("echo_of_system") else {}) for s in segments],
         }
-        write_text(os.path.join(rec, "transcript.md"), markdown(transcript))
+        write_text(names(rec)["transcript"], markdown(transcript))
         write_json(out, transcript)
         record_output(rec, "transcript", out, fingerprints)
         remove_master(rec, cfg)
         return out, "written"
 
 
-# The recorder's listen.m4a chain (record-meeting-finalize): mic left +6 dB, system
+# The recorder's <id>.m4a chain (record-meeting-finalize): mic left +6 dB, system
 # right, limiter, 256k AAC.
 STEREO_LISTEN = ("[0:a]channelsplit=channel_layout=stereo[m][s];[m]volume=6dB,alimiter=limit=0.97[mv];"
                  "[s]alimiter=limit=0.97[sv];[mv][sv]join=inputs=2:channel_layout=stereo:map=0.0-FL|1.0-FR[o]")
@@ -370,11 +369,11 @@ STEREO_LISTEN = ("[0:a]channelsplit=channel_layout=stereo[m][s];[m]volume=6dB,al
 
 def remove_master(rec, cfg):
     """Once a transcript exists, master.caf (about 1.4 GB an hour) goes; the stereo
-    listen.m4a keeps both channels for playback and for a later rerun. A recording
-    made before listen.m4a was stereo gets a stereo listen.m4a from master.caf
-    first. Kept when [transcribe] keep_master = true, or when listen.m4a does not
+    <id>.m4a keeps both channels for playback and for a later rerun. A recording
+    made before the .m4a was stereo gets a stereo one from master.caf
+    first. Kept when [transcribe] keep_master = true, or when the .m4a does not
     come out stereo and as long as master.caf."""
-    master, listen = os.path.join(rec, "master.caf"), os.path.join(rec, "listen.m4a")
+    master, listen = os.path.join(rec, "master.caf"), names(rec)["audio"]
     if cfg["transcribe"]["keep_master"] or not os.path.exists(master):
         return False
     pm = probe(master)
@@ -398,6 +397,6 @@ def remove_master(rec, cfg):
     path = os.path.join(rec, "recording.json")
     meta = json.load(open(path))
     meta.setdefault("files", {})["master"] = None
-    meta["master_removed"] = {"at": now_iso(), "reason": "transcribed; listen.m4a holds both channels"}
+    meta["master_removed"] = {"at": now_iso(), "reason": "transcribed; the .m4a holds both channels"}
     write_json(path, meta)
     return True

@@ -4,7 +4,7 @@
 # avfoundation input drops mic buffers under load, measured 58-75% loss).
 # Output: one directory per recording, ~/Recordings/meeting-<ts>/ (mode 700):
 #   master.caf      lossless 48 kHz float, ch0 = mic, ch1 = system, one timeline
-#   listen.m4a      listening mix derived from master.caf (+6dB mic, limiter, 256k AAC)
+#   <id>.m4a        stereo listening copy of master.caf (mic left +6dB, system right, limiter, 256k AAC)
 #   recording.json  format_version 1: id, requested/actual times, channel roles,
 #                   per-leg health (exit status, samples, start offset, gaps), state
 # Stdout: the recording directory. Exit status:

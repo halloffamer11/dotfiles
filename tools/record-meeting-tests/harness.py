@@ -14,7 +14,7 @@ and validates the failure modes that have actually bitten:
                        them and record successfully (the "crisscross" case)
 
 Each saved recording must be a meeting-<ts>/ directory with a 2-channel
-48 kHz master.caf, a listen.m4a and a recording.json in state "recorded".
+48 kHz master.caf, a stereo <id>.m4a and a recording.json in state "recorded".
 
 Run:  make test-recorder     (or: python3 tools/record-meeting-tests/harness.py)
       --system-only          the host process has no microphone permission, so
@@ -79,7 +79,7 @@ def check_saved(name, p, out, err, before, run_secs):
     d = new.pop()
     meta = json.loads((d / "recording.json").read_text())
     ch, dur = probe(d / "master.caf")
-    _, listen = probe(d / "listen.m4a")
+    _, listen = probe(d / f"{d.name}.m4a")
     legs = {n: meta["legs"][n]["present"] for n in ("mic", "system")}
     ok = ch == 2 and dur > max(0.5, run_secs - 4) and dur < run_secs + 2 and abs(listen - dur) < 0.5 \
         and meta["state"] == want_state and legs["system"] and legs["mic"] != SYSTEM_ONLY \

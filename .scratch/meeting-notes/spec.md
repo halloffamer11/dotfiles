@@ -65,10 +65,15 @@ names (`-coreml` stripped) and different v3 files than the installed cache has.
 ## Pipeline
 
 ```
-~/Recordings/<id>/recording.json + master.caf + listen.m4a (stereo)
-  └─ transcribe → transcript.json + transcript.md    (VoiceInk's model, offline, per channel)
-  └─ enhance    → enhanced.md                        (optional: VoiceInk's Local CLI setting)
-  then master.caf is removed; listen.m4a stays
+~/Recordings/<id>/recording.json + master.caf + <id>.m4a (stereo)
+  └─ transcribe → <id>.json + <id>.md                (VoiceInk's model, offline, per channel)
+  └─ enhance    → <id>.enhanced.md                   (optional: VoiceInk's Local CLI setting)
+  then master.caf is removed; <id>.m4a stays
+
+Files a user keeps are named after the recording (`<id>` is the folder name, such
+as `meeting-2026-10-06-081106`), so each still makes sense copied into a flat
+folder (user decision 2026-10-06; the folder stays for the lock and state files).
+Older recordings' generic names are renamed on their next run.
 ```
 
 - The only model work in scope is the speech stack producing the transcript.
@@ -78,7 +83,7 @@ names (`-coreml` stripped) and different v3 files than the installed cache has.
   Speech (on-device, only with its assets already installed). Whisper needs a
   whisper.cpp binary, which is not installed, so it is not supported yet. A cloud
   model, an unsupported one, or one whose files do not load falls back in a fixed
-  order (Unified, v2, v3, Apple Speech); transcript.json records what was asked
+  order (Unified, v2, v3, Apple Speech); `<id>.json` records what was asked
   for, what was used, and why.
 - Text, as VoiceInk does for a file: its output filter with its filler words, and
   paragraphs when its mode has text formatting on. Not mirrored: word
@@ -99,11 +104,11 @@ names (`-coreml` stripped) and different v3 files than the installed cache has.
 
 - **Channel contract.** A lossless master (`master.caf`, 48 kHz float): channel 0 =
   mic, channel 1 = system. A missing leg is padded with silence and marked.
-  `listen.m4a` is derived from it as stereo AAC, mic left and system right, so
+  `<id>.m4a` is derived from it as stereo AAC, mic left and system right, so
   it keeps the channels apart. Once a transcript is written, `master.caf` (about
-  1.4 GB an hour) is removed when `listen.m4a` is stereo and as long; later runs
-  read `listen.m4a` (user decision 2026-10-06; `[transcribe] keep_master = true`
-  keeps it). An older recording with a mono `listen.m4a` gets a stereo one made
+  1.4 GB an hour) is removed when `<id>.m4a` is stereo and as long; later runs
+  read `<id>.m4a` (user decision 2026-10-06; `[transcribe] keep_master = true`
+  keeps it). An older recording with a mono `<id>.m4a` gets a stereo one made
   from `master.caf` first. Old mono recordings are marked
   `layout: legacy-mono` and are diarized as one channel.
 - **Synchronization.** Two processes start the legs, so equal sample rates do not
@@ -126,13 +131,13 @@ time overlap.
 - `recording.json`: format version, stable recording ID, requested and actual
   capture times, channel roles, per-leg health, state; `pipeline` (state, failure
   reason, what enhancement did) is added by the pipeline.
-- `transcript.json`: format version; recorded times; the model asked for and used
+- `<id>.json` (transcript details): format version; recorded times; the model asked for and used
   (with the ones skipped and why), engine and language; per channel its role,
   duration, raw and filtered text; segments with start, end, source, speaker, raw
   text, filtered text and word timings; fingerprints of the audio, model and SDK.
-- `transcript.md`: a short header (recording, times, model, channel roles), then
+- `<id>.md` (the transcript): a short header (recording, times, model, channel roles), then
   the segments in time order, one paragraph each: `**[mm:ss] Speaker:** text`.
-- `enhanced.md`: the Local CLI tool's answer, with a header naming the template,
+- `<id>.enhanced.md`: the Local CLI tool's answer, with a header naming the template,
   prompt and transcript fingerprint.
 - Writes are atomic (temp file + rename); one lock per recording; a step reruns
   only when its input fingerprints change; a file the user edited by hand is never

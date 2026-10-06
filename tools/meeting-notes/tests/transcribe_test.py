@@ -6,8 +6,8 @@ system channel is two other voices taking turns; one system sentence is also
 copied into the mic channel 15 dB lower (the mic hearing the speakers). VoiceInk's
 settings come from a fake plist ($MEETING_NOTES_VOICEINK_PLIST). Checks:
 
-  1. schema       transcript.json format_version 1 with the documented keys, and
-                  transcript.md: header, "---", then "**[mm:ss] Speaker:** text"
+  1. schema       <id>.json format_version 1 with the documented keys, and
+                  <id>.md: header, "---", then "**[mm:ss] Speaker:** text"
   2. model        VoiceInk's selected model is the one used
   3. sources      the user's sentences are source=mic; the others source=system
   4. no-diarize   by default the system channel's speaker is just "system"
@@ -21,7 +21,7 @@ settings come from a fake plist ($MEETING_NOTES_VOICEINK_PLIST). Checks:
   8b. short-merge the short-speaker rule on synthetic diarizer output (no models)
   9. skip         a rerun with unchanged fingerprints writes nothing
  10. rerun        a changed master.caf is transcribed again
- 11. hand-edit    an edited transcript.json is never overwritten (exit 4)
+ 11. hand-edit    an edited <id>.json is never overwritten (exit 4)
  12. doctor       the model loads offline; a synced or group-readable folder fails
 
 meeting-asr always runs with the network denied (the default no_network = true).
@@ -178,7 +178,7 @@ def main():
                     MEETING_NOTES_VOICEINK_DICTIONARY=voiceink_dictionary(work / f"{name}.store", rules))
 
     def fresh(rec):
-        for f in ("transcript.json", "transcript.md", ".meeting-notes-state.json"):
+        for f in (f"{rec.name}.json", f"{rec.name}.md", ".meeting-notes-state.json"):
             (rec / f).unlink(missing_ok=True)
 
     results = []
@@ -189,8 +189,8 @@ def main():
         if rc != 0:
             print(out)
             return report("transcribe", False, f"rc={rc}")
-        t = json.loads((rec / "transcript.json").read_text())
-        md = (rec / "transcript.md").read_text()
+        t = json.loads((rec / f"{rec.name}.json").read_text())
+        md = (rec / f"{rec.name}.md").read_text()
         lines = [l for l in md.split("\n---\n", 1)[1].splitlines() if l.strip()]
         keys = {"format_version", "recording_id", "recorded", "model", "voiceink_postprocessing", "diarize",
                 "fingerprints", "channels", "speakers", "segments", "merges", "dedup", "assumptions"}
@@ -219,14 +219,14 @@ def main():
         results.append(report("echo", any(d["kept"] == "system" for d in t["dedup"]) and echo_in_mic < 0.3,
                               f"dedup={t['dedup']} echo-words-left-in-mic={echo_in_mic:.2f}"))
 
-        before = (rec / "transcript.json").stat().st_mtime_ns
+        before = (rec / f"{rec.name}.json").stat().st_mtime_ns
         rc, out = run(rec, env)
         results.append(report("skip", rc == 0 and "unchanged" in out
-                              and (rec / "transcript.json").stat().st_mtime_ns == before))
+                              and (rec / f"{rec.name}.json").stat().st_mtime_ns == before))
 
         fresh(rec)
         rc, out = run(rec, env_for("fallback", vi_model="some-cloud-model", fillers=["bracket"]))
-        t2 = json.loads((rec / "transcript.json").read_text()) if rc == 0 else {}
+        t2 = json.loads((rec / f"{rec.name}.json").read_text()) if rc == 0 else {}
         tried = t2.get("model", {}).get("tried", [])
         no_bracket = all("bracket" not in s["text_clean"].lower() for s in t2.get("segments", []))
         raw_bracket = any("bracket" in s["text"].lower() for s in t2.get("segments", []))
@@ -236,7 +236,7 @@ def main():
 
         fresh(rec)
         rc, out = run(rec, env_for("dictionary", rules=[("supplier, suppliers", "Vendor"), ("Friday", "FRI")]))
-        t7 = json.loads((rec / "transcript.json").read_text()) if rc == 0 else {}
+        t7 = json.loads((rec / f"{rec.name}.json").read_text()) if rc == 0 else {}
         segs = t7.get("segments", [])
         clean_text = " ".join(s["text_clean"] for s in segs)
         raw_text = " ".join(s["text"] for s in segs)
@@ -247,26 +247,26 @@ def main():
 
         fresh(rec)
         rc, out = run(rec, env_for("override", vi_model="whisper-cloud-x", model="parakeet-tdt-0.6b-v2"))
-        t3 = json.loads((rec / "transcript.json").read_text()) if rc == 0 else {}
+        t3 = json.loads((rec / f"{rec.name}.json").read_text()) if rc == 0 else {}
         results.append(report("override", rc == 0 and t3["model"]["used"] == "parakeet-tdt-0.6b-v2"
                               and t3["model"]["tried"][0]["role"] == "config override", out.strip()[-120:]))
 
         fresh(rec)
         rc, out = run(rec, env_for("diarize", diarize=True, max_speakers=2, model="parakeet-tdt-0.6b-v2"))
-        t4 = json.loads((rec / "transcript.json").read_text()) if rc == 0 else {}
+        t4 = json.loads((rec / f"{rec.name}.json").read_text()) if rc == 0 else {}
         sys_speakers = sorted({s["speaker"] for s in t4.get("segments", []) if s["source"] == "system"})
         results.append(short_merge_case())
         results.append(report("diarize", sys_speakers == ["S1", "S2"], f"system speakers={sys_speakers}"))
 
         fresh(rec)
         rc, out = run(rec, env)
-        t5 = json.loads((rec / "transcript.json").read_text())
+        t5 = json.loads((rec / f"{rec.name}.json").read_text())
         write_master(work, rec, extra=",volume=0.9")
         rc, out = run(rec, env)
-        t6 = json.loads((rec / "transcript.json").read_text())
+        t6 = json.loads((rec / f"{rec.name}.json").read_text())
         results.append(report("rerun", rc == 0 and t6["fingerprints"]["audio_sha256"] != t5["fingerprints"]["audio_sha256"]))
 
-        (rec / "transcript.json").write_text((rec / "transcript.json").read_text().replace("Friday", "Thursday"))
+        (rec / f"{rec.name}.json").write_text((rec / f"{rec.name}.json").read_text().replace("Friday", "Thursday"))
         rc, out = run(rec, env, "--force")
         results.append(report("hand-edit", rc == 4 and "edited by hand" in out))
 
