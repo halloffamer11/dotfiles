@@ -1,12 +1,15 @@
 # Meeting notes pipeline
 
-Phase 2 of the meeting recorder. Phase 1 (⌥⌘R → `bin/record-meeting` → m4a + JSON
-sidecar in `~/Recordings`) is built. This effort turns a recording into a transcript
-and notes on the machine. No audio, transcript or notes leave it.
+Phase 2 of the meeting recorder. Phase 1 (⌥⌘R → `bin/record-meeting`) is built.
+Scope (narrowed 2026-10-06): replicate VoiceInk's drag-and-drop file transcription
+for a meeting recording, on the machine and offline, and nothing more. The model
+and the text handling follow VoiceInk's own settings. VoiceInk's optional AI
+enhancement is mirrored only when it uses its Local CLI provider.
 
-**Status:** spec accepted 2026-10-05 and revised after an independent review
-(`research/2026-10-05-review.md`). Phase A passed for v2 (`research/2026-10-05-phase-a-probe.md`).
-Next: diarizer provisioning and the recorder changes (Phase B).
+**Status:** spec accepted 2026-10-05, revised after an independent review
+(`research/2026-10-05-review.md`), Phase A probe passed
+(`research/2026-10-05-phase-a-probe.md`), recorder (Phase B) merged, scope narrowed
+2026-10-06 (no calendar matching, no notes stage of our own).
 
 ## Goals
 
@@ -14,8 +17,8 @@ Next: diarizer provisioning and the recorder changes (Phase B).
 - Reuse the speech models VoiceInk already downloaded when the SDK can load them as
   they are; never silently download a second copy.
 - Small stages with versioned file contracts, safe to rerun.
-- Nothing site-specific in the repo. Folders, calendar source, notes model and
-  retention are machine-local settings.
+- Nothing site-specific in the repo. Folders, model override and retention are
+  machine-local settings.
 
 ## What VoiceInk does (source, 2026-10-05)
 
@@ -32,6 +35,16 @@ Next: diarizer provisioning and the recorder changes (Phase B).
 - Whisper models live in `~/Library/Application Support/com.prakashjoshipax.VoiceInk/WhisperModels/`.
 - VoiceInk has no CLI, URL scheme, watch folder or API for files, so it cannot be a
   stage. Its "clean output" is a regex filler-word filter, not AI.
+- A dropped file (AudioImport, AudioFileTranscriptionService): the active mode's
+  model transcribes it; then TranscriptionOutputFilter (tag blocks, bracketed text,
+  filler words), paragraphs when the mode has text formatting on, the user's word
+  replacements, and the mode's AI enhancement if on. The model is the mode's
+  `selectedTranscriptionModelName` (else `CurrentTranscriptionModel`); Parakeet
+  Unified runs through FluidAudio's `UnifiedAsrManager`.
+- Enhancement providers include cloud APIs, Ollama, VoiceInk Refine (a local model
+  that only the app can call, through its XPC service) and Local CLI
+  (`/bin/zsh -lc <template>` with `VOICEINK_SYSTEM_PROMPT`, `VOICEINK_USER_PROMPT`
+  and `VOICEINK_FULL_PROMPT`).
 
 ## Model provisioning (Phase A, before pipeline code)
 
@@ -53,19 +66,33 @@ names (`-coreml` stripped) and different v3 files than the installed cache has.
 
 ```
 ~/Recordings/<id>/recording.json + master.caf (+ listen.m4a)
-  └─ transcribe    → transcript.json   (FluidAudio, offline, per channel)
-  └─ match-meeting → meeting.json      (calendar, read-only, optional)
-  └─ make-notes    → notes.md          (local LLM, off until configured)
+  └─ transcribe → transcript.json + transcript.md    (VoiceInk's model, offline, per channel)
+  └─ enhance    → enhanced.md                        (optional: VoiceInk's Local CLI setting)
 ```
 
-- Start from FluidAudio's own `fluidaudiocli transcribe` and `process --mode
-  offline`. Write only a thin adapter for what they lack: offline loading,
-  per-channel processing and the stable JSON below. The adapter is a SwiftPM
-  package built by `make meeting-notes`; the `mictee` single-file `swiftc` pattern
-  cannot build a package with dependencies.
-- Alternatives if FluidAudio fails Phase A: WhisperKit or whisper.cpp (own weights
-  plus a separate diarizer), sherpa-onnx (more integration work), pyannote
-  (accuracy reference, needs Python).
+- The only model work in scope is the speech stack producing the transcript.
+  There is no language model of our own.
+- Model: VoiceInk's selected model (or `[transcribe] model` in config). Supported
+  offline here: Parakeet Unified, Parakeet TDT v2 and v3 (FluidAudio), and Apple
+  Speech (on-device, only with its assets already installed). Whisper needs a
+  whisper.cpp binary, which is not installed, so it is not supported yet. A cloud
+  model, an unsupported one, or one whose files do not load falls back in a fixed
+  order (Unified, v2, v3, Apple Speech); transcript.json records what was asked
+  for, what was used, and why.
+- Text, as VoiceInk does for a file: its output filter with its filler words, and
+  paragraphs when its mode has text formatting on. Not mirrored: word
+  replacements and custom vocabulary (in VoiceInk's own database) and its VAD
+  option.
+- Channels: mic and system are transcribed apart (free from the recorder). Speaker
+  diarization is off by default, as in VoiceInk (`[transcribe] diarize = true`).
+- Enhancement (off unless `[enhance] enabled = true`): runs only when VoiceInk's
+  mode has enhancement on with the Local CLI provider and a command template, with
+  VoiceInk's exact contract. Its system template is read from the installed app at
+  run time, not copied into this repo. Otherwise it is skipped with the reason.
+- Transcription: a thin adapter, `meeting-asr` (SwiftPM package, `make
+  meeting-notes`), over FluidAudio and Apple's Speech framework. `fluidaudiocli` is
+  not used: its `process` command has no offline switch, and its load path deletes
+  and re-downloads the diarizer cache after a failed load.
 
 ### Recorder changes
 
@@ -86,19 +113,22 @@ names (`-coreml` stripped) and different v3 files than the installed cache has.
 `source` (mic or system) is stored apart from `speaker`. The mic can hear other
 people in the room and leakage from speakers, so "mic = the user" is an assumption
 shown as such, never a fact. Duplicate speech heard on both channels is merged by
-time overlap. Calendar invitees are context for the notes, never speaker names.
+time overlap.
 
 ## File contracts
 
 - `recording.json`: format version, stable recording ID, requested and actual
-  capture times, channel roles, per-leg health, state.
-- `transcript.json`: format version; segments with start, end, source, speaker,
-  raw text; a derived view with filler words removed; fingerprints of input audio,
-  model and SDK version.
-- `meeting.json`: matched event or `unmatched`. Ties and ambiguity stay unmatched.
-- `notes.md`: the notes, with a header naming the transcript fingerprint, model and
-  prompt version.
-- Writes are atomic (temp file + rename); one lock per recording; a stage reruns
+  capture times, channel roles, per-leg health, state; `pipeline` (state, failure
+  reason, what enhancement did) is added by the pipeline.
+- `transcript.json`: format version; recorded times; the model asked for and used
+  (with the ones skipped and why), engine and language; per channel its role,
+  duration, raw and filtered text; segments with start, end, source, speaker, raw
+  text, filtered text and word timings; fingerprints of the audio, model and SDK.
+- `transcript.md`: a short header (recording, times, model, channel roles), then
+  the segments in time order, one paragraph each: `**[mm:ss] Speaker:** text`.
+- `enhanced.md`: the Local CLI tool's answer, with a header naming the template,
+  prompt and transcript fingerprint.
+- Writes are atomic (temp file + rename); one lock per recording; a step reruns
   only when its input fingerprints change; a file the user edited by hand is never
   overwritten (it keeps a hash of what was generated).
 
@@ -106,30 +136,36 @@ time overlap. Calendar invitees are context for the notes, never speaker names.
 
 Hammerspoon starts the pipeline from `onExit` of a successful recording, after
 `recording.json` validates, not at the stop key. The queue is files on disk, so a
-reload loses nothing and a recording runs once. States: recorded, processing,
-partial, failed, notes-ready; the menubar shows them.
+reload loses nothing and a recording runs once. States: recorded, partial (capture),
+then processing, transcribed, enhanced or failed; the menubar shows them. Off until
+`[run] auto_run = true`.
 
 ## Long meetings
 
-Use the disk-backed diarizer, cap memory, checkpoint per chunk, and summarize in
-chunks without truncation. Test with multi-hour audio and window seams before the
-trigger is enabled.
+Parakeet transcribes long files in windows (TDT and Unified both chunk). With
+diarize on, use the disk-backed diarizer and cap memory. Test with multi-hour
+audio and window seams before the trigger is enabled.
 
 ## Privacy, enforced
 
-- The notes stage is off until a local model is configured. Only loopback
-  endpoints are accepted; redirects and remote hosts are refused.
-- SDK telemetry and any cloud fallback are off.
+- The local-only rule covers transcription: every `meeting-asr` call runs in a
+  no-network sandbox, and the speech models load from disk only.
+- Enhancement runs the user's own Local CLI tool with normal network access.
+  Turning it on (`[enhance] enabled = true`) is the decision to send the transcript
+  to it; a machine deployment that must keep transcripts local leaves it off.
+- SDK telemetry and any cloud fallback in the speech stack are off.
 - Recording folders are mode 700; no transcript text in logs; the output folder
   must not be a synced folder (checked by `doctor`).
-- An egress test runs the whole pipeline with the network blocked.
+- An egress test runs the pipeline with the network fully blocked.
 - Recordings, transcripts, logs and models never enter a repo checkout. Tests use
   synthetic fixtures only.
 
 ## Machine-local settings
 
-`~/.config/meeting-notes/config.toml` (never committed): model variant, model
-directory, notes endpoint and model, calendar source, output folder, retention.
+`~/.config/meeting-notes/config.toml` (never committed): model override, diarize,
+enhancement on/off and timeout, output folder, auto_run. Everything else comes from
+VoiceInk's settings.
+`tools/meeting-notes/config.example.toml` lists every key.
 
 ## Build order
 
@@ -137,15 +173,18 @@ A. Provisioning probe: pin FluidAudio, load v2 offline from the VoiceInk cache (
    provision), diarizer provisioned, `doctor`.
 B. Recorder: channel contract, sync, health, `recording.json`.
 C. `transcribe` adapter and file contracts, tested on synthetic two-channel audio.
-D. `match-meeting`, `make-notes` behind the local-only checks.
+D. VoiceInk's model and text handling, optional Local CLI enhancement, `run` and
+   `queue`.
 E. Trigger, states, long-meeting and egress tests; then enable.
 
 ## Open questions
 
-- Local notes model and server (default: Ollama on the same machine).
+- Whether to support Whisper (needs a whisper.cpp binary) and VoiceInk's other
+  local engines (Nemotron, Cohere, SenseVoice, transcribe.cpp).
 - Maximum meeting length and retention period.
 
 ## Out of scope
 
 - Live transcription during the meeting.
-- Any cloud transcription or cloud notes model.
+- Any cloud transcription, any language model of our own, calendar matching and
+  notes writing.

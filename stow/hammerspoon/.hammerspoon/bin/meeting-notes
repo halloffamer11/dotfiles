@@ -1,0 +1,33 @@
+#!/usr/bin/python3
+"""meeting-notes — transcribe a recording folder the way VoiceInk transcribes a dropped file.
+
+  meeting-notes transcribe <dir>   VoiceInk's model, offline -> transcript.json + .md    meeting_notes/transcribe.py
+  meeting-notes enhance <dir>      VoiceInk's Local CLI enhancement -> enhanced.md       meeting_notes/enhance.py
+  meeting-notes run <dir>          transcribe, then enhance                               meeting_notes/pipeline.py
+  meeting-notes queue              run every recording not yet processed
+  meeting-notes doctor             read-only health check, incl. VoiceInk's settings
+  --force reruns a step even when its fingerprints are unchanged; --if-enabled
+  (run, queue) does nothing unless [run] auto_run = true (how Hammerspoon calls it).
+
+The model and text handling follow VoiceInk's own settings (meeting_notes/voiceink.py).
+Transcription runs with no network access. Enhancement is off unless
+[enhance] enabled = true and VoiceInk uses its Local CLI provider.
+
+Every step: one lock per recording, atomic writes (mode 600), skipped when its
+input fingerprints are unchanged, and never overwrites an output edited by hand
+(the hash of what it wrote is kept in .meeting-notes-state.json).
+
+Exit: 0 done or unchanged, 1 error, 4 refused (hand-edited output), 5 off
+(enhancement skipped, or auto_run off with --if-enabled), 75 busy (locked).
+
+Settings: ~/.config/meeting-notes/config.toml (or $MEETING_NOTES_CONFIG), never
+committed; every key is optional (tools/meeting-notes/config.example.toml).
+"""
+import os, sys
+
+sys.dont_write_bytecode = True  # no __pycache__ under ~/.hammerspoon: it would trigger a config reload
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), ".."))
+from meeting_notes.cli import main  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(main())

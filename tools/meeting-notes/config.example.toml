@@ -1,0 +1,23 @@
+# Example ~/.config/meeting-notes/config.toml (machine-local; never commit the real one).
+# Every key is optional; these are the defaults. The model, language, filler words,
+# paragraphs and enhancement come from VoiceInk's own settings.
+
+[paths]
+recordings = "~/Recordings"
+adapter = "~/.local/bin/meeting-asr"
+
+[models]
+models_root = "~/Library/Application Support/FluidAudio/Models"
+
+[transcribe]
+model = ""                # "" = VoiceInk's selected model; or a VoiceInk model name
+diarize = false           # true: speaker labels S1, S2, ... on the system channel
+max_speakers = 0          # with diarize: upper bound on speakers (0 = automatic)
+no_network = true         # meeting-asr runs in a no-network sandbox
+
+[enhance]
+enabled = false           # true: run VoiceInk's Local CLI enhancement (uses the network)
+timeout_s = 0             # 0 = VoiceInk's localCLITimeoutSeconds
+
+[run]
+auto_run = false          # true: Hammerspoon runs the pipeline after each recording

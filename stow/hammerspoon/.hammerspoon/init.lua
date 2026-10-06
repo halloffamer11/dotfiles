@@ -26,15 +26,67 @@ local function updateTitle()
 	)
 end
 
+-- meeting-notes pipeline: after a saved recording, `meeting-notes run --if-enabled <dir>`
+-- transcribes it in the background with VoiceInk's model (and, if set up, VoiceInk's
+-- Local CLI enhancement). It does nothing (exit 5) unless [run] auto_run = true in
+-- ~/.config/meeting-notes/config.toml. At load, `meeting-notes queue --if-enabled` runs
+-- once to catch recordings a reload or crash interrupted. Menu bar "✎ transcribing…"
+-- while it works; an alert when the transcript is ready, or when it failed.
+local NOTES = os.getenv("HOME") .. "/.hammerspoon/bin/meeting-notes"
+local pipeline = { tasks = {}, menubar = nil }
+
+local function pipelineUI()
+	local busy = false
+	for t in pairs(pipeline.tasks) do
+		busy = busy or t:isRunning()
+	end
+	if busy and not pipeline.menubar then
+		pipeline.menubar = hs.menubar.new()
+		pipeline.menubar:setTitle("✎ transcribing…")
+	elseif not busy and pipeline.menubar then
+		pipeline.menubar:delete()
+		pipeline.menubar = nil
+	end
+end
+
+local function startPipeline(args, label)
+	local task
+	task = hs.task.new(NOTES, function(exitCode, stdOut, stdErr)
+		pipeline.tasks[task] = nil
+		pipelineUI()
+		if exitCode == 5 then
+			return -- auto_run is off
+		end
+		local last = (stdOut or ""):gsub("%s+$", ""):match("[^\n]*$") or ""
+		if exitCode ~= 0 then
+			hs.alert.show("Transcription FAILED (" .. label .. ") — open Hammerspoon console")
+			print("meeting-notes stderr: " .. (stdErr or ""))
+		elseif last:find(": enhanced$") then
+			hs.alert.show("Transcript and enhanced text ready: " .. label)
+		elseif last:find(": transcribed$") then
+			hs.alert.show("Transcript ready: " .. label)
+		elseif last:find("^queue:") and not last:find("^queue: 0 processed") then
+			hs.alert.show("Transcription " .. last)
+		end
+	end, args)
+	if task:start() then
+		pipeline.tasks[task] = true
+		hs.timer.doAfter(1, pipelineUI) -- after --if-enabled had its chance to exit
+	end
+end
+
 local function onExit(exitCode, stdOut, stdErr)
 	stopUI()
 	recorder.task = nil
 	local dir = (stdOut or ""):gsub("%s+$", "")
-	if exitCode == 0 then
-		hs.alert.show("Saved: " .. dir)
-	elseif exitCode == 3 then -- partial: one leg missing or cut short, see recording.json
-		hs.alert.show("Saved PARTIAL (a capture leg is missing): " .. dir)
-		print("record-meeting stderr: " .. (stdErr or ""))
+	if exitCode == 0 or exitCode == 3 then
+		if exitCode == 0 then
+			hs.alert.show("Saved: " .. dir)
+		else -- partial: one leg missing or cut short, see recording.json
+			hs.alert.show("Saved PARTIAL (a capture leg is missing): " .. dir)
+			print("record-meeting stderr: " .. (stdErr or ""))
+		end
+		startPipeline({ "run", "--if-enabled", dir }, dir:match("[^/]+$") or dir)
 	else
 		hs.alert.show("Recording FAILED — open Hammerspoon console")
 		print("record-meeting stderr: " .. (stdErr or ""))
@@ -61,6 +113,7 @@ local function toggleRecording()
 end
 
 hs.hotkey.bind({ "cmd", "alt" }, "r", toggleRecording)
+startPipeline({ "queue", "--if-enabled" }, "queue")
 
 -- delegate rows in the Claude Code status line: ⌥⌘D toggles them (ticket 23).
 -- Terminal-agnostic on purpose: Ghostty keybinds cannot run a program. The
