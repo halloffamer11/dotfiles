@@ -4,13 +4,14 @@ import contextlib, fcntl, hashlib, json, os, re, subprocess, tempfile, time
 
 FORMAT_VERSION = 1
 FFMPEG = "/opt/homebrew/bin/ffmpeg"
+FFPROBE = os.path.join(os.path.dirname(FFMPEG), "ffprobe")
 NO_NETWORK = "(version 1)(allow default)(deny network*)"
 MODELS_ROOT = "~/Library/Application Support/FluidAudio/Models"
 DEFAULTS = {
     "paths": {"recordings": "~/Recordings", "adapter": "~/.local/bin/meeting-asr"},
     "models": {"models_root": MODELS_ROOT, "diarizer_folder": "speaker-diarization"},
     "transcribe": {"model": "", "diarize": False, "pause_s": 1.0, "min_speaker_s": 3.0, "echo_min_words": 3,
-                   "max_speakers": 0, "num_speakers": 0, "no_network": True},
+                   "max_speakers": 0, "num_speakers": 0, "no_network": True, "keep_master": False},
     "enhance": {"enabled": False, "timeout_s": 0},
     "run": {"auto_run": False},
 }
@@ -197,10 +198,30 @@ def record_output(rec, stage, out, fingerprints):
     write_json(_state_path(rec), state)
 
 
+def audio_source(rec):
+    """master.caf while it exists; after transcription it is removed and the stereo
+    listen.m4a (ch0 = mic, ch1 = system) is the recording."""
+    master = os.path.join(rec, "master.caf")
+    return master if os.path.exists(master) else os.path.join(rec, "listen.m4a")
+
+
+def probe(path):
+    """(channels, sample rate, duration s) or None."""
+    r = subprocess.run([FFPROBE, "-v", "error", "-show_entries", "stream=channels,sample_rate:format=duration",
+                        "-of", "json", path], capture_output=True, text=True)
+    try:
+        j = json.loads(r.stdout)
+        s = j["streams"][0]
+        return int(s["channels"]), int(s["sample_rate"]), float(j["format"]["duration"])
+    except (ValueError, KeyError, IndexError):
+        return None
+
+
 def read_recording(rec):
     path = os.path.join(rec, "recording.json")
-    if not (os.path.exists(path) and os.path.exists(os.path.join(rec, "master.caf"))):
-        raise ValueError(f"{rec} has no recording.json + master.caf (older flat recordings are not supported)")
+    if not (os.path.exists(path) and os.path.exists(audio_source(rec))):
+        raise ValueError(f"{rec} has no recording.json + master.caf or listen.m4a "
+                         "(older flat recordings are not supported)")
     meta = json.load(open(path))
     if meta.get("format_version") != 1 or meta.get("state") not in ("recorded", "partial"):
         raise ValueError(f"recording state is {meta.get('state')!r}; nothing to process")

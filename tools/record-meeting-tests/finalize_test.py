@@ -74,6 +74,15 @@ def finalize(tmp, stop_ns=0):
     return r.returncode, out, meta, r.stderr
 
 
+def listen_channels(m4a):
+    r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=channels", "-of", "json", str(m4a)],
+                       capture_output=True, text=True)
+    try:
+        return json.loads(r.stdout)["streams"][0]["channels"]
+    except (ValueError, KeyError, IndexError):
+        return None
+
+
 def channels(caf):
     """master.caf as two float lists (ch0, ch1)."""
     raw = subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", str(caf),
@@ -103,7 +112,7 @@ def case_aligned():
         "timing": meta and meta["legs"]["mic"]["timing"] == "host-time"
         and meta["legs"]["system"]["timing"] == "first-data-estimate",
         "length": abs(len(sysc) - 10 * RATE) <= 1,
-        "listen": (out / "listen.m4a").exists() and (out / "listen.m4a").stat().st_size > 0,
+        "listen-stereo": listen_channels(out / "listen.m4a") == 2,
         "json": meta and meta["format_version"] == 1 and meta["channels"] == {"0": "mic", "1": "system"},
         "mode700": oct(out.stat().st_mode & 0o777) == "0o700",
     })

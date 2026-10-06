@@ -7,18 +7,24 @@ from .common import FFMPEG, adapter
 SYNCED = ("Library/Mobile Documents", "Library/CloudStorage", "Dropbox", "Google Drive", "OneDrive", "iCloud Drive")
 
 
+def tilde(text):
+    """Show the home folder as ~, so the output names no account."""
+    home = os.path.expanduser("~")
+    return text.replace(os.path.realpath(home), "~").replace(home, "~")
+
+
 def run(cfg):
     ok = True
 
     def line(good, what):
         nonlocal ok
         ok &= good
-        print(f"{'ok  ' if good else 'FAIL'}  {what}")
+        print(f"{'ok  ' if good else 'FAIL'}  {tilde(what)}")
 
     def info(what):
-        print(f"info  {what}")
+        print(f"info  {tilde(what)}")
 
-    print(f"config: {cfg['config_path']} ({'found' if os.path.exists(cfg['config_path']) else 'defaults'})")
+    print(tilde(f"config: {cfg['config_path']} ({'found' if os.path.exists(cfg['config_path']) else 'defaults'})"))
     exe = cfg["paths"]["adapter"]
     line(os.access(exe, os.X_OK), f"adapter {exe} (make meeting-notes)")
     line(os.path.exists(FFMPEG), f"ffmpeg {FFMPEG}")
