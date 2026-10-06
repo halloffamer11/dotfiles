@@ -65,9 +65,10 @@ names (`-coreml` stripped) and different v3 files than the installed cache has.
 ## Pipeline
 
 ```
-~/Recordings/<id>/recording.json + master.caf (+ listen.m4a)
+~/Recordings/<id>/recording.json + master.caf + listen.m4a (stereo)
   └─ transcribe → transcript.json + transcript.md    (VoiceInk's model, offline, per channel)
   └─ enhance    → enhanced.md                        (optional: VoiceInk's Local CLI setting)
+  then master.caf is removed; listen.m4a stays
 ```
 
 - The only model work in scope is the speech stack producing the transcript.
@@ -97,8 +98,12 @@ names (`-coreml` stripped) and different v3 files than the installed cache has.
 ### Recorder changes
 
 - **Channel contract.** A lossless master (`master.caf`, 48 kHz float): channel 0 =
-  mic, channel 1 = system. A missing leg is padded with silence and marked. The
-  listening mix (`listen.m4a`) is a derived file. Old mono recordings are marked
+  mic, channel 1 = system. A missing leg is padded with silence and marked.
+  `listen.m4a` is derived from it as stereo AAC, mic left and system right, so
+  it keeps the channels apart. Once a transcript is written, `master.caf` (about
+  1.4 GB an hour) is removed when `listen.m4a` is stereo and as long; later runs
+  read `listen.m4a` (user decision 2026-10-06; `[transcribe] keep_master = true`
+  keeps it). Old mono recordings are marked
   `layout: legacy-mono` and are diarized as one channel.
 - **Synchronization.** Two processes start the legs, so equal sample rates do not
   mean equal timelines. Each leg logs its start against one monotonic clock, its
@@ -163,7 +168,7 @@ audio and window seams before the trigger is enabled.
 ## Machine-local settings
 
 `~/.config/meeting-notes/config.toml` (never committed): model override, diarize,
-enhancement on/off and timeout, output folder, auto_run. Everything else comes from
+enhancement on/off and timeout, output folder, keep_master, auto_run. Everything else comes from
 VoiceInk's settings.
 `tools/meeting-notes/config.example.toml` lists every key.
 

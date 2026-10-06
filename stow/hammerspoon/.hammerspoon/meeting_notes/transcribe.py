@@ -1,4 +1,4 @@
-"""transcribe: master.caf -> transcript.json + transcript.md, offline, the way
+"""transcribe: master.caf (or the stereo listen.m4a) -> transcript.json + transcript.md, offline, the way
 VoiceInk transcribes a file dragged onto it.
 
 Model: VoiceInk's selected model (voiceink.py), or [transcribe] model in
@@ -8,7 +8,7 @@ is used; transcript.json "model" records what was asked for, what was used, and
 why each skipped one was skipped. Every meeting-asr call runs in a no-network
 sandbox (no_network = true).
 
-Per channel (ch0 = mic, ch1 = system of master.caf), like VoiceInk's file path:
+Per channel (ch0 = mic, ch1 = system), like VoiceInk's file path:
 speech-to-text, then VoiceInk's output filter (<TAG>...</TAG> blocks, [..] (..)
 {..} and its filler words removed), then paragraphs when the VoiceInk mode has
 text formatting on, then the word replacements from VoiceInk's dictionary.
@@ -32,7 +32,7 @@ Not mirrored: VoiceInk's VAD setting.
              dropped; only when the system copy is weaker (mean word confidence
              lower by more than 0.1) is the mic run kept instead, as source=mic
              with echo_of_system=true, and the system words dropped.
-  fingerprints  sha256 of master.caf, the model used (and a manifest hash of its
+  fingerprints  sha256 of listen.m4a (master.caf when there is none), the model used (and a manifest hash of its
              folder), the adapter and FluidAudio versions, and the settings.
              Unchanged fingerprints: the run is skipped.
 
@@ -43,7 +43,7 @@ a "---" rule, then the segments in time order, one paragraph each:
 import json, math, os, platform, re, subprocess, tempfile, time
 
 from . import voiceink
-from .common import (FFMPEG, FORMAT_VERSION, adapter, guard, manifest, now_iso, read_recording, record_output,
+from .common import (FFMPEG, FORMAT_VERSION, adapter, audio_source, probe, guard, manifest, now_iso, read_recording, record_output,
                      recording_lock, sha256_file, sha256_text, write_json, write_text)
 
 
@@ -236,7 +236,8 @@ def run(rec, cfg, force=False):
     """Returns (path, "written" | "unchanged"). Raises Refused, Busy, RuntimeError."""
     with recording_lock(rec):
         meta = read_recording(rec)
-        master = os.path.join(rec, "master.caf")
+        src = audio_source(rec)
+        listen = os.path.join(rec, "listen.m4a")
         out = os.path.join(rec, "transcript.json")
         t = cfg["transcribe"]
         vi = voiceink.settings()
@@ -246,7 +247,7 @@ def run(rec, cfg, force=False):
         version = adapter(cfg, "version")
         diarize = bool(t["diarize"])
         fingerprints = {
-            "master_sha256": sha256_file(master),
+            "audio_sha256": sha256_file(listen if os.path.exists(listen) else src),
             "model": model_fingerprint(name, cfg),
             "diarizer_model": manifest(os.path.join(cfg["models"]["models_root"], cfg["models"]["diarizer_folder"]))
             if diarize else None,
@@ -256,6 +257,7 @@ def run(rec, cfg, force=False):
                  "fillers": fillers, "replacements": rules}, sort_keys=True)),
         }
         if guard(rec, "transcript", out, fingerprints, force) == "unchanged":
+            remove_master(rec, cfg)
             return out, "unchanged"
 
         present = {n: meta["legs"][n]["present"] for n in ("mic", "system")}
@@ -266,7 +268,7 @@ def run(rec, cfg, force=False):
                 if not present[chan]:
                     continue
                 wav = os.path.join(tmp, f"{chan}.wav")
-                subprocess.run([FFMPEG, "-hide_banner", "-nostdin", "-loglevel", "error", "-y", "-i", master,
+                subprocess.run([FFMPEG, "-hide_banner", "-nostdin", "-loglevel", "error", "-y", "-i", src,
                                 "-af", f"pan=mono|c0=c{ch}", "-ar", "16000", wav], check=True)
                 results[chan] = {"asr": adapter(cfg, "transcribe", *args, wav)}
                 if chan == "system" and diarize and results[chan]["asr"]["words"]:
@@ -356,4 +358,25 @@ def run(rec, cfg, force=False):
         write_text(os.path.join(rec, "transcript.md"), markdown(transcript))
         write_json(out, transcript)
         record_output(rec, "transcript", out, fingerprints)
+        remove_master(rec, cfg)
         return out, "written"
+
+
+def remove_master(rec, cfg):
+    """Once a transcript exists, master.caf (about 1.4 GB an hour) goes; the stereo
+    listen.m4a keeps both channels for playback and for a later rerun. Kept when
+    [transcribe] keep_master = true, or when listen.m4a is not stereo (recordings made
+    before the stereo listen.m4a) or does not match master.caf's length."""
+    master, listen = os.path.join(rec, "master.caf"), os.path.join(rec, "listen.m4a")
+    if cfg["transcribe"]["keep_master"] or not (os.path.exists(master) and os.path.exists(listen)):
+        return False
+    pm, pl = probe(master), probe(listen)
+    if not (pm and pl and pl[0] == 2 and abs(pl[2] - pm[2]) <= 0.5):
+        return False
+    os.remove(master)
+    path = os.path.join(rec, "recording.json")
+    meta = json.load(open(path))
+    meta.setdefault("files", {})["master"] = None
+    meta["master_removed"] = {"at": now_iso(), "reason": "transcribed; listen.m4a holds both channels"}
+    write_json(path, meta)
+    return True

@@ -14,6 +14,7 @@ model = ""                # "" = VoiceInk's selected model; or a VoiceInk model 
 diarize = false           # true: speaker labels S1, S2, ... on the system channel
 max_speakers = 0          # with diarize: upper bound on speakers (0 = automatic)
 no_network = true         # meeting-asr runs in a no-network sandbox
+keep_master = false       # true: keep master.caf after transcription (listen.m4a is stereo either way)
 
 [enhance]
 enabled = false           # true: run VoiceInk's Local CLI enhancement (uses the network)

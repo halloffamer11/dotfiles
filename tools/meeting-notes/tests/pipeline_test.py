@@ -18,6 +18,9 @@ enhance     off by default; skipped (with the reason) when VoiceInk's mode has i
 run         (macOS, models present) transcribed with the skip reason recorded,
             enhanced, failed with a reason, --if-enabled; queue picks new and
             stale recordings and retries failed ones only with --retry
+master      master.caf is removed after a transcript only when listen.m4a is
+            stereo and as long, never with keep_master = true; the folder
+            then reads from listen.m4a
 egress      (macOS, models present) the whole run inside a sandbox that denies
             all network access; a request to the internet from it fails
 
@@ -287,6 +290,44 @@ def run_cases():
     return res
 
 
+def master_cases():
+    """remove_master on real audio files (any OS with ffmpeg)."""
+    ffmpeg = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
+    if not os.path.exists(ffmpeg):
+        return [report("master", True, "SKIP (no ffmpeg)")]
+    from meeting_notes import common, transcribe
+    common.FFPROBE = os.path.join(os.path.dirname(ffmpeg), "ffprobe")
+    cfg = common.settings()
+
+    def rec_with(name, listen_ch):
+        rec = WORK / "master" / name
+        rec.mkdir(parents=True, mode=0o700)
+        two = ["-f", "lavfi", "-i", "sine=f=440:d=3", "-f", "lavfi", "-i", "sine=f=660:d=3", "-filter_complex",
+               "[0:a][1:a]join=inputs=2:channel_layout=stereo:map=0.0-FL|1.0-FR[m]", "-map", "[m]"]
+        subprocess.run([ffmpeg, "-loglevel", "error", "-y", *two, "-ar", "48000", "-c:a", "pcm_f32le", "-f", "caf",
+                        str(rec / "master.caf")], check=True)
+        subprocess.run([ffmpeg, "-loglevel", "error", "-y", "-i", str(rec / "master.caf"), "-ac", str(listen_ch),
+                        "-c:a", "aac", "-b:a", "256k", "-f", "mp4", str(rec / "listen.m4a")], check=True)
+        (rec / "recording.json").write_text(json.dumps({"format_version": 1, "id": name, "state": "recorded",
+                                                        "files": {"master": "master.caf", "listen": "listen.m4a"}}))
+        return rec
+
+    res = []
+    rec = rec_with("stereo", 2)
+    removed = transcribe.remove_master(rec, cfg)
+    meta = json.loads((rec / "recording.json").read_text())
+    common.read_recording(str(rec))
+    res.append(report("master-removed", removed and not (rec / "master.caf").exists()
+                      and meta["files"]["master"] is None and "master_removed" in meta
+                      and common.audio_source(str(rec)).endswith("listen.m4a")))
+    rec = rec_with("mono-listen", 1)
+    res.append(report("master-kept-mono-listen", not transcribe.remove_master(rec, cfg) and (rec / "master.caf").exists()))
+    rec = rec_with("keep", 2)
+    keep = dict(cfg, transcribe=dict(cfg["transcribe"], keep_master=True))
+    res.append(report("master-kept-keep_master", not transcribe.remove_master(rec, keep) and (rec / "master.caf").exists()))
+    return res
+
+
 def config_case():
     """The committed example config parses and its keys are all known settings."""
     from meeting_notes.common import DEFAULTS, parse_toml_subset
@@ -298,7 +339,7 @@ def config_case():
 
 if __name__ == "__main__":
     try:
-        results = voiceink_cases() + enhance_cases() + run_cases() + [config_case()]
+        results = voiceink_cases() + enhance_cases() + master_cases() + run_cases() + [config_case()]
     finally:
         if "--keep" in sys.argv[1:]:
             print(f"kept: {WORK}")

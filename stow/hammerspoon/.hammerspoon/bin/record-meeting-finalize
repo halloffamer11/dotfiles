@@ -12,7 +12,9 @@ the same clock as mictee's host times):
                         master.caf     48 kHz float, ch0 = mic, ch1 = system,
                                        both legs on one timeline: start offsets
                                        aligned, gaps and missing legs as silence
-                        listen.m4a     the listening mix, derived from master.caf
+                        listen.m4a     stereo AAC from master.caf, mic left and
+                                       system right; it stays after meeting-notes
+                                       removes master.caf
                         recording.json format_version 1 (see build_meta)
                       Exit 0 = recorded, 3 = partial (a leg is missing or ended
                       early; files are written), 1 = failed (raw legs and logs
@@ -241,14 +243,10 @@ def cmd_finalize(a):
               "-map", "[m]", "-c:a", "pcm_f32le", "-f", "caf", master + ".tmp"], log)
     if ok:
         os.replace(master + ".tmp", master)
-        # Listening mix: the current quality chain (+6 dB mic, limiter, 256k AAC).
-        # A missing leg is left out, not mixed in as silence, so the level holds.
-        mix = {
-            (True, True): "[0:a]channelsplit=channel_layout=stereo[m][s];[m]volume=6dB[mv];"
-                          "[s][mv]amix=inputs=2:duration=longest,alimiter=limit=0.97,aformat=channel_layouts=mono[o]",
-            (True, False): "[0:a]pan=mono|c0=c0,volume=6dB,alimiter=limit=0.97,aformat=channel_layouts=mono[o]",
-            (False, True): "[0:a]pan=mono|c0=c1,alimiter=limit=0.97,aformat=channel_layouts=mono[o]",
-        }[(legs["mic"]["present"], legs["system"]["present"])]
+        # listen.m4a keeps the channels apart (mic left, system right; +6 dB mic,
+        # limiter, 256k AAC), so it can stand in for master.caf once transcribed.
+        mix = ("[0:a]channelsplit=channel_layout=stereo[m][s];[m]volume=6dB,alimiter=limit=0.97[mv];"
+               "[s]alimiter=limit=0.97[sv];[mv][sv]join=inputs=2:channel_layout=stereo:map=0.0-FL|1.0-FR[o]")
         ok = run([FFMPEG, "-hide_banner", "-nostdin", "-loglevel", "error", "-y", "-i", master,
                   "-filter_complex", mix, "-map", "[o]", "-c:a", "aac", "-b:a", "256k",
                   "-f", "mp4", listen + ".tmp"], log)
@@ -262,8 +260,8 @@ def cmd_finalize(a):
         meta["problems"].append(f"ffmpeg failed; see {log}")
     elif not pm or pm[0] != 2 or pm[1] != RATE or abs(pm[2] - expect_s) > 0.05:
         meta["problems"].append(f"master.caf failed validation: {pm} vs 2 ch, {RATE} Hz, {expect_s:.2f} s")
-    elif not pl or abs(pl[2] - expect_s) > 0.5:
-        meta["problems"].append(f"listen.m4a failed validation: {pl} vs {expect_s:.2f} s")
+    elif not pl or pl[0] != 2 or abs(pl[2] - expect_s) > 0.5:
+        meta["problems"].append(f"listen.m4a failed validation: {pl} vs 2 ch, {expect_s:.2f} s")
     else:
         meta["state"] = state
         offset_ns = a.start_epoch_ns - a.start_mono_ns  # wall clock = mono + offset

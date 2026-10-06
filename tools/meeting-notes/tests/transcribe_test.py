@@ -264,7 +264,7 @@ def main():
         write_master(work, rec, extra=",volume=0.9")
         rc, out = run(rec, env)
         t6 = json.loads((rec / "transcript.json").read_text())
-        results.append(report("rerun", rc == 0 and t6["fingerprints"]["master_sha256"] != t5["fingerprints"]["master_sha256"]))
+        results.append(report("rerun", rc == 0 and t6["fingerprints"]["audio_sha256"] != t5["fingerprints"]["audio_sha256"]))
 
         (rec / "transcript.json").write_text((rec / "transcript.json").read_text().replace("Friday", "Thursday"))
         rc, out = run(rec, env, "--force")
