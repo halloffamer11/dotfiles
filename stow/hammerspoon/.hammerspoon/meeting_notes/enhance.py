@@ -1,4 +1,4 @@
-"""enhance: transcript.txt -> enhanced.md, the way VoiceInk enhances a transcript
+"""enhance: transcript.md -> enhanced.md, the way VoiceInk enhances a transcript
 with its "Local CLI" AI provider. Optional, on top of transcription.
 
 Runs only when all of these hold; otherwise it is skipped and the reason is kept
@@ -16,7 +16,8 @@ The call is VoiceInk's LocalCLIService contract: `/bin/zsh -lc <template>` with
 VOICEINK_SYSTEM_PROMPT, VOICEINK_USER_PROMPT and VOICEINK_FULL_PROMPT in the
 environment; the full prompt also goes to stdin unless the template passes
 $VOICEINK_FULL_PROMPT as an argument; the answer is stdout. System prompt = the
-mode's prompt text inside VoiceInk's template; user prompt = the transcript in
+mode's prompt text inside VoiceInk's template; user prompt = the transcript lines
+of transcript.md (below its "---" rule, as plain "[mm:ss] Speaker: text") in
 <TRANSCRIPT> tags. Timeout: [enhance] timeout_s, else VoiceInk's
 localCLITimeoutSeconds. It runs in an empty temporary folder. Not mirrored:
 VoiceInk's custom vocabulary block (in its own database).
@@ -88,6 +89,12 @@ def call(template, system, user, timeout):
     return out.strip()
 
 
+def transcript_lines(md):
+    """The segment lines of transcript.md as plain text, one per line."""
+    body = md.split("\n---\n", 1)[1] if "\n---\n" in md else md
+    return "\n".join(l.replace("**", "", 2) for l in body.splitlines() if l.strip())
+
+
 def run(rec, cfg, force=False):
     """Returns (path, "written" | "unchanged") or (None, "skipped: <reason>")."""
     try:
@@ -96,16 +103,16 @@ def run(rec, cfg, force=False):
         return None, f"skipped: {s}"
     with recording_lock(rec):
         meta = read_recording(rec)
-        src = os.path.join(rec, "transcript.txt")
+        src = os.path.join(rec, "transcript.md")
         if not os.path.exists(src):
-            raise RuntimeError("no transcript.txt; run transcribe first")
+            raise RuntimeError("no transcript.md; run transcribe first")
         out = os.path.join(rec, "enhanced.md")
         timeout = float(cfg["enhance"]["timeout_s"] or e["cli_timeout_s"])
         fingerprints = {"transcript_sha256": sha256_file(src), "template": e["cli_template"],
                         "system_sha256": sha256_text(system), "timeout_s": timeout}
         if guard(rec, "enhanced", out, fingerprints, force) == "unchanged":
             return out, "unchanged"
-        text = open(src).read().strip()
+        text = transcript_lines(open(src).read())
         answer = call(e["cli_template"], system, f"\n<TRANSCRIPT>\n{text}\n</TRANSCRIPT>", timeout)
         header = "\n".join([
             f"<!-- enhanced by VoiceInk's Local CLI setting: {e['cli_template']}",

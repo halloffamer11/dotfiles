@@ -1,4 +1,4 @@
-"""transcribe: master.caf -> transcript.json + transcript.txt, offline, the way
+"""transcribe: master.caf -> transcript.json + transcript.md, offline, the way
 VoiceInk transcribes a file dragged onto it.
 
 Model: VoiceInk's selected model (voiceink.py), or [transcribe] model in
@@ -35,7 +35,9 @@ text formatting on. Not mirrored: VoiceInk's word replacements and VAD setting.
              folder), the adapter and FluidAudio versions, and the settings.
              Unchanged fingerprints: the run is skipped.
 
-transcript.txt: the segments in time order, "[mm:ss] Speaker: text".
+transcript.md: a short header (recording, recorded times, model, channel roles),
+a "---" rule, then the segments in time order, one paragraph each:
+"**[mm:ss] Speaker:** text".
 """
 import json, math, os, platform, re, subprocess, tempfile, time
 
@@ -212,6 +214,23 @@ def dedup(mic_words, sys_words, min_words):
             [w for k, w in enumerate(sys_words) if k not in drop_sys], log)
 
 
+def markdown(t):
+    label = {"mic": "Mic", "system": "System"}
+    rec, m = t["recorded"], t["model"]
+    when = f"{rec['start']} to {rec['end']}" if rec.get("start") else "unknown"
+    dur = f" ({rec['duration_s']:.0f} s)" if rec.get("duration_s") else ""
+    head = [f"# Transcript: {t['recording_id']}", "",
+            f"- Recorded: {when}{dur}" + ("" if rec.get("state") != "partial" else "; partial: a capture leg is missing"),
+            f"- Model: {m['used']}" + (f" (VoiceInk selected {m['voiceink_selected']})"
+                                         if m["voiceink_selected"] and m["voiceink_selected"] != m["used"] else
+                                         " (VoiceInk's selection)" if m["voiceink_selected"] else ""),
+            f"- Mic: {t['channels']['mic']['role']}; System: {t['channels']['system']['role']}",
+            "", "---", ""]
+    body = [f"**[{mmss(s['start'])}] {label.get(s['speaker'], s['speaker'])}:** {s['text_clean']}\n"
+            for s in t["segments"] if s["text_clean"]]
+    return "\n".join(head + body)
+
+
 def run(rec, cfg, force=False):
     """Returns (path, "written" | "unchanged"). Raises Refused, Busy, RuntimeError."""
     with recording_lock(rec):
@@ -327,10 +346,7 @@ def run(rec, cfg, force=False):
                                             "confidence", "words")}
                          | ({"echo_of_system": True} if s.get("echo_of_system") else {}) for s in segments],
         }
-        label = {"mic": "Mic", "system": "System"}
-        lines = [f"[{mmss(s['start'])}] {label.get(s['speaker'], s['speaker'])}: {s['text_clean']}"
-                 for s in segments if s["text_clean"]]
-        write_text(os.path.join(rec, "transcript.txt"), "\n".join(lines) + "\n")
+        write_text(os.path.join(rec, "transcript.md"), markdown(transcript))
         write_json(out, transcript)
         record_output(rec, "transcript", out, fingerprints)
         return out, "written"

@@ -99,14 +99,15 @@ def cli(e, *args, sandbox=None):
 
 
 def text_rec(name):
-    """A recording folder with a transcript.txt only (enough for enhance)."""
+    """A recording folder with a transcript.md only (enough for enhance)."""
     rec = WORK / "rec" / name
     rec.mkdir(parents=True, mode=0o700)
     (rec / "master.caf").write_bytes(b"stand-in")
     (rec / "recording.json").write_text(json.dumps({"format_version": 1, "id": name, "state": "recorded",
                                                     "legs": {"mic": {"present": True}, "system": {"present": True}}}))
-    (rec / "transcript.txt").write_text("[00:01] System: um the supplier confirmed a delay\n"
-                                        "[00:05] Mic: please send the quote before Wednesday\n")
+    (rec / "transcript.md").write_text("# Transcript: x\n\n- Model: m\n\n---\n\n"
+                                       "**[00:01] System:** um the supplier confirmed a delay\n\n"
+                                       "**[00:05] Mic:** please send the quote before Wednesday\n")
     return rec
 
 
@@ -169,7 +170,8 @@ def enhance_cases():
     body = (rec / "enhanced.md").read_text() if (rec / "enhanced.md").exists() else ""
     ok = (rc == 0 and len(calls) == 1 and c["argv"] == [full] and c["stdin"] == ""
           and system == FAKE_TEMPLATE.replace("%@", "Clean up the transcript.")
-          and user.startswith("\n<TRANSCRIPT>\n[00:01] System:") and user.endswith("</TRANSCRIPT>")
+          and user == "\n<TRANSCRIPT>\n[00:01] System: um the supplier confirmed a delay\n"
+                      "[00:05] Mic: please send the quote before Wednesday\n</TRANSCRIPT>"
           and "<SYSTEM_MESSAGE>" in full and "<USER_MESSAGE_PAYLOAD>" in full
           and os.path.realpath(c["cwd"]) != os.path.realpath(rec) and "The enhanced transcript." in body
           and oct((rec / "enhanced.md").stat().st_mode & 0o777) == "0o600")
@@ -177,7 +179,7 @@ def enhance_cases():
     st = pipeline_state(rec)
     rc, out = cli(e, "enhance", str(rec))
     res.append(report("enhance-skip", rc == 0 and "unchanged" in out and len(stub_calls()) == 1))
-    (rec / "transcript.txt").write_text("[00:01] System: a changed line\n")
+    (rec / "transcript.md").write_text("# Transcript: x\n\n---\n\n**[00:01] System:** a changed line\n")
     rc, out = cli(e, "enhance", str(rec))
     res.append(report("enhance-rerun", rc == 0 and len(stub_calls()) == 2 and "a changed line" in
                       stub_calls()[-1]["env"]["VOICEINK_USER_PROMPT"]))
@@ -226,7 +228,7 @@ def run_cases():
     rc, out = cli(plain, "run", str(rec))
     st = pipeline_state(rec)
     res.append(report("run-transcribed", rc == 0 and st.get("state") == "transcribed"
-                      and (st.get("enhancement") or "").startswith("skipped: off") and (rec / "transcript.txt").exists(),
+                      and (st.get("enhancement") or "").startswith("skipped: off") and (rec / "transcript.md").exists(),
                       str(st)))
 
     enh = env("r1", plist("q1"), enhance={"enabled": True}, **base)

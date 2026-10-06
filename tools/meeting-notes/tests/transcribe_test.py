@@ -7,7 +7,7 @@ copied into the mic channel 15 dB lower (the mic hearing the speakers). VoiceInk
 settings come from a fake plist ($MEETING_NOTES_VOICEINK_PLIST). Checks:
 
   1. schema       transcript.json format_version 1 with the documented keys, and
-                  transcript.txt lines "[mm:ss] Speaker: text"
+                  transcript.md: header, "---", then "**[mm:ss] Speaker:** text"
   2. model        VoiceInk's selected model is the one used
   3. sources      the user's sentences are source=mic; the others source=system
   4. no-diarize   by default the system channel's speaker is just "system"
@@ -162,7 +162,7 @@ def main():
                     MEETING_NOTES_VOICEINK_PLIST=voiceink_plist(work / f"{name}.plist", vi_model, fillers))
 
     def fresh(rec):
-        for f in ("transcript.json", "transcript.txt", ".meeting-notes-state.json"):
+        for f in ("transcript.json", "transcript.md", ".meeting-notes-state.json"):
             (rec / f).unlink(missing_ok=True)
 
     results = []
@@ -174,15 +174,17 @@ def main():
             print(out)
             return report("transcribe", False, f"rc={rc}")
         t = json.loads((rec / "transcript.json").read_text())
-        txt = (rec / "transcript.txt").read_text().splitlines()
+        md = (rec / "transcript.md").read_text()
+        txt = [l for l in md.split("\n---\n", 1)[1].splitlines() if l.strip()]
         keys = {"format_version", "recording_id", "recorded", "model", "voiceink_postprocessing", "diarize",
                 "fingerprints", "channels", "speakers", "segments", "merges", "dedup", "assumptions"}
         seg_keys = {"id", "start", "end", "source", "speaker", "text", "text_clean", "words"}
         results.append(report("schema", t["format_version"] == 1 and keys <= t.keys()
                               and all(seg_keys <= s.keys() for s in t["segments"])
                               and t["channels"]["mic"]["role"].startswith("microphone")
-                              and len(txt) == len(t["segments"]) and txt[0].startswith("[00:0")
-                              and all(": " in l for l in txt), f"{len(t['segments'])} segments"))
+                              and md.startswith("# Transcript: ") and "- Model: parakeet-unified-0.6b" in md
+                              and len(txt) == len(t["segments"]) and txt[0].startswith("**[00:0")
+                              and all(":** " in l for l in txt), f"{len(t['segments'])} segments"))
         results.append(report("model", t["model"]["used"] == "parakeet-unified-0.6b"
                               and t["model"]["tried"][0]["role"] == "VoiceInk's selected model", str(t["model"]["used"])))
 

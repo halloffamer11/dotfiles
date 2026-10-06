@@ -66,7 +66,7 @@ names (`-coreml` stripped) and different v3 files than the installed cache has.
 
 ```
 ~/Recordings/<id>/recording.json + master.caf (+ listen.m4a)
-  └─ transcribe → transcript.json + transcript.txt   (VoiceInk's model, offline, per channel)
+  └─ transcribe → transcript.json + transcript.md    (VoiceInk's model, offline, per channel)
   └─ enhance    → enhanced.md                        (optional: VoiceInk's Local CLI setting)
 ```
 
@@ -124,7 +124,8 @@ time overlap.
   (with the ones skipped and why), engine and language; per channel its role,
   duration, raw and filtered text; segments with start, end, source, speaker, raw
   text, filtered text and word timings; fingerprints of the audio, model and SDK.
-- `transcript.txt`: the segments in time order, `[mm:ss] Speaker: text`.
+- `transcript.md`: a short header (recording, times, model, channel roles), then
+  the segments in time order, one paragraph each: `**[mm:ss] Speaker:** text`.
 - `enhanced.md`: the Local CLI tool's answer, with a header naming the template,
   prompt and transcript fingerprint.
 - Writes are atomic (temp file + rename); one lock per recording; a step reruns
