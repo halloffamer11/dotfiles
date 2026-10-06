@@ -221,7 +221,8 @@ def markdown(t):
     when = f"{rec['start']} to {rec['end']}" if rec.get("start") else "unknown"
     dur = f" ({rec['duration_s']:.0f} s)" if rec.get("duration_s") else ""
     head = [f"# Transcript: {t['recording_id']}", "",
-            f"- Recorded: {when}{dur}" + ("" if rec.get("state") != "partial" else "; partial: a capture leg is missing"),
+            f"- Recorded: {when}{dur}" + ("" if rec.get("state") != "partial" else "; partial"),
+            *[f"- Warning: {p}" for p in rec.get("problems") or []],
             f"- Model: {m['used']}" + (f" (VoiceInk selected {m['voiceink_selected']})"
                                          if m["voiceink_selected"] and m["voiceink_selected"] != m["used"] else
                                          " (VoiceInk's selection)" if m["voiceink_selected"] else ""),
@@ -335,7 +336,8 @@ def run(rec, cfg, force=False):
             "generated_at": now_iso(),
             "processing_s": round(time.time() - began, 2),
             "recorded": {"start": (meta.get("actual") or {}).get("start"), "end": (meta.get("actual") or {}).get("end"),
-                         "duration_s": (meta.get("actual") or {}).get("duration_s"), "state": meta.get("state")},
+                         "duration_s": (meta.get("actual") or {}).get("duration_s"), "state": meta.get("state"),
+                         "problems": meta.get("problems") or []},
             "model": {"voiceink_selected": vi["model"], "voiceink_mode": vi["mode"], "used": name,
                       "engine": voiceink.ENGINES[name]["engine"], "language": vi["language"], "tried": model_log,
                       "word_timings": timed},

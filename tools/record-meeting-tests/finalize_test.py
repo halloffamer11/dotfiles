@@ -157,6 +157,19 @@ def case_stop_trim():
     })
 
 
+def case_silent_system():
+    tmp = make_case("silent-system", sys_secs=8, mic_secs=7.9)
+    raw = tmp / "system.raw"
+    raw.write_bytes(b"\0" * raw.stat().st_size)  # what the tap writes without the permission
+    rc, out, meta, err = finalize(tmp)
+    return report("silent-system", {
+        "rc3": rc == 3, "state": meta and meta["state"] == "partial",
+        "marked": meta and meta["legs"]["system"]["silent"] is True and meta["legs"]["mic"]["silent"] is False,
+        "warned": "warning: system audio was digital silence" in err and "Screen & System Audio" in err,
+        "files": (out / "master.caf").exists() and (out / f"{out.parent.name}.m4a").exists(),
+    })
+
+
 def case_both_empty():
     rc, out, meta, err = finalize(make_case("both-empty"))
     return report("both-empty", {
@@ -167,7 +180,7 @@ def case_both_empty():
 
 
 if __name__ == "__main__":
-    results = [case_aligned(), case_gap(), case_missing_mic(), case_truncated(), case_stop_trim(), case_both_empty()]
+    results = [case_aligned(), case_gap(), case_missing_mic(), case_truncated(), case_stop_trim(), case_silent_system(), case_both_empty()]
     shutil.rmtree(WORK, ignore_errors=True)
     print("ALL PASS" if all(results) else "FAILURES PRESENT")
     sys.exit(0 if all(results) else 1)

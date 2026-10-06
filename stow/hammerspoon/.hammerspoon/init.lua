@@ -82,8 +82,9 @@ local function onExit(exitCode, stdOut, stdErr)
 	if exitCode == 0 or exitCode == 3 then
 		if exitCode == 0 then
 			hs.alert.show("Saved: " .. dir)
-		else -- partial: one leg missing or cut short, see recording.json
-			hs.alert.show("Saved PARTIAL (a capture leg is missing): " .. dir)
+		else -- partial: a leg missing, cut short or digital silence, see recording.json
+			local why = (stdErr or ""):match("warning: ([^\n]+)") or "a capture leg is missing"
+			hs.alert.show("Saved PARTIAL: " .. why .. "\n" .. dir, 8)
 			print("record-meeting stderr: " .. (stdErr or ""))
 		end
 		startPipeline({ "run", "--if-enabled", dir }, dir:match("[^/]+$") or dir)

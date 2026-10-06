@@ -16,8 +16,8 @@ the same clock as mictee's host times):
                                        system right; it stays after meeting-notes
                                        removes master.caf
                         recording.json format_version 1 (see build_meta)
-                      Exit 0 = recorded, 3 = partial (a leg is missing or ended
-                      early; files are written), 1 = failed (raw legs and logs
+                      Exit 0 = recorded, 3 = partial (a leg is missing, ended
+                      early or is all zeros; files are written), 1 = failed (raw legs and logs
                       stay in --tmp; recording.json says why).
 
 Raw legs in --tmp: system.raw (s16le) with system.first (watch output), and
@@ -29,6 +29,16 @@ RATE = 48000
 FORMAT_VERSION = 1
 CHUNK = 1 << 20
 TRUNCATED_S = 2.0      # a leg that ends this much before the others counts as truncated
+# A leg whose samples are all exactly zero is digital silence: macOS hands the
+# system tap zeros when the process lacks Screen & System Audio Recording
+# permission (and when nothing plays), and the mic zeros when Microphone access
+# is denied. A real microphone in a quiet room is never exact zeros.
+SILENT_CAUSE = {
+    "system": "system audio was digital silence (all zero samples): Hammerspoon may lack Screen & System "
+              "Audio Recording permission (System Settings > Privacy & Security), or nothing was playing",
+    "mic": "microphone was digital silence (all zero samples): Hammerspoon may lack Microphone permission, "
+           "or the input device delivered nothing",
+}
 FFMPEG = os.environ.get("RECORD_MEETING_FFMPEG", "/opt/homebrew/bin/ffmpeg")
 FFPROBE = os.path.join(os.path.dirname(FFMPEG), "ffprobe")
 LEGS = (  # (name, channel, raw file, bytes per sample, ffmpeg raw format)
@@ -89,8 +99,8 @@ def leg_info(a, name, raw, width):
     """What is known about one leg before alignment."""
     path = os.path.join(a.tmp, raw)
     size = os.path.getsize(path) if os.path.exists(path) else 0
-    info = {"present": size > 0, "samples": size // width, "exit_status": None,
-            "first_sample_ns": None, "timing": None, "gaps": [], "drift_ppm": None}
+    info = {"present": size > 0, "samples": size // width, "silent": size > 0 and all_zero(path),
+            "exit_status": None, "first_sample_ns": None, "timing": None, "gaps": [], "drift_ppm": None}
     info["exit_status"] = a.mic_rc if name == "mic" else a.sys_rc
     if name == "mic":
         first, last, gaps = read_mictee_log(os.path.join(a.tmp, "mictee.log"))
@@ -112,6 +122,17 @@ def leg_info(a, name, raw, width):
     if info["present"] and info["first_sample_ns"] is None:
         info["first_sample_ns"], info["timing"] = a.spawn_ns, "spawn-time-fallback"
     return info
+
+
+def all_zero(path):
+    """True when every byte of the raw leg is zero (streams, C-speed per chunk)."""
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(CHUNK)
+            if not chunk:
+                return True
+            if chunk.count(0) != len(chunk):
+                return False
 
 
 def write_aligned(src, dst, width, offset, gaps, total):
@@ -222,6 +243,9 @@ def cmd_finalize(a):
         if not l["present"]:
             state = "partial"
             meta["problems"].append(f"{name} leg is empty; its channel is silence")
+        elif l["silent"]:
+            state = "partial"
+            meta["problems"].append(SILENT_CAUSE[name])
         elif (end_ns - ends[name]) / 1e9 > TRUNCATED_S:
             state = "partial"
             l["truncated"] = True
