@@ -362,15 +362,36 @@ def run(rec, cfg, force=False):
         return out, "written"
 
 
+# The recorder's listen.m4a chain (record-meeting-finalize): mic left +6 dB, system
+# right, limiter, 256k AAC.
+STEREO_LISTEN = ("[0:a]channelsplit=channel_layout=stereo[m][s];[m]volume=6dB,alimiter=limit=0.97[mv];"
+                 "[s]alimiter=limit=0.97[sv];[mv][sv]join=inputs=2:channel_layout=stereo:map=0.0-FL|1.0-FR[o]")
+
+
 def remove_master(rec, cfg):
     """Once a transcript exists, master.caf (about 1.4 GB an hour) goes; the stereo
-    listen.m4a keeps both channels for playback and for a later rerun. Kept when
-    [transcribe] keep_master = true, or when listen.m4a is not stereo (recordings made
-    before the stereo listen.m4a) or does not match master.caf's length."""
+    listen.m4a keeps both channels for playback and for a later rerun. A recording
+    made before listen.m4a was stereo gets a stereo listen.m4a from master.caf
+    first. Kept when [transcribe] keep_master = true, or when listen.m4a does not
+    come out stereo and as long as master.caf."""
     master, listen = os.path.join(rec, "master.caf"), os.path.join(rec, "listen.m4a")
-    if cfg["transcribe"]["keep_master"] or not (os.path.exists(master) and os.path.exists(listen)):
+    if cfg["transcribe"]["keep_master"] or not os.path.exists(master):
         return False
-    pm, pl = probe(master), probe(listen)
+    pm = probe(master)
+    pl = probe(listen) if os.path.exists(listen) else None
+    if pm and pm[0] == 2 and not (pl and pl[0] == 2):
+        tmp = listen + ".tmp"
+        r = subprocess.run([FFMPEG, "-hide_banner", "-nostdin", "-loglevel", "error", "-y", "-i", master,
+                            "-filter_complex", STEREO_LISTEN, "-map", "[o]", "-c:a", "aac", "-b:a", "256k",
+                            "-f", "mp4", tmp])
+        pt = probe(tmp) if r.returncode == 0 else None
+        if not (pt and pt[0] == 2 and abs(pt[2] - pm[2]) <= 0.5):
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            return False
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, listen)
+        pl = pt
     if not (pm and pl and pl[0] == 2 and abs(pl[2] - pm[2]) <= 0.5):
         return False
     os.remove(master)

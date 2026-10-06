@@ -18,9 +18,9 @@ enhance     off by default; skipped (with the reason) when VoiceInk's mode has i
 run         (macOS, models present) transcribed with the skip reason recorded,
             enhanced, failed with a reason, --if-enabled; queue picks new and
             stale recordings and retries failed ones only with --retry
-master      master.caf is removed after a transcript only when listen.m4a is
-            stereo and as long, never with keep_master = true; the folder
-            then reads from listen.m4a
+master      master.caf is removed after a transcript once listen.m4a is stereo
+            and as long (an old mono listen.m4a is re-made in stereo first),
+            never with keep_master = true; the folder then reads from listen.m4a
 egress      (macOS, models present) the whole run inside a sandbox that denies
             all network access; a request to the internet from it fails
 
@@ -297,6 +297,7 @@ def master_cases():
         return [report("master", True, "SKIP (no ffmpeg)")]
     from meeting_notes import common, transcribe
     common.FFPROBE = os.path.join(os.path.dirname(ffmpeg), "ffprobe")
+    transcribe.FFMPEG = ffmpeg
     cfg = common.settings()
 
     def rec_with(name, listen_ch):
@@ -321,7 +322,9 @@ def master_cases():
                       and meta["files"]["master"] is None and "master_removed" in meta
                       and common.audio_source(str(rec)).endswith("listen.m4a")))
     rec = rec_with("mono-listen", 1)
-    res.append(report("master-kept-mono-listen", not transcribe.remove_master(rec, cfg) and (rec / "master.caf").exists()))
+    removed = transcribe.remove_master(rec, cfg)
+    res.append(report("master-old-mono-listen", removed and not (rec / "master.caf").exists()
+                      and common.probe(str(rec / "listen.m4a"))[0] == 2))
     rec = rec_with("keep", 2)
     keep = dict(cfg, transcribe=dict(cfg["transcribe"], keep_master=True))
     res.append(report("master-kept-keep_master", not transcribe.remove_master(rec, keep) and (rec / "master.caf").exists()))

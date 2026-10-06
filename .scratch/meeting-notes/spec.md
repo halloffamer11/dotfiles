@@ -103,7 +103,8 @@ names (`-coreml` stripped) and different v3 files than the installed cache has.
   it keeps the channels apart. Once a transcript is written, `master.caf` (about
   1.4 GB an hour) is removed when `listen.m4a` is stereo and as long; later runs
   read `listen.m4a` (user decision 2026-10-06; `[transcribe] keep_master = true`
-  keeps it). Old mono recordings are marked
+  keeps it). An older recording with a mono `listen.m4a` gets a stereo one made
+  from `master.caf` first. Old mono recordings are marked
   `layout: legacy-mono` and are diarized as one channel.
 - **Synchronization.** Two processes start the legs, so equal sample rates do not
   mean equal timelines. Each leg logs its start against one monotonic clock, its
