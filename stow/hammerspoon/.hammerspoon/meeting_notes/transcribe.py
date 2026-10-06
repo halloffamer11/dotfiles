@@ -11,7 +11,8 @@ sandbox (no_network = true).
 Per channel (ch0 = mic, ch1 = system of master.caf), like VoiceInk's file path:
 speech-to-text, then VoiceInk's output filter (<TAG>...</TAG> blocks, [..] (..)
 {..} and its filler words removed), then paragraphs when the VoiceInk mode has
-text formatting on. Not mirrored: VoiceInk's word replacements and VAD setting.
+text formatting on, then the word replacements from VoiceInk's dictionary.
+Not mirrored: VoiceInk's VAD setting.
 
   channels   per channel: role, transcribed, duration, text_raw, text
   segments   start, end, source (mic|system), speaker, text (raw), text_clean,
@@ -240,6 +241,7 @@ def run(rec, cfg, force=False):
         t = cfg["transcribe"]
         vi = voiceink.settings()
         fillers = vi["filler_words"]
+        rules, dict_error = voiceink.word_replacements()
         name, args, model_log = choose_model(cfg, vi)
         version = adapter(cfg, "version")
         diarize = bool(t["diarize"])
@@ -251,7 +253,7 @@ def run(rec, cfg, force=False):
             "fluidaudio": version["sdk"], "adapter": version["adapter"],
             "settings_sha256": sha256_text(json.dumps(
                 {"transcribe": t, "language": vi["language"], "formatting": vi["text_formatting"],
-                 "fillers": fillers}, sort_keys=True)),
+                 "fillers": fillers, "replacements": rules}, sort_keys=True)),
         }
         if guard(rec, "transcript", out, fingerprints, force) == "unchanged":
             return out, "unchanged"
@@ -303,6 +305,8 @@ def run(rec, cfg, force=False):
                          "confidence": None, "words": []} for c in results if results[c]["asr"]["text"].strip()]
 
         segments.sort(key=lambda s: (s["start"], s["source"]))
+        for s in segments:
+            s["text_clean"] = voiceink.replace_words(s["text_clean"], rules)
         for i, s in enumerate(segments):
             s["id"] = i + 1
             s["start"], s["end"] = round(s["start"], 3), round(s["end"], 3)
@@ -317,6 +321,8 @@ def run(rec, cfg, force=False):
             text = clean(r["text"], fillers) if r else None
             if text and vi["text_formatting"]:
                 text = adapter(cfg, "format", stdin=text)["text"]
+            if text:
+                text = voiceink.replace_words(text, rules)
             channels[c] = {"role": role, "transcribed": r is not None,
                            "duration_s": round(r["duration_s"], 3) if r else None,
                            "processing_s": round(r["processing_s"], 3) if r else None,
@@ -333,7 +339,8 @@ def run(rec, cfg, force=False):
                       "engine": voiceink.ENGINES[name]["engine"], "language": vi["language"], "tried": model_log,
                       "word_timings": timed},
             "voiceink_postprocessing": {"filler_words": fillers, "paragraphs": vi["text_formatting"],
-                                        "not_mirrored": ["word replacements", "VAD"]},
+                                        "word_replacements": len(rules), "dictionary_error": dict_error,
+                                        "not_mirrored": ["VAD"]},
             "diarize": {"on": diarize, "max_speakers": t["max_speakers"] or None,
                         "num_speakers": t["num_speakers"] or None},
             "fingerprints": fingerprints,

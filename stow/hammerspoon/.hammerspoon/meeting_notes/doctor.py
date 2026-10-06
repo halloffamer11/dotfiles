@@ -46,6 +46,11 @@ def run(cfg):
             except RuntimeError as e:
                 line(False, f"diarizer: {e}")
 
+    rules, dict_error = voiceink.word_replacements()
+    if dict_error:
+        line(False, f"VoiceInk dictionary: {dict_error}")
+    else:
+        info(f"VoiceInk dictionary: {len(rules)} word replacement rule(s), applied to transcripts")
     e = vi["enhancement"]
     info(f"VoiceInk enhancement: {'on' if e['enabled'] else 'off'}, provider "
          f"{e['provider'] or '(first connected; not readable here)'}, model {e['model']!r}, prompt {e['prompt_title']!r}, "
@@ -55,6 +60,10 @@ def run(cfg):
         line(True, f"enhancement: VoiceInk Local CLI ({e['cli_template']}), prompt {e['prompt_title']!r}")
     except enhance.Skipped as s:
         info(f"enhancement skipped: {s}")
+        if e["enabled"] and e["provider"] in (None, "VoiceInk Refine") and \
+                str(e["model"] or "").startswith("VoiceInk Refine"):
+            info("VoiceInk Refine runs only inside the VoiceInk app; for enhancement here, set VoiceInk's "
+                 "AI provider to Local CLI and [enhance] enabled = true")
 
     rec = os.path.realpath(cfg["paths"]["recordings"])
     synced = [s for s in SYNCED if s in rec]

@@ -6,7 +6,9 @@ system template from a fake app binary ($MEETING_NOTES_VOICEINK_BINARY); a stub
 command stands in for the Local CLI tool.
 
 voiceink    active mode chosen by id; CurrentTranscriptionModel when the mode
-            has no model; the system template found once, refused when ambiguous
+            has no model; the system template found once, refused when ambiguous;
+            word replacements read from a dictionary store and applied like
+            VoiceInk (variants, longest first, whole words, case-insensitive)
 enhance     off by default; skipped (with the reason) when VoiceInk's mode has it
             off, uses another provider, or has no template; the Local CLI call
             matches VoiceInk's (zsh -lc, VOICEINK_* variables, full prompt as an
@@ -87,7 +89,8 @@ def env(name, vi_plist, **sections):
         lines += [f"{k} = {json.dumps(v)}" for k, v in vals.items()]
     cfg.write_text("\n".join(lines) + "\n")
     return dict(os.environ, MEETING_NOTES_CONFIG=str(cfg), MEETING_NOTES_VOICEINK_PLIST=vi_plist,
-                MEETING_NOTES_VOICEINK_BINARY=str(FAKE_BINARY))
+                MEETING_NOTES_VOICEINK_BINARY=str(FAKE_BINARY),
+                MEETING_NOTES_VOICEINK_DICTIONARY=str(WORK / "no-dictionary.store"))
 
 
 def cli(e, *args, sandbox=None):
@@ -137,6 +140,18 @@ def voiceink_cases():
     found = voiceink.system_template(str(FAKE_BINARY))
     two = WORK / "VoiceInk-two"
     two.write_bytes(FAKE_TEMPLATE.encode() + b"\x00" + FAKE_TEMPLATE.replace("Fake", "Other").encode())
+    store = tt.voiceink_dictionary(WORK / "dict.store", [("voice ink, voiceinc", "VoiceInk"), ("gpt", "GPT"),
+                                                          ("new york", "NYC"), ("new", "NEW")])
+    os.environ["MEETING_NOTES_VOICEINK_DICTIONARY"] = store
+    rules, err = voiceink.word_replacements()
+    del os.environ["MEETING_NOTES_VOICEINK_DICTIONARY"]
+    got = voiceink.replace_words("Voice Ink and voiceinc use gpt, not gptx or chatgpt, in New York; new.", rules)
+    res.append(report("voiceink-dictionary", err is None and len(rules) == 4 and
+                      got == "VoiceInk and VoiceInk use GPT, not gptx or chatgpt, in NYC; NEW.", got))
+    os.environ["MEETING_NOTES_VOICEINK_DICTIONARY"] = str(WORK / "missing.store")
+    res.append(report("voiceink-dictionary-missing", voiceink.word_replacements() == ([], None)))
+    del os.environ["MEETING_NOTES_VOICEINK_DICTIONARY"]
+
     res.append(report("voiceink-template", found == FAKE_TEMPLATE and voiceink.system_template(str(two)) is None
                       and voiceink.system_template(str(WORK / "missing")) is None))
     return res
