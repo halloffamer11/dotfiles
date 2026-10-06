@@ -14,6 +14,8 @@ settings come from a fake plist ($MEETING_NOTES_VOICEINK_PLIST). Checks:
   5. echo         the copied sentence is dropped from the mic channel (dedup)
   6. fallback     a model this tool cannot run is skipped, with the reason kept,
                   and the next one that loads is used; VoiceInk's filler words apply
+  6b. dictionary  VoiceInk's word replacements (a fake dictionary.store) change the
+                  clean text and channel text, not the raw text
   7. override     [transcribe] model picks the model instead of VoiceInk
   8. diarize      diarize = true, max_speakers = 2: exactly S1 and S2 on system
   8b. short-merge the short-speaker rule on synthetic diarizer output (no models)
@@ -26,7 +28,7 @@ meeting-asr always runs with the network denied (the default no_network = true).
 macOS only; skips (exit 0) when meeting-asr, ffmpeg or the models are missing.
 Run:  make test-meeting-notes    (--keep leaves the work folder for inspection)
 """
-import array, json, os, pathlib, platform, plistlib, shutil, subprocess, sys, tempfile
+import array, json, os, pathlib, platform, plistlib, shutil, sqlite3, subprocess, sys, tempfile
 
 sys.dont_write_bytecode = True  # no __pycache__ under ~/.hammerspoon
 
@@ -115,6 +117,19 @@ def voiceink_plist(path, model, fillers=None, formatting=True, enhancement=None)
     return str(path)
 
 
+def voiceink_dictionary(path, rules=()):
+    """A fake VoiceInk dictionary.store with ZWORDREPLACEMENT rows (original, replacement)."""
+    path.unlink(missing_ok=True)
+    con = sqlite3.connect(path)
+    con.execute("CREATE TABLE ZWORDREPLACEMENT (Z_PK INTEGER PRIMARY KEY, Z_ENT INTEGER, Z_OPT INTEGER, "
+                "ZISENABLED INTEGER, ZDATEADDED TIMESTAMP, ZORIGINALTEXT VARCHAR, ZREPLACEMENTTEXT VARCHAR, ZID BLOB)")
+    for i, (o, r) in enumerate(rules):
+        con.execute("INSERT INTO ZWORDREPLACEMENT VALUES (?, 1, 1, 1, ?, ?, ?, ?)", (i + 1, float(i), o, r, bytes([i])))
+    con.commit()
+    con.close()
+    return str(path)
+
+
 def run(rec, env, *extra):
     r = subprocess.run([str(CLI), "transcribe", str(rec), *extra], capture_output=True, text=True, env=env)
     return r.returncode, r.stdout + r.stderr
@@ -153,13 +168,14 @@ def main():
             skip(f"{what} not found at {p}")
     work = pathlib.Path(tempfile.mkdtemp(prefix="mn-test."))
 
-    def env_for(name, vi_model="parakeet-unified-0.6b", fillers=None, **transcribe):
+    def env_for(name, vi_model="parakeet-unified-0.6b", fillers=None, rules=(), **transcribe):
         cfg = work / f"{name}.toml"
         lines = [f'[paths]\nrecordings = "{work}"\n[transcribe]\nno_network = true']
         lines += [f"{k} = {json.dumps(v)}" for k, v in transcribe.items()]
         cfg.write_text("\n".join(lines) + "\n")
         return dict(os.environ, MEETING_NOTES_CONFIG=str(cfg),
-                    MEETING_NOTES_VOICEINK_PLIST=voiceink_plist(work / f"{name}.plist", vi_model, fillers))
+                    MEETING_NOTES_VOICEINK_PLIST=voiceink_plist(work / f"{name}.plist", vi_model, fillers),
+                    MEETING_NOTES_VOICEINK_DICTIONARY=voiceink_dictionary(work / f"{name}.store", rules))
 
     def fresh(rec):
         for f in ("transcript.json", "transcript.md", ".meeting-notes-state.json"):
@@ -217,6 +233,17 @@ def main():
         results.append(report("fallback", rc == 0 and tried[0]["model"] == "some-cloud-model" and "skipped" in tried[0]
                               and t2["model"]["used"] == "parakeet-unified-0.6b" and no_bracket and raw_bracket,
                               f"tried={tried}"))
+
+        fresh(rec)
+        rc, out = run(rec, env_for("dictionary", rules=[("supplier, suppliers", "Vendor"), ("Friday", "FRI")]))
+        t7 = json.loads((rec / "transcript.json").read_text()) if rc == 0 else {}
+        segs = t7.get("segments", [])
+        clean_text = " ".join(s["text_clean"] for s in segs)
+        raw_text = " ".join(s["text"] for s in segs)
+        results.append(report("dictionary", rc == 0 and "Vendor" in clean_text and "FRI" in clean_text
+                              and "supplier" not in clean_text.lower() and "supplier" in raw_text.lower()
+                              and "Vendor" in (t7["channels"]["system"]["text"] or "")
+                              and t7["voiceink_postprocessing"]["word_replacements"] == 2, out.strip()[-120:]))
 
         fresh(rec)
         rc, out = run(rec, env_for("override", vi_model="whisper-cloud-x", model="parakeet-tdt-0.6b-v2"))

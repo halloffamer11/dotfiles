@@ -14,15 +14,21 @@ $MEETING_NOTES_VOICEINK_PLIST, for tests). What is used:
                 global selectedAIProvider), selectedPrompt -> customPrompts, and the
                 Local CLI keys localCLICommandTemplate / localCLITimeoutSeconds
 
-Not readable from outside the app, so not mirrored: word replacements and custom
-vocabulary (VoiceInk's own database), and which providers hold API keys.
+  dictionary    word replacements from VoiceInk's dictionary.store (SQLite, read
+                only; $MEETING_NOTES_VOICEINK_DICTIONARY for tests), applied like
+                its WordReplacementService (see replace_words)
+
+Not readable from outside the app: which providers hold API keys, and VoiceInk
+Refine, its local enhancement model, which only the app can call.
 """
-import json, os, plistlib, re, subprocess
+import json, os, plistlib, re, sqlite3, subprocess, unicodedata
 
 DOMAIN = "com.prakashjoshipax.VoiceInk"
 APP_BINARY = "/Applications/VoiceInk.app/Contents/MacOS/VoiceInk"
 MODELS_ROOT = os.path.expanduser("~/Library/Application Support/FluidAudio/Models")
-WHISPER_DIR = os.path.expanduser("~/Library/Application Support/com.prakashjoshipax.VoiceInk/WhisperModels")
+SUPPORT_DIR = os.path.expanduser("~/Library/Application Support/com.prakashjoshipax.VoiceInk")
+WHISPER_DIR = os.path.join(SUPPORT_DIR, "WhisperModels")
+NON_SPACED = ((0x3040, 0x309F), (0x30A0, 0x30FF), (0x4E00, 0x9FFF), (0xAC00, 0xD7AF), (0x0E00, 0x0E7F))
 # VoiceInk FillerWordManager.defaultFillerWords (read 2026-10-05)
 DEFAULT_FILLERS = ["uh", "um", "uhm", "umm", "uhh", "uhhh", "hmm", "hm", "mmm", "mm", "mh", "ehh"]
 
@@ -129,3 +135,52 @@ def candidates(selected, override=None):
     first = override or selected
     out = [(first, "config override" if override else "VoiceInk's selected model")] if first else []
     return out + [(n, "fallback") for n in FALLBACKS if n != first]
+
+
+def dictionary_path():
+    return os.environ.get("MEETING_NOTES_VOICEINK_DICTIONARY", os.path.join(SUPPORT_DIR, "dictionary.store"))
+
+
+def word_replacements():
+    """(rules, error): VoiceInk's word replacement rules, read only. Each rule is
+    (original, replacement, date_added, id); VoiceInk applies all of them, enabled
+    or not."""
+    path = dictionary_path()
+    if not os.path.exists(path):
+        return [], None
+    try:
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
+        try:
+            rows = con.execute("SELECT ZORIGINALTEXT, ZREPLACEMENTTEXT, ZDATEADDED, hex(ZID) "
+                               "FROM ZWORDREPLACEMENT").fetchall()
+        finally:
+            con.close()
+    except sqlite3.Error as e:
+        return [], f"cannot read VoiceInk's dictionary: {e}"
+    return [(o or "", r or "", d or 0, i or "") for o, r, d, i in rows], None
+
+
+def _nfc(text):
+    return unicodedata.normalize("NFC", text.strip())
+
+
+def replace_words(text, rules):
+    """VoiceInk's WordReplacementService: each rule's original is a comma list of
+    variants; variants are applied longest first (then by folded text, date added,
+    id), case-insensitively, as whole words (letters, marks and digits around a
+    match block it) for spaced scripts and as plain substrings for CJK and Thai.
+    The replacement is inserted literally."""
+    variants = []
+    for original, replacement, added, rid in rules:
+        seen = set()
+        for v in (_nfc(x) for x in original.split(",")):
+            k = v.casefold()
+            if v and k not in seen:
+                seen.add(k)
+                variants.append((v, replacement, added, rid))
+    variants.sort(key=lambda r: (-len(r[0]), r[0].casefold(), r[2], r[3]))
+    for v, replacement, _, _ in variants:
+        spaced = not any(lo <= ord(c) <= hi for c in v for lo, hi in NON_SPACED)
+        pattern = (r"(?<![^\W_])" + re.escape(v) + r"(?![^\W_])") if spaced else re.escape(v)
+        text = re.sub(pattern, lambda _m: replacement, text, flags=re.IGNORECASE)
+    return text
