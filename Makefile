@@ -18,8 +18,8 @@
 #   make audiotee    # build the audiotee system-audio capture binary into ~/.local/bin (Swift 5.9+, macOS 14.2+)
 #   make mictee      # build the mictee mic capture binary into ~/.local/bin (Swift)
 #   make test-recorder  # regression harness for the record-meeting rig
-#   make meeting-notes  # build meeting-asr (FluidAudio 0.17.5 adapter) into ~/.local/bin; build dir outside the repo
-#   make test-meeting-notes  # meeting-notes stages on synthetic recordings and a stub local LLM (model parts macOS only)
+#   make meeting-notes  # build meeting-asr (VoiceInk-style offline transcription: FluidAudio 0.17.5, Apple Speech) into ~/.local/bin
+#   make test-meeting-notes  # transcription on synthetic recordings, VoiceInk settings, Local CLI enhancement stub (macOS)
 #
 # Editing:
 #   - PROFILE: macos, omarchy or linux, detected (Darwin; Omarchy's /usr/share/omarchy or

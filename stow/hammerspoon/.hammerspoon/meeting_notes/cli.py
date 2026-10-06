@@ -1,7 +1,7 @@
 """Command line for meeting-notes; see bin/meeting-notes."""
 import argparse, os, subprocess, sys
 
-from . import doctor, match, notes, pipeline, transcribe
+from . import doctor, enhance, pipeline, transcribe
 from .common import Busy, Refused, settings
 
 EXIT_DISABLED, EXIT_REFUSED, EXIT_BUSY = 5, 4, 75
@@ -10,10 +10,9 @@ EXIT_DISABLED, EXIT_REFUSED, EXIT_BUSY = 5, 4, 75
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="meeting-notes")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name, helptext in (("match", "find the calendar event -> meeting.json"),
-                           ("transcribe", "speech to text and speakers -> transcript.json"),
-                           ("notes", "hand the transcript to this machine's agent CLI -> notes.md"),
-                           ("run", "match, transcribe, notes in order")):
+    for name, helptext in (("transcribe", "VoiceInk's model, offline -> transcript.json + transcript.txt"),
+                           ("enhance", "VoiceInk's Local CLI enhancement -> enhanced.md (optional)"),
+                           ("run", "transcribe, then enhance")):
         p = sub.add_parser(name, help=helptext)
         p.add_argument("dir")
         p.add_argument("--force", action="store_true", help="rerun even when the fingerprints are unchanged")
@@ -39,12 +38,11 @@ def main(argv=None):
         if a.cmd == "run":
             print(f"{rec}: {pipeline.run(rec, cfg, a.force)}")
             return 0
-        path, how = {"match": match.run, "transcribe": transcribe.run, "notes": notes.run}[a.cmd](rec, cfg, a.force)
-        if how == "off":
-            print("meeting-notes: notes are off ([notes] command in config.toml)")
+        path, how = {"transcribe": transcribe.run, "enhance": enhance.run}[a.cmd](rec, cfg, a.force)
+        if how.startswith("skipped"):
+            print(f"meeting-notes: enhancement {how}")
             return EXIT_DISABLED
-        print(f"meeting-notes: unchanged, skipped: {path}" if how == "unchanged" else
-              f"{path} (unstructured: the answer lacks the expected headings)" if how == "unstructured" else path)
+        print(f"meeting-notes: unchanged, skipped: {path}" if how == "unchanged" else path)
         return 0
     except Refused as e:
         print(f"meeting-notes: {e}", file=sys.stderr)

@@ -8,16 +8,13 @@ NO_NETWORK = "(version 1)(allow default)(deny network*)"
 MODELS_ROOT = "~/Library/Application Support/FluidAudio/Models"
 DEFAULTS = {
     "paths": {"recordings": "~/Recordings", "adapter": "~/.local/bin/meeting-asr"},
-    "models": {"asr_dir": MODELS_ROOT + "/parakeet-tdt-0.6b-v2-coreml", "asr_version": "v2",
-               "models_root": MODELS_ROOT, "diarizer_folder": "speaker-diarization"},
-    "transcribe": {"pause_s": 1.0, "min_speaker_s": 3.0, "echo_min_words": 3, "max_speakers": 0,
-                   "num_speakers": 0, "no_network": True},
-    "notes": {"command": [], "prompt_file": "", "timeout_s": 900},
-    "match": {"source": "none", "path": "", "min_overlap": 0.5},
-    "run": {"auto_run": False, "match": True, "transcribe": True, "notes": True},
+    "models": {"models_root": MODELS_ROOT, "diarizer_folder": "speaker-diarization"},
+    "transcribe": {"model": "", "diarize": False, "pause_s": 1.0, "min_speaker_s": 3.0, "echo_min_words": 3,
+                   "max_speakers": 0, "num_speakers": 0, "no_network": True},
+    "enhance": {"enabled": False, "timeout_s": 0},
+    "run": {"auto_run": False},
 }
-PATH_KEYS = {("paths", "recordings"), ("paths", "adapter"), ("models", "asr_dir"), ("models", "models_root"),
-             ("match", "path")}
+PATH_KEYS = {("paths", "recordings"), ("paths", "adapter"), ("models", "models_root")}
 
 
 class Refused(Exception):
@@ -121,12 +118,12 @@ def now_iso():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
-def adapter(cfg, *args):
+def adapter(cfg, *args, stdin=None):
     """Run meeting-asr; with no_network (the default) inside a no-network sandbox."""
     cmd = [cfg["paths"]["adapter"], *args]
     if cfg["transcribe"]["no_network"]:
         cmd = ["/usr/bin/sandbox-exec", "-p", NO_NETWORK, *cmd]
-    r = subprocess.run(cmd, capture_output=True, text=True)
+    r = subprocess.run(cmd, capture_output=True, text=True, input=stdin)
     if r.returncode != 0:
         raise RuntimeError(f"meeting-asr {args[0]} failed: {r.stderr.strip()[-500:]}")
     return json.loads(r.stdout)
@@ -210,9 +207,9 @@ def read_recording(rec):
     return meta
 
 
-def set_pipeline(rec, state, reason=None):
+def set_pipeline(rec, state, reason=None, enhancement=None):
     """Pipeline progress lives under recording.json "pipeline"; the capture state is untouched."""
     path = os.path.join(rec, "recording.json")
     meta = json.load(open(path))
-    meta["pipeline"] = {"state": state, "reason": reason, "updated": now_iso()}
+    meta["pipeline"] = {"state": state, "reason": reason, "enhancement": enhancement, "updated": now_iso()}
     write_json(path, meta)

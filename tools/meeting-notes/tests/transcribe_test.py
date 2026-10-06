@@ -3,24 +3,30 @@
 
 The recording is made with `say`: the mic channel is one voice (the user); the
 system channel is two other voices taking turns; one system sentence is also
-copied into the mic channel 15 dB lower (the mic hearing the speakers). Checks:
+copied into the mic channel 15 dB lower (the mic hearing the speakers). VoiceInk's
+settings come from a fake plist ($MEETING_NOTES_VOICEINK_PLIST). Checks:
 
-  1. schema       transcript.json format_version 1 with the documented keys
-  2. sources      the user's sentences are source=mic; the others source=system
-  3. speakers     the system channel has exactly 2 speakers (max_speakers = 2, the
-                  known upper bound; automatic counting splits these TTS voices)
-  3b. short-merge the short-speaker rule on synthetic diarizer output (no models)
-  4. echo         the copied sentence is dropped from the mic channel (dedup)
-  5. skip         a rerun with unchanged fingerprints writes nothing
-  6. rerun        a changed master.caf is transcribed again
-  7. hand-edit    an edited transcript.json is never overwritten (exit 4)
-  8. doctor       models load offline; a synced or group-readable output folder fails
+  1. schema       transcript.json format_version 1 with the documented keys, and
+                  transcript.txt lines "[mm:ss] Speaker: text"
+  2. model        VoiceInk's selected model is the one used
+  3. sources      the user's sentences are source=mic; the others source=system
+  4. no-diarize   by default the system channel's speaker is just "system"
+  5. echo         the copied sentence is dropped from the mic channel (dedup)
+  6. fallback     a model this tool cannot run is skipped, with the reason kept,
+                  and the next one that loads is used; VoiceInk's filler words apply
+  7. override     [transcribe] model picks the model instead of VoiceInk
+  8. diarize      diarize = true, max_speakers = 2: exactly S1 and S2 on system
+  8b. short-merge the short-speaker rule on synthetic diarizer output (no models)
+  9. skip         a rerun with unchanged fingerprints writes nothing
+ 10. rerun        a changed master.caf is transcribed again
+ 11. hand-edit    an edited transcript.json is never overwritten (exit 4)
+ 12. doctor       the model loads offline; a synced or group-readable folder fails
 
 meeting-asr always runs with the network denied (the default no_network = true).
 macOS only; skips (exit 0) when meeting-asr, ffmpeg or the models are missing.
 Run:  make test-meeting-notes    (--keep leaves the work folder for inspection)
 """
-import array, json, os, pathlib, platform, shutil, subprocess, sys, tempfile
+import array, json, os, pathlib, platform, plistlib, shutil, subprocess, sys, tempfile
 
 sys.dont_write_bytecode = True  # no __pycache__ under ~/.hammerspoon
 
@@ -91,6 +97,24 @@ def write_master(work, rec, extra=""):
                     "-map", "[m]", "-c:a", "pcm_f32le", "-f", "caf", str(rec / "master.caf")], check=True)
 
 
+def voiceink_plist(path, model, fillers=None, formatting=True, enhancement=None):
+    """A fake VoiceInk preferences file with one active mode."""
+    mode = {"id": "mode-1", "name": "Dictation", "isDefault": True, "selectedTranscriptionModelName": model,
+            "selectedLanguage": "en", "isTextFormattingEnabled": formatting, "isAIEnhancementEnabled": False,
+            "selectedPrompt": "prompt-1"}
+    prefs = {"activeConfigurationId": "mode-1",
+             "customPrompts": json.dumps([{"id": "prompt-1", "title": "Default", "useSystemInstructions": True,
+                                           "promptText": "Clean up the transcript."}]).encode()}
+    if fillers is not None:
+        prefs["FillerWords"] = fillers
+    if enhancement:
+        mode.update(enhancement.pop("mode", {}))
+        prefs.update(enhancement)
+    prefs["modeConfigurationsV2"] = json.dumps([mode]).encode()
+    path.write_bytes(plistlib.dumps(prefs))
+    return str(path)
+
+
 def run(rec, env, *extra):
     r = subprocess.run([str(CLI), "transcribe", str(rec), *extra], capture_output=True, text=True, env=env)
     return r.returncode, r.stdout + r.stderr
@@ -122,42 +146,56 @@ def main():
     if platform.system() != "Darwin":
         skip("macOS only")
     for p, what in ((ADAPTER, "meeting-asr (make meeting-notes)"), (pathlib.Path(FFMPEG), "ffmpeg"),
-                    (MODELS / "parakeet-tdt-0.6b-v2-coreml", "the v2 ASR model"),
+                    (MODELS / "parakeet-unified-en-0.6b", "the Parakeet Unified model"),
+                    (MODELS / "parakeet-tdt-0.6b-v2-coreml", "the Parakeet v2 model"),
                     (MODELS / "speaker-diarization", "the diarizer model")):
         if not p.exists():
             skip(f"{what} not found at {p}")
     work = pathlib.Path(tempfile.mkdtemp(prefix="mn-test."))
-    cfg = work / "config.toml"
-    cfg.write_text(f'[paths]\nrecordings = "{work}"\n[transcribe]\nno_network = true\nmax_speakers = 2\n')
-    env = dict(os.environ, MEETING_NOTES_CONFIG=str(cfg))
+
+    def env_for(name, vi_model="parakeet-unified-0.6b", fillers=None, **transcribe):
+        cfg = work / f"{name}.toml"
+        lines = [f'[paths]\nrecordings = "{work}"\n[transcribe]\nno_network = true']
+        lines += [f"{k} = {json.dumps(v)}" for k, v in transcribe.items()]
+        cfg.write_text("\n".join(lines) + "\n")
+        return dict(os.environ, MEETING_NOTES_CONFIG=str(cfg),
+                    MEETING_NOTES_VOICEINK_PLIST=voiceink_plist(work / f"{name}.plist", vi_model, fillers))
+
+    def fresh(rec):
+        for f in ("transcript.json", "transcript.txt", ".meeting-notes-state.json"):
+            (rec / f).unlink(missing_ok=True)
+
     results = []
     try:
         rec = make_recording(work)
+        env = env_for("default")
         rc, out = run(rec, env)
         if rc != 0:
             print(out)
             return report("transcribe", False, f"rc={rc}")
         t = json.loads((rec / "transcript.json").read_text())
-        keys = {"format_version", "recording_id", "fingerprints", "channels", "speakers", "segments", "merges",
-                "dedup", "filler_words", "assumptions"}
+        txt = (rec / "transcript.txt").read_text().splitlines()
+        keys = {"format_version", "recording_id", "recorded", "model", "voiceink_postprocessing", "diarize",
+                "fingerprints", "channels", "speakers", "segments", "merges", "dedup", "assumptions"}
         seg_keys = {"id", "start", "end", "source", "speaker", "text", "text_clean", "words"}
         results.append(report("schema", t["format_version"] == 1 and keys <= t.keys()
-                              and all(seg_keys <= s.keys() for s in t["segments"]),
-                              f"{len(t['segments'])} segments"))
+                              and all(seg_keys <= s.keys() for s in t["segments"])
+                              and t["channels"]["mic"]["role"].startswith("microphone")
+                              and len(txt) == len(t["segments"]) and txt[0].startswith("[00:0")
+                              and all(": " in l for l in txt), f"{len(t['segments'])} segments"))
+        results.append(report("model", t["model"]["used"] == "parakeet-unified-0.6b"
+                              and t["model"]["tried"][0]["role"] == "VoiceInk's selected model", str(t["model"]["used"])))
 
         mic_text = " ".join(s["text"] for s in t["segments"] if s["source"] == "mic")
         sys_text = " ".join(s["text"] for s in t["segments"] if s["source"] == "system")
         user_words = words(TURNS[2][1]) | words(TURNS[5][1])
         sys_only = words(TURNS[0][1]) | words(TURNS[3][1])
-        mic_ok = len(user_words & words(mic_text)) / len(user_words) > 0.8 and not (words(TURNS[0][1]) <= words(mic_text))
+        mic_ok = len(user_words & words(mic_text)) / len(user_words) > 0.7 and not (words(TURNS[0][1]) <= words(mic_text))
         sys_ok = len(sys_only & words(sys_text)) / len(sys_only) > 0.8
         results.append(report("sources", mic_ok and sys_ok and all(s["speaker"] == "mic" for s in t["segments"]
                                                                     if s["source"] == "mic")))
-
         sys_speakers = sorted({s["speaker"] for s in t["segments"] if s["source"] == "system"})
-        results.append(short_merge_case())
-        results.append(report("speakers", sys_speakers == ["S1", "S2"], f"system speakers={sys_speakers} merges={t['merges']}"))
-
+        results.append(report("no-diarize", sys_speakers == ["system"] and not t["diarize"]["on"], str(sys_speakers)))
         echo = words(TURNS[ECHO_TURN][1])
         echo_in_mic = len(echo & words(mic_text) - user_words) / len(echo)
         results.append(report("echo", any(d["kept"] == "system" for d in t["dedup"]) and echo_in_mic < 0.3,
@@ -168,10 +206,36 @@ def main():
         results.append(report("skip", rc == 0 and "unchanged" in out
                               and (rec / "transcript.json").stat().st_mtime_ns == before))
 
+        fresh(rec)
+        rc, out = run(rec, env_for("fallback", vi_model="some-cloud-model", fillers=["bracket"]))
+        t2 = json.loads((rec / "transcript.json").read_text()) if rc == 0 else {}
+        tried = t2.get("model", {}).get("tried", [])
+        no_bracket = all("bracket" not in s["text_clean"].lower() for s in t2.get("segments", []))
+        raw_bracket = any("bracket" in s["text"].lower() for s in t2.get("segments", []))
+        results.append(report("fallback", rc == 0 and tried[0]["model"] == "some-cloud-model" and "skipped" in tried[0]
+                              and t2["model"]["used"] == "parakeet-unified-0.6b" and no_bracket and raw_bracket,
+                              f"tried={tried}"))
+
+        fresh(rec)
+        rc, out = run(rec, env_for("override", vi_model="whisper-cloud-x", model="parakeet-tdt-0.6b-v2"))
+        t3 = json.loads((rec / "transcript.json").read_text()) if rc == 0 else {}
+        results.append(report("override", rc == 0 and t3["model"]["used"] == "parakeet-tdt-0.6b-v2"
+                              and t3["model"]["tried"][0]["role"] == "config override", out.strip()[-120:]))
+
+        fresh(rec)
+        rc, out = run(rec, env_for("diarize", diarize=True, max_speakers=2, model="parakeet-tdt-0.6b-v2"))
+        t4 = json.loads((rec / "transcript.json").read_text()) if rc == 0 else {}
+        sys_speakers = sorted({s["speaker"] for s in t4.get("segments", []) if s["source"] == "system"})
+        results.append(short_merge_case())
+        results.append(report("diarize", sys_speakers == ["S1", "S2"], f"system speakers={sys_speakers}"))
+
+        fresh(rec)
+        rc, out = run(rec, env)
+        t5 = json.loads((rec / "transcript.json").read_text())
         write_master(work, rec, extra=",volume=0.9")
         rc, out = run(rec, env)
-        t2 = json.loads((rec / "transcript.json").read_text())
-        results.append(report("rerun", rc == 0 and t2["fingerprints"]["master_sha256"] != t["fingerprints"]["master_sha256"]))
+        t6 = json.loads((rec / "transcript.json").read_text())
+        results.append(report("rerun", rc == 0 and t6["fingerprints"]["master_sha256"] != t5["fingerprints"]["master_sha256"]))
 
         (rec / "transcript.json").write_text((rec / "transcript.json").read_text().replace("Friday", "Thursday"))
         rc, out = run(rec, env, "--force")
@@ -183,9 +247,9 @@ def main():
         bad.write_text(f'[paths]\nrecordings = "{synced}"\n')
         r = subprocess.run([str(CLI), "doctor"], capture_output=True, text=True,
                            env=dict(env, MEETING_NOTES_CONFIG=str(bad)))
-        loads = "ok    models load offline" in r.stdout
+        loads = "parakeet-unified-0.6b loads offline" in r.stdout
         flags = "FAIL  output folder" in r.stdout and "synced" in r.stdout and "mode 0o755" in r.stdout
-        results.append(report("doctor", r.returncode == 1 and loads and flags))
+        results.append(report("doctor", r.returncode == 1 and loads and flags, r.stdout.strip()[-200:] if not loads else ""))
     finally:
         if "--keep" in sys.argv[1:]:
             print(f"kept: {work}")

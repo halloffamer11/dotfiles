@@ -1,14 +1,9 @@
-"""run and queue: the stages in order, with progress in recording.json "pipeline".
+"""run and queue: transcribe, then the optional enhancement, with progress in
+recording.json "pipeline".
 
-Order: match -> transcribe -> notes. match goes first because a matched meeting's
-invitee count bounds the diarizer's speaker count. Each stage is optional in
-[run] (match, transcribe, notes = true|false); match also needs a calendar
-source and notes a [notes] command, else they are skipped.
-
-pipeline.state: processing, then transcribed (no notes stage), notes-ready,
-notes-unstructured (the notes command answered without the four headings; its
-answer is saved), or failed with a reason. A hand-edited output is kept and the
-run goes on.
+pipeline.state: processing, then transcribed or enhanced, or failed with a
+reason; pipeline.enhancement says what the enhancement step did (written,
+unchanged, or skipped and why). A hand-edited output is kept and the run goes on.
 
 queue runs every recording folder whose capture state is recorded or partial
 and whose pipeline state is missing, or processing with a free lock (a run that
@@ -17,38 +12,29 @@ so a Hammerspoon reload loses nothing.
 """
 import json, os
 
-from . import match, notes, transcribe
+from . import enhance, transcribe
 from .common import Busy, Refused, lock_is_free, read_recording, recording_lock, set_pipeline
 
 
 def run(rec, cfg, force=False, log=print):
     """Returns the final pipeline state."""
-    r = cfg["run"]
     with recording_lock(rec):
         read_recording(rec)
         set_pipeline(rec, "processing")
         try:
-            steps = []
-            if r["match"] and cfg["match"]["source"] != "none":
-                steps.append(("match", match.run))
-            if r["transcribe"]:
-                steps.append(("transcribe", transcribe.run))
-            if r["notes"] and notes.enabled(cfg):
-                steps.append(("notes", notes.run))
-            final = None
-            for name, fn in steps:
-                try:
-                    path, how = fn(rec, cfg, force)
-                    log(f"{name}: {how} {path or ''}".rstrip())
-                    if name == "notes":
-                        final = "notes-unstructured" if how == "unstructured" else "notes-ready"
-                except Refused as e:
-                    log(f"{name}: kept as edited ({e})")
-                    if name == "notes":
-                        final = "notes-ready"
-            if final is None:
-                final = "transcribed" if os.path.exists(os.path.join(rec, "transcript.json")) else "processed"
-            set_pipeline(rec, final)
+            try:
+                path, how = transcribe.run(rec, cfg, force)
+                log(f"transcribe: {how} {path}")
+            except Refused as e:
+                log(f"transcribe: kept as edited ({e})")
+            try:
+                path, how = enhance.run(rec, cfg, force)
+                log(f"enhance: {how} {path or ''}".rstrip())
+            except Refused as e:
+                how = f"kept as edited ({e})"
+                log(f"enhance: {how}")
+            final = "enhanced" if how in ("written", "unchanged") or how.startswith("kept") else "transcribed"
+            set_pipeline(rec, final, enhancement=how)
             return final
         except Exception as e:
             set_pipeline(rec, "failed", f"{type(e).__name__}: {e}")
