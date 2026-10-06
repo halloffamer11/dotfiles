@@ -115,8 +115,11 @@ Older recordings' generic names are renamed on their next run.
   mean equal timelines. Each leg logs its start against one monotonic clock, its
   sample count and any discontinuities (mictee restarts after a device change).
   The mux aligns the start offset, keeps gaps as silence and corrects drift.
-- **Health.** Per leg: exit status, duration, gaps. Validate before deleting raw
-  legs; keep diagnostics on failure. A one-leg salvage is a `partial` recording,
+- **Health.** Per leg: exit status, duration, gaps, and whether it is digital
+  silence (all zero samples: the system tap without Screen & System Audio
+  Recording permission, or a denied microphone), which makes the recording
+  `partial` with a warning in the alert and the transcript header. Validate
+  before deleting raw legs; keep diagnostics on failure. A one-leg salvage is a `partial` recording,
   not a success.
 
 ### Speaker attribution
