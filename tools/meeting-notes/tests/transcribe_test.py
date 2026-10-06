@@ -175,7 +175,7 @@ def main():
             return report("transcribe", False, f"rc={rc}")
         t = json.loads((rec / "transcript.json").read_text())
         md = (rec / "transcript.md").read_text()
-        txt = [l for l in md.split("\n---\n", 1)[1].splitlines() if l.strip()]
+        lines = [l for l in md.split("\n---\n", 1)[1].splitlines() if l.strip()]
         keys = {"format_version", "recording_id", "recorded", "model", "voiceink_postprocessing", "diarize",
                 "fingerprints", "channels", "speakers", "segments", "merges", "dedup", "assumptions"}
         seg_keys = {"id", "start", "end", "source", "speaker", "text", "text_clean", "words"}
@@ -183,8 +183,8 @@ def main():
                               and all(seg_keys <= s.keys() for s in t["segments"])
                               and t["channels"]["mic"]["role"].startswith("microphone")
                               and md.startswith("# Transcript: ") and "- Model: parakeet-unified-0.6b" in md
-                              and len(txt) == len(t["segments"]) and txt[0].startswith("**[00:0")
-                              and all(":** " in l for l in txt), f"{len(t['segments'])} segments"))
+                              and len(lines) == len(t["segments"]) and lines[0].startswith("**[00:0")
+                              and all(":** " in l for l in lines), f"{len(t['segments'])} segments"))
         results.append(report("model", t["model"]["used"] == "parakeet-unified-0.6b"
                               and t["model"]["tried"][0]["role"] == "VoiceInk's selected model", str(t["model"]["used"])))
 
