@@ -295,10 +295,10 @@ def run(rec, cfg, force=False):
                 for s in sorted(diar, key=lambda s: s["start"]):
                     if s["speaker"] not in order:
                         order.append(s["speaker"])
-                names = {sp: f"S{i + 1}" for i, sp in enumerate(order)}
+                labels = {sp: f"S{i + 1}" for i, sp in enumerate(order)}
                 for m in merges:
-                    m["into"] = names.get(m["into"], m["into"])
-                speaker_of = lambda w: names.get(speaker_at(diar, w), "S?")
+                    m["into"] = labels.get(m["into"], m["into"])
+                speaker_of = lambda w: labels.get(speaker_at(diar, w), "S?")
             segments = group(sys_words, "system", speaker_of, t["pause_s"], fillers) + \
                 group(mic_words, "mic", lambda w: "mic", t["pause_s"], fillers)
         else:  # no word timings (Apple Speech): one segment per channel
