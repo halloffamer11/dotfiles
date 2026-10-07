@@ -18,3 +18,14 @@ jobs:
         run: |
           if [ "$RUNNER_OS" = macOS ]; then brew install stow; else sudo apt-get update && sudo apt-get install -y stow; fi
       - run: make test-bootstrap
+
+  test-meeting-notes:
+    # The portable cases (stub adapter, shadowing check, finalize); the cases that
+    # need meeting-asr and the models skip here and run on the Mac.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ffmpeg and zsh
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg zsh
+      - run: make test-meeting-notes
+      - run: RECORD_MEETING_FFMPEG=/usr/bin/ffmpeg python3 tools/record-meeting-tests/finalize_test.py

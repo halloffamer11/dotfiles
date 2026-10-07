@@ -25,10 +25,17 @@ names       old generic names (listen.m4a, transcript.md, transcript.json,
             enhanced.md) are renamed to <id>.* and recording.json follows
 egress      (macOS, models present) the whole run inside a sandbox that denies
             all network access; a request to the internet from it fails
+stub-run    (any OS with ffmpeg) transcribe.run end to end with a stub adapter
+            in place of meeting-asr, diarization on: <id>.md and <id>.json
+            written with speakers S1 and S2, master.caf removed
+shadowing   no function in meeting_notes or the recorder assigns a local that
+            has the name of a module-level import or definition (Python then
+            treats it as local for the whole function, and an earlier use
+            raises UnboundLocalError)
 
 Run:  make test-meeting-notes
 """
-import json, os, pathlib, platform, plistlib, shutil, subprocess, sys, tempfile
+import json, os, pathlib, platform, plistlib, shutil, subprocess, symtable, sys, tempfile
 
 sys.dont_write_bytecode = True  # no __pycache__ under ~/.hammerspoon
 HERE = pathlib.Path(__file__).resolve().parent
@@ -344,6 +351,99 @@ def master_cases():
     return res
 
 
+STUB_ADAPTER = """#!/usr/bin/env python3
+# Stand-in for meeting-asr: canned answers in its JSON shapes, no models.
+import json, os, sys
+cmd, wav = sys.argv[1], sys.argv[-1]
+if cmd == "version":
+    out = {"sdk": "stub", "adapter": "stub"}
+elif cmd == "check":
+    out = {}
+elif cmd == "format":
+    out = {"text": sys.stdin.read()}
+elif cmd == "diarize":
+    out = {"segments": [{"speaker": "B", "start": 0.0, "end": 1.4}, {"speaker": "A", "start": 1.5, "end": 3.0}]}
+elif cmd == "transcribe":
+    said = (["please", "send", "the", "quote"] if os.path.basename(wav) == "mic.wav" else
+            ["the", "supplier", "is", "late", "we", "can", "qualify", "another"])
+    step = 3.0 / len(said)
+    out = {"text": " ".join(said), "duration_s": 3.0, "processing_s": 0.1,
+           "words": [{"w": w, "s": i * step, "e": (i + 1) * step - 0.05, "c": 0.9} for i, w in enumerate(said)]}
+else:
+    sys.exit(f"stub: unknown command {cmd}")
+print(json.dumps(out))
+"""
+
+
+def stub_run_cases():
+    """transcribe.run on a real master.caf with a stub adapter (any OS with ffmpeg):
+    covers the code path between choosing a model and writing the outputs."""
+    ffmpeg = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
+    if not os.path.exists(ffmpeg):
+        return [report("stub-run", True, "SKIP (no ffmpeg)")]
+    from meeting_notes import common, transcribe
+    common.FFPROBE = os.path.join(os.path.dirname(ffmpeg), "ffprobe")
+    transcribe.FFMPEG = ffmpeg
+    stub = WORK / "meeting-asr-stub"
+    stub.write_text(STUB_ADAPTER)
+    stub.chmod(0o755)
+    models = WORK / "stub-models"
+    folder = models / voiceink.ENGINES["parakeet-unified-0.6b"]["folder"]
+    folder.mkdir(parents=True)
+    for f in ("parakeet_unified_encoder_int8.mlmodelc", "parakeet_unified_decoder.mlmodelc",
+              "parakeet_unified_joint_decision_single_step.mlmodelc", "vocab.json"):
+        (folder / f).write_text("{}")
+    os.environ.update(MEETING_NOTES_VOICEINK_PLIST=tt.voiceink_plist(WORK / "stub.plist", "parakeet-unified-0.6b"),
+                      MEETING_NOTES_VOICEINK_DICTIONARY=str(WORK / "no-dictionary.store"))
+    cfg = common.settings()
+    cfg = dict(cfg, paths=dict(cfg["paths"], adapter=str(stub)), models=dict(cfg["models"], models_root=str(models)),
+               transcribe=dict(cfg["transcribe"], no_network=False, diarize=True, min_speaker_s=0.5))
+
+    name = "meeting-2026-01-02-030405"
+    rec = WORK / "stub-run" / name
+    rec.mkdir(parents=True, mode=0o700)
+    subprocess.run([ffmpeg, "-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=f=440:d=3", "-f", "lavfi", "-i",
+                    "sine=f=660:d=3", "-filter_complex",
+                    "[0:a][1:a]join=inputs=2:channel_layout=stereo:map=0.0-FL|1.0-FR[m]", "-map", "[m]",
+                    "-ar", "48000", "-c:a", "pcm_f32le", "-f", "caf", str(rec / "master.caf")], check=True)
+    (rec / "recording.json").write_text(json.dumps({"format_version": 1, "id": name, "state": "recorded",
+                                                    "files": {"master": "master.caf", "listen": f"{name}.m4a"},
+                                                    "legs": {"mic": {"present": True}, "system": {"present": True}}}))
+    try:
+        out, how = transcribe.run(str(rec), cfg)
+    except Exception as e:  # the point of this case: any crash in run() fails here, on every OS
+        return [report("stub-run", False, f"{type(e).__name__}: {e}")]
+    t = json.loads(pathlib.Path(out).read_text())
+    md = (rec / f"{name}.md").read_text()
+    speakers = {s["speaker"] for s in t["segments"] if s["source"] == "system"}
+    return [report("stub-run", how == "written" and out.endswith(f"{name}.json") and speakers == {"S1", "S2"}
+                   and "**[00:00] Mic:** please send the quote" in md and "S1:" in md
+                   and not (rec / "master.caf").exists() and (rec / f"{name}.m4a").exists(),
+                   f"{how} speakers={sorted(speakers)}")]
+
+
+def shadowing_case():
+    """A function-local name equal to a module-level one is local for the WHOLE
+    function, so a use before the assignment raises UnboundLocalError at run time
+    (the #19 bug: names = {...} in transcribe.run hid common.names)."""
+    files = sorted((CLI.parent.parent / "meeting_notes").glob("*.py")) + [CLI.parent / "record-meeting-finalize"]
+    found = []
+
+    def walk(table, module, path):
+        for child in table.get_children():
+            if child.get_type() == "function":
+                found.extend(f"{path.name}:{child.get_lineno()} {child.get_name()}() assigns {s.get_name()}"
+                             for s in child.get_symbols()
+                             if s.is_local() and not s.is_parameter() and s.get_name() in module)
+            walk(child, module, path)
+
+    for path in files:
+        top = symtable.symtable(path.read_text(), str(path), "exec")
+        module = {s.get_name() for s in top.get_symbols() if s.is_imported() or s.is_assigned() or s.is_namespace()}
+        walk(top, module, path)
+    return report("shadowing", not found, "; ".join(found))
+
+
 def config_case():
     """The committed example config parses and its keys are all known settings."""
     from meeting_notes.common import DEFAULTS, parse_toml_subset
@@ -355,7 +455,8 @@ def config_case():
 
 if __name__ == "__main__":
     try:
-        results = voiceink_cases() + enhance_cases() + master_cases() + run_cases() + [config_case()]
+        results = [shadowing_case()] + voiceink_cases() + enhance_cases() + master_cases() + stub_run_cases() \
+            + run_cases() + [config_case()]
     finally:
         if "--keep" in sys.argv[1:]:
             print(f"kept: {WORK}")

@@ -1,5 +1,5 @@
 """doctor: read-only health check of the meeting-notes setup."""
-import os
+import os, subprocess
 
 from . import enhance, voiceink
 from .common import FFMPEG, adapter
@@ -13,6 +13,30 @@ def tilde(text):
     return text.replace(os.path.realpath(home), "~").replace(home, "~")
 
 
+def code_version():
+    """(good, text) for the checkout this code runs from: ~/.hammerspoon links into
+    the dotfiles repo, so the running code is whatever that checkout holds. Uses
+    the last fetch only (no network)."""
+    here = os.path.dirname(os.path.realpath(__file__))
+
+    def git(*args):
+        r = subprocess.run(["git", "-C", here, *args], capture_output=True, text=True)
+        return r.stdout.strip() if r.returncode == 0 else None
+
+    top, head = git("rev-parse", "--show-toplevel"), git("rev-parse", "--short", "HEAD")
+    if not top or not head:
+        return False, f"code in {here} is not a git checkout (expected ~/.hammerspoon to link into ~/dotfiles)"
+    edits = git("status", "--porcelain", "--", here)
+    behind = git("rev-list", "--count", "HEAD..@{upstream}")
+    text = f"code: {top} at {head}"
+    if edits:
+        text += f", {len(edits.splitlines())} uncommitted change(s) under meeting_notes"
+    if behind and behind != "0":
+        return False, f"{text}, {behind} commit(s) behind {git('rev-parse', '--abbrev-ref', '@{upstream}')} " \
+                      f"as of the last fetch (cd {top} && git pull --ff-only)"
+    return True, text
+
+
 def run(cfg):
     ok = True
 
@@ -24,6 +48,7 @@ def run(cfg):
     def info(what):
         print(f"info  {tilde(what)}")
 
+    line(*code_version())
     print(tilde(f"config: {cfg['config_path']} ({'found' if os.path.exists(cfg['config_path']) else 'defaults'})"))
     exe = cfg["paths"]["adapter"]
     line(os.access(exe, os.X_OK), f"adapter {exe} (make meeting-notes)")
