@@ -35,6 +35,11 @@ Bootstrap stops before it changes anything if Homebrew is missing. After `brew b
 it stops if a real file sits where a link belongs. Compare that file with the repo's
 copy, move it aside (`mv ~/.zshrc ~/.zshrc.pre-dotfiles`), and run bootstrap again.
 
+Herdr uses its standalone installation and vendor updater. Install it separately
+before using its terminal workflow; the Brewfile does not select a second copy.
+Brew supplies the public Node/npm commands. Keep application-private runtimes
+inside their application directories.
+
 You still do these by hand, because no command can:
 
 - Remap Caps Lock to Control (System Settings, Keyboard, Modifier Keys).

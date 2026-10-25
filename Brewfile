@@ -2,7 +2,7 @@
 # Formula names verified against this machine's installs (homebrew-core).
 brew "stow"    # symlink manager — everything in Makefile's configs/skills targets depends on it
 brew "hunk"    # diff viewer; ships the hunk-review skill (linked by `make skills`)
-brew "herdr"   # agent multiplexer; installs its own agent-state hooks on first launch
+# Herdr uses its standalone installation and vendor updater.
 brew "jq"      # the Claude Code statusline (stow/claude) parses its stdin JSON with it
 brew "node"    # npx runs the skills CLI (`make externals`); npm comes with it
 cask "hammerspoon" # hotkey/menubar orchestrator for the record-meeting rig
@@ -43,12 +43,6 @@ brew "pipx"
 brew "duti"
 tap "FelixKratz/formulae", trusted: true # JankyBorders lives in the author's personal tap
 brew "borders", restart_service: :changed # focused-window highlight; config: stow/borders
-
-# Agent CLIs
-cask "kiro-cli"   # Kiro headless (`kiro-cli chat --no-interactive`); delegate's kiro harness; KIRO_API_KEY stays machine-local
-
-# Security and Passwords
-cask "bitwarden"
 
 # Terminals
 cask "ghostty"                          # primary; config: stow/ghostty

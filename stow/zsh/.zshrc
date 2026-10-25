@@ -22,6 +22,7 @@ export EDITOR="nvim"
 export VISUAL="nvim"
 export PATH="$HOME/.local/bin:$PATH"
 export PATH="$HOME/.grok/bin:$PATH"     # grok CLI (delegate skill lane)
+export PATH="$PATH:$HOME/.bun/bin"     # Bun global tools; keep existing providers first
 
 # --- Prompt (Starship) ---
 eval "$(starship init zsh)"
