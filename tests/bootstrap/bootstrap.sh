@@ -1,6 +1,6 @@
 #!/bin/sh
 # Tickets 03 and 04: one bootstrap command per platform. Every external tool
-# (brew, npx, git clone, swift) is a stub, so this runs offline and only ever
+# (brew, npx, git clone, swift, the herdr installer) is a stub, so this runs offline and only ever
 # writes inside throwaway homes.
 . "$(dirname "$0")/lib.sh"
 
@@ -40,6 +40,14 @@ cat > "$stubs/swiftc" <<'STUB'
 echo "swiftc $*" >> "$HOME/calls.log"
 while [ $# -gt 0 ]; do [ "$1" = -o ] && : > "$2"; shift; done
 STUB
+# curl only ever fetches herdr's installer; the stand-in installs a stand-in herdr.
+cat > "$stubs/curl" <<'STUB'
+#!/bin/sh
+echo "curl $*" >> "$HOME/calls.log"
+while [ $# -gt 0 ]; do [ "$1" = -o ] && printf '%s\n' '#!/bin/sh' \
+  'echo "herdr-install $HERDR_INSTALL_DIR" >> "$HOME/calls.log"' \
+  'mkdir -p "$HERDR_INSTALL_DIR" && install -m 755 /dev/null "$HERDR_INSTALL_DIR/herdr"' > "$2"; shift; done
+STUB
 chmod +x "$stubs"/*
 
 # A stand-in delegate checkout whose installer only records that it ran.
@@ -77,10 +85,10 @@ rm -rf "$h"
 h=$(fresh_home)
 out=$(boot "$h" macos "$stubs:$bin") || bad "macos: bootstrap succeeds in an isolated home" "$out"
 log=$(cat "$h/calls.log" 2>/dev/null)
-check "macos: brew bundle, the skills CLI, both audio builds and delegate's installer ran" \
-  sh -c 'for p in "brew bundle" "npx" "swift build" "swiftc" "delegate-install"; do printf "%s\n" "$1" | grep -q "$p" || exit 1; done' _ "$log"
-check "macos: config, Hammerspoon and the audio binaries are in place" \
-  test -L "$h/.zshrc" -a -L "$h/.hammerspoon" -a -f "$h/.local/bin/mictee" -a -f "$h/.local/bin/audiotee"
+check "macos: brew bundle, the herdr installer, the skills CLI, both audio builds and delegate's installer ran" \
+  sh -c 'for p in "brew bundle" "herdr-install" "npx" "swift build" "swiftc" "delegate-install"; do printf "%s\n" "$1" | grep -q "$p" || exit 1; done' _ "$log"
+check "macos: config, Hammerspoon, herdr and the audio binaries are in place" \
+  test -L "$h/.zshrc" -a -L "$h/.hammerspoon" -a -x "$h/.local/bin/herdr" -a -f "$h/.local/bin/mictee" -a -f "$h/.local/bin/audiotee"
 rm -rf "$h"
 
 # --- Linux ---------------------------------------------------------------

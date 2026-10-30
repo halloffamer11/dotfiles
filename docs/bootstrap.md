@@ -35,8 +35,25 @@ Bootstrap stops before it changes anything if Homebrew is missing. After `brew b
 it stops if a real file sits where a link belongs. Compare that file with the repo's
 copy, move it aside (`mv ~/.zshrc ~/.zshrc.pre-dotfiles`), and run bootstrap again.
 
-Herdr uses its standalone installation and vendor updater. Install it separately
-before using its terminal workflow; the Brewfile does not select a second copy.
+Herdr uses its standalone installation and vendor updater, not Homebrew. Bootstrap
+runs `make herdr`, which installs it into `~/.local/bin` with the upstream installer,
+and `make update` runs `herdr update`. Both stop, changing nothing, while a Homebrew
+login service or a second herdr on `PATH` could start a different server build.
+
+Upstream herdr builds are ad-hoc signed, so macOS keys each privacy grant (Full Disk
+Access, Files and Folders, Screen Recording) to one build, and every update adds new
+rows. To keep one row per category, sign herdr with your own certificate once per
+machine:
+
+1. Open `/System/Library/CoreServices/Certificate Assistant.app` and choose Create a
+   Certificate. Use a name such as `herdr-local`, Identity Type Self-Signed Root,
+   Certificate Type Code Signing. It goes into the login keychain.
+2. Add `HERDR_SIGN_IDENTITY = herdr-local` to `local.mk`.
+3. Run `make herdr`, then quit Herdr and start it again. Remove the old herdr rows in
+   System Settings, Privacy and Security, and grant access once.
+
+`make herdr-update` (part of `make update`) signs each new build again. Quit and start
+Herdr after it, so the server runs the signed build.
 Brew supplies the public Node/npm commands. Keep application-private runtimes
 inside their application directories.
 
