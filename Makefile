@@ -67,7 +67,7 @@ CONFIG_PACKAGES ?= $(sort $(COMMON_PACKAGES) $(PROFILE_PACKAGES))
 # Packages under stow/ this profile leaves out, named so a skipped one is a choice, not a surprise.
 UNSELECTED_PACKAGES = $(filter-out $(CONFIG_PACKAGES) hammerspoon,$(notdir $(wildcard $(CURDIR)/stow/*)))
 SKILL_AGENTS ?= claude-code codex kiro-cli
-PERSONAL_SKILLS ?= facebook-marketplace fresh-context toolsmith
+PERSONAL_SKILLS ?= facebook-marketplace fresh-context skillsmith toolsmith
 DELEGATE_DIR ?= $(HOME)/projects/delegate
 EXTRA_BREWFILES ?=
 # Checkouts `make doctor` compares with their upstream main (it asks the remote, writes nothing).
