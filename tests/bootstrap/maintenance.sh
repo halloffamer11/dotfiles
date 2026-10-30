@@ -41,7 +41,7 @@ for profile in macos omarchy linux; do
   check "$profile: doctor on a fresh home asks for delegate" has "$out" "ACTION: delegate is not checked out"
 
   make -s -C "$REPO" configs PROFILE=$profile HOME="$h" >/dev/null 2>&1
-  for s in herdr humanizer facebook-marketplace fresh-context toolsmith; do mkdir -p "$h/.agents/skills/$s"; done
+  for s in herdr humanizer facebook-marketplace fresh-context skillsmith toolsmith; do mkdir -p "$h/.agents/skills/$s"; done
   fake_delegate "$h"
   out=$(PATH="$stub:$PATH" make -s -C "$REPO" doctor PROFILE=$profile HOME="$h" 2>&1); rc=$?
   # a missing prerequisite (no brew in this container) is the one thing allowed to remain
