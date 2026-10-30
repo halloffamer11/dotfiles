@@ -4,6 +4,8 @@
 #   make bootstrap   # fresh machine. macOS: brew packages + config/skills + audiotee/mictee + delegate.
 #                    # Linux (omarchy, linux): config/skills + delegate; system packages stay the distro's.
 #   make brew        # install/verify Brewfile packages only
+#   make herdr       # macOS: install herdr with its own installer into ~/.local/bin, then sign it (HERDR_SIGN_IDENTITY)
+#   make herdr-update  # macOS: `herdr update`, then sign the new binary again
 #   make apply       # reconcile configs, agent links, declared skills, and the delegate install
 #   make configs     # restow the profile's config packages and link ~/.claude/CLAUDE.md
 #   make configs-plan  # dry run of configs: the profile, its links and any conflicts; writes nothing
@@ -12,7 +14,7 @@
 #   make externals   # ensure declared skills (personal and third-party) are installed at current upstream
 #   make external-updates  # update only the skills declared by this repo
 #   make delegate    # clone halloffamer11/delegate into DELEGATE_DIR if absent (else pull a clean main), then run its `make install`
-#   make update      # macOS: Brewfile packages + declared skills; Linux: declared skills only
+#   make update      # macOS: Brewfile packages + herdr + declared skills; Linux: declared skills only
 #   make doctor      # read-only diagnosis: profile, prerequisites, conflicts, broken links, skills,
 #                    # gitleaks, delegate (checkout, relays, catalog) and checkouts behind upstream
 #   make audiotee    # build the audiotee system-audio capture binary into ~/.local/bin (Swift 5.9+, macOS 14.2+)
@@ -70,17 +72,25 @@ SKILL_AGENTS ?= claude-code codex kiro-cli
 PERSONAL_SKILLS ?= facebook-marketplace fresh-context skillsmith toolsmith
 DELEGATE_DIR ?= $(HOME)/projects/delegate
 EXTRA_BREWFILES ?=
+# The upstream installer's own variable and default; `make herdr` passes it through.
+HERDR_INSTALL_DIR ?= $(HOME)/.local/bin
+# A code-signing identity in the login keychain (set it in local.mk). Upstream builds are
+# ad-hoc signed, so macOS keys each privacy grant to one build and every update adds a new
+# row. Signed with a fixed identifier and certificate, every build keeps the same grants.
+# Empty: herdr stays ad-hoc signed.
+HERDR_SIGN_IDENTITY ?=
+HERDR_IDENTIFIER ?= dev.herdr.herdr
 # Checkouts `make doctor` compares with their upstream main (it asks the remote, writes nothing).
 DOCTOR_UPSTREAM ?= dotfiles delegate
 SKILLS_CLI = DISABLE_TELEMETRY=1 npx -y skills@latest
 
-.PHONY: bootstrap preflight conflicts doctor brew apply configs configs-plan skills externals external-updates update delegate audiotee mictee meeting-notes test-recorder test-meeting-notes test-bootstrap
+.PHONY: bootstrap preflight conflicts doctor brew apply configs configs-plan skills externals external-updates update herdr herdr-sign herdr-update delegate audiotee mictee meeting-notes test-recorder test-meeting-notes test-bootstrap
 
 # Prerequisites run left to right. Each profile first checks what it cannot do without, so
 # a machine missing one stops before anything in the home directory changes; existing
 # files in the way stop it next, with what to do, since stow never adopts or overwrites.
 ifeq ($(PROFILE),macos)
-bootstrap: preflight brew conflicts apply audiotee mictee
+bootstrap: preflight brew conflicts herdr apply audiotee mictee
 else
 bootstrap: preflight conflicts apply
 	@echo "note: Linux system packages (git, make, stow, node, npm, the tools the configs call) are the distribution's or yours; bootstrap installs none."
@@ -105,6 +115,46 @@ conflicts:
 brew:
 	brew bundle --file=$(CURDIR)/Brewfile
 	@for f in $(EXTRA_BREWFILES); do brew bundle --file=$$f; done
+
+# One owner per machine: the server and every client must be the same build. The guard
+# changes nothing and stops while a Homebrew login service or another herdr on PATH
+# (Homebrew, mise, a distribution package) could start a different build of the server.
+# The installer is downloaded to a file first, so a failed download fails the target.
+herdr:
+	@if [ -e "$(HOME)/Library/LaunchAgents/homebrew.mxcl.herdr.plist" ]; then \
+		echo "ERROR: the Homebrew login service homebrew.mxcl.herdr starts its own herdr server. From a terminal outside Herdr:"; \
+		echo "  herdr server stop; launchctl bootout gui/$$(id -u)/homebrew.mxcl.herdr; rm ~/Library/LaunchAgents/homebrew.mxcl.herdr.plist"; \
+		exit 1; fi
+	@IFS=:; for d in $$PATH; do \
+		if [ -x "$$d/herdr" ] && [ "$$d/herdr" != "$(HERDR_INSTALL_DIR)/herdr" ]; then \
+			echo "ERROR: $$d/herdr has another owner. Remove it with that package manager, then run make herdr again."; \
+			exit 1; fi; \
+	done
+	@if [ ! -x "$(HERDR_INSTALL_DIR)/herdr" ]; then \
+		tmp="$$(mktemp)" && curl -fsSL https://herdr.dev/install.sh -o "$$tmp" && HERDR_INSTALL_DIR="$(HERDR_INSTALL_DIR)" sh "$$tmp"; \
+		rc=$$?; rm -f "$$tmp"; exit $$rc; fi
+	@$(MAKE) --no-print-directory herdr-sign
+
+# Signs again only when the binary is not already signed by the identity, and checks that
+# the designated requirement names the certificate, not a build hash.
+herdr-sign:
+	@if [ -z "$(HERDR_SIGN_IDENTITY)" ]; then \
+		echo "note: HERDR_SIGN_IDENTITY is not set; herdr stays ad-hoc signed and each update adds new privacy rows. See docs/bootstrap.md."; \
+	elif codesign -dr - "$(HERDR_INSTALL_DIR)/herdr" 2>&1 | grep -q 'identifier "$(HERDR_IDENTIFIER)" and certificate leaf' \
+		&& codesign -dvv "$(HERDR_INSTALL_DIR)/herdr" 2>&1 | grep -qx 'Authority=$(HERDR_SIGN_IDENTITY)'; then \
+		echo "herdr: already signed by $(HERDR_SIGN_IDENTITY)"; \
+	else \
+		codesign -f -s "$(HERDR_SIGN_IDENTITY)" -i "$(HERDR_IDENTIFIER)" "$(HERDR_INSTALL_DIR)/herdr" && \
+		codesign -dr - "$(HERDR_INSTALL_DIR)/herdr" 2>&1 | grep -q 'certificate leaf' || { \
+			echo "ERROR: herdr is not signed by $(HERDR_SIGN_IDENTITY). Check the identity with: security find-identity -p codesigning"; exit 1; }; \
+		echo "herdr: signed by $(HERDR_SIGN_IDENTITY); quit Herdr and start it again so the server runs the signed build"; \
+	fi
+
+# `herdr update` replaces the binary in place. The running server keeps its old build
+# until Herdr is quit and started again; `herdr status` then shows server_binary_stale: no.
+herdr-update: herdr
+	"$(HERDR_INSTALL_DIR)/herdr" update
+	@$(MAKE) --no-print-directory herdr-sign
 
 apply: configs skills externals delegate
 
@@ -167,7 +217,7 @@ external-updates:
 
 # Linux packages belong to the distribution, so update touches only the skills there.
 ifeq ($(PROFILE),macos)
-update: brew external-updates
+update: brew herdr-update external-updates
 else
 update: external-updates
 	@echo "note: system packages are not updated on $(PROFILE); use the distribution's tools."
