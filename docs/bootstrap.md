@@ -37,6 +37,10 @@ copy, move it aside (`mv ~/.zshrc ~/.zshrc.pre-dotfiles`), and run bootstrap aga
 
 Herdr uses its standalone installation and vendor updater. Install it separately
 before using its terminal workflow; the Brewfile does not select a second copy.
+The Herdr desktop app installs the same way. Bootstrap copies its `keys.json` in
+only when none is there, because the app does not reload a linked file; after you
+change keys in the app, copy `~/.config/herdr-app/keys.json` back to
+`stow/herdr-app/` to commit it.
 Brew supplies the public Node/npm commands. Keep application-private runtimes
 inside their application directories.
 

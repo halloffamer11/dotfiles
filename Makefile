@@ -30,6 +30,10 @@
 #     needs ~/.hammerspoon to be ONE whole-directory symlink (per-file links break
 #     hs.configdir and the pathwatcher auto-reload — upstream issue #830), so `configs`
 #     links it explicitly instead of stowing it
+#   - herdr-app is NOT in CONFIG_PACKAGES either: the Herdr app watches its own folder and
+#     misses edits made through a symlink (tested 2026-11-02), so live key reload needs a
+#     regular file. `configs` copies keys.json in only when it is missing; after editing the
+#     live file, copy it back to stow/herdr-app to commit it
 #   - This repo holds no authored skills. PERSONAL_SKILLS come from halloffamer11/skills
 #     through the skills CLI, like the third-party ones.
 #   - SKILL_AGENTS: which harnesses the skills CLI installs into
@@ -63,7 +67,7 @@ $(error PROFILE must be macos, omarchy or linux, not '$(PROFILE)')
 endif
 CONFIG_PACKAGES ?= $(sort $(COMMON_PACKAGES) $(PROFILE_PACKAGES))
 # Packages under stow/ this profile leaves out, named so a skipped one is a choice, not a surprise.
-UNSELECTED_PACKAGES = $(filter-out $(CONFIG_PACKAGES) hammerspoon,$(notdir $(wildcard $(CURDIR)/stow/*)))
+UNSELECTED_PACKAGES = $(filter-out $(CONFIG_PACKAGES) hammerspoon herdr-app,$(notdir $(wildcard $(CURDIR)/stow/*)))
 SKILL_AGENTS ?= claude-code codex
 PERSONAL_SKILLS ?= council facebook-marketplace fresh-context skillsmith toolsmith
 EXTRA_BREWFILES ?=
@@ -113,6 +117,9 @@ ifeq ($(PROFILE),macos)
 	@if [ -d $(HOME)/.hammerspoon ] && [ ! -L $(HOME)/.hammerspoon ]; then \
 		echo "ERROR: ~/.hammerspoon is a real directory (Hammerspoon launched before configs?) — move it aside first"; exit 1; fi
 	ln -sfn $(CURDIR)/stow/hammerspoon/.hammerspoon $(HOME)/.hammerspoon
+	@# A copy, never a link, and never over the live file (see herdr-app above).
+	@if [ ! -e $(HOME)/.config/herdr-app/keys.json ]; then mkdir -p $(HOME)/.config/herdr-app && \
+		cp $(CURDIR)/stow/herdr-app/.config/herdr-app/keys.json $(HOME)/.config/herdr-app/keys.json && echo "copied herdr-app keys.json"; fi
 endif
 	@# ~/.claude/CLAUDE.md is the user's global steering file, kept in references/. A real
 	@# file there is someone's data: stop rather than replace it.
@@ -135,6 +142,9 @@ ifeq ($(PROFILE),macos)
 	@if [ -e $(HOME)/.hammerspoon ] && [ ! -L $(HOME)/.hammerspoon ]; then echo "CONFLICT: ~/.hammerspoon is a real directory"; \
 		elif [ "$$(readlink $(HOME)/.hammerspoon)" = $(CURDIR)/stow/hammerspoon/.hammerspoon ]; then echo "in place: .hammerspoon"; \
 		else echo "LINK: .hammerspoon => $(CURDIR)/stow/hammerspoon/.hammerspoon"; fi
+	@if [ ! -e $(HOME)/.config/herdr-app/keys.json ]; then echo "COPY: .config/herdr-app/keys.json"; \
+		elif cmp -s $(HOME)/.config/herdr-app/keys.json $(CURDIR)/stow/herdr-app/.config/herdr-app/keys.json; then echo "in place: .config/herdr-app/keys.json"; \
+		else echo "differs: .config/herdr-app/keys.json (live copy kept; copy it back to commit)"; fi
 endif
 	@if [ -e $(HOME)/.claude/CLAUDE.md ] && [ ! -L $(HOME)/.claude/CLAUDE.md ]; then echo "CONFLICT: ~/.claude/CLAUDE.md is a real file"; \
 		elif [ "$$(readlink $(HOME)/.claude/CLAUDE.md)" = $(CURDIR)/references/CLAUDE.md ]; then echo "in place: .claude/CLAUDE.md"; \

@@ -27,6 +27,8 @@ for profile in macos omarchy linux; do
     macos)
       check "macos: Borders, zsh and a whole-directory Hammerspoon link" \
         test -L "$h/.config/borders/bordersrc" -a -L "$h/.zshrc" -a -L "$h/.hammerspoon"
+      check "macos: Herdr app keys are a copied file, not a link (live reload)" \
+        test -f "$h/.config/herdr-app/keys.json" -a ! -L "$h/.config/herdr-app/keys.json"
       check "macos: no Omarchy config" test ! -e "$h/.config/hypr" -a ! -e "$h/.bashrc" ;;
     omarchy)
       check "omarchy: Bash, Ghostty, Herdr, Hyprland and Voxtype" \
