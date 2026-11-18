@@ -30,5 +30,5 @@ paths from it.
 - Remove after the merge: `herdr worktree remove --workspace <id>`, then delete the branch.
 - Find them: `herdr worktree list --cwd "$PWD"`.
 
-A worktree is a blast radius for a delegate worker (`delegate.py --write <path>`); the
-primary checkout never is.
+A worktree is the blast radius for an agent that writes in parallel; the primary
+checkout never is.

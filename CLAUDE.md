@@ -1,9 +1,8 @@
 # Dotfiles
 
 Machine configuration managed as one Git repository. The repo is public. Agent skills
-live in their own repos: `halloffamer11/skills` (personal, installed through the
-skills CLI) and `halloffamer11/delegate` (its own installer). They split out on
-2026-10-01 with their history.
+live in their own repo, `halloffamer11/skills`, installed through the skills CLI. They
+split out on 2026-10-01 with their history.
 
 ## Start here
 
@@ -12,8 +11,6 @@ skills CLI) and `halloffamer11/delegate` (its own installer). They split out on
   `make test-bootstrap` checks it in isolated homes.
 - Skills are declared in the Makefile (`externals`), not stored here. To change a
   personal skill, edit `halloffamer11/skills`, push, then `make external-updates`.
-- Delegate work happens in `~/projects/delegate` (`make delegate` clones and installs
-  it). The statusline, Hammerspoon and Herdr configs here call its installed scripts.
 - `tools/` holds machine tools; each tool directory owns its own `CLAUDE.md`.
 - `references/CLAUDE.md` is the user's global `~/.claude/CLAUDE.md`; `make configs` links
   it there. Edit it here. It is not an instruction for this repo.
@@ -28,9 +25,6 @@ skills CLI) and `halloffamer11/delegate` (its own installer). They split out on
 
 ## Standing rules
 
-- Never stow or commit `~/.config/delegate/` or the `lane-*.md` agents; they are
-  machine-local (see the delegate repo).
-- A project's `.delegate/` policy never goes to main.
 - Keep the repo generic. Name no organization, site or machine that a deployment
   serves. Call a target a site deployment or a machine deployment; its specific
   settings stay in machine-local files (`local.mk`, `~/.gitconfig.local`,

@@ -1,20 +1,19 @@
 # ~/dotfiles/Makefile — machine provisioning entry points.
 #
 # Usage:
-#   make bootstrap   # fresh machine. macOS: brew packages + config/skills + audiotee/mictee + delegate.
-#                    # Linux (omarchy, linux): config/skills + delegate; system packages stay the distro's.
+#   make bootstrap   # fresh machine. macOS: brew packages + config/skills + audiotee/mictee.
+#                    # Linux (omarchy, linux): config/skills; system packages stay the distro's.
 #   make brew        # install/verify Brewfile packages only
-#   make apply       # reconcile configs, agent links, declared skills, and the delegate install
+#   make apply       # reconcile configs, agent links and declared skills
 #   make configs     # restow the profile's config packages and link ~/.claude/CLAUDE.md
 #   make configs-plan  # dry run of configs: the profile, its links and any conflicts; writes nothing
 #   make test-bootstrap  # isolated-home checks of configs and skills (needs stow and make)
 #   make skills      # drop stale authored-skill links + brew-provided skill links + per-file agent links
 #   make externals   # ensure declared skills (personal and third-party) are installed at current upstream
 #   make external-updates  # update only the skills declared by this repo
-#   make delegate    # clone halloffamer11/delegate into DELEGATE_DIR if absent (else pull a clean main), then run its `make install`
 #   make update      # macOS: Brewfile packages + declared skills; Linux: declared skills only
 #   make doctor      # read-only diagnosis: profile, prerequisites, conflicts, broken links, skills,
-#                    # gitleaks, delegate (checkout, relays, catalog) and checkouts behind upstream
+#                    # gitleaks and a dotfiles checkout behind upstream
 #   make audiotee    # build the audiotee system-audio capture binary into ~/.local/bin (Swift 5.9+, macOS 14.2+)
 #   make mictee      # build the mictee mic capture binary into ~/.local/bin (Swift)
 #   make test-recorder  # regression harness for the record-meeting rig
@@ -32,8 +31,7 @@
 #     hs.configdir and the pathwatcher auto-reload — upstream issue #830), so `configs`
 #     links it explicitly instead of stowing it
 #   - This repo holds no authored skills. PERSONAL_SKILLS come from halloffamer11/skills
-#     through the skills CLI, like the third-party ones; delegate has its own repo and
-#     installer (DELEGATE_DIR), because it needs machine setup the skills CLI cannot do.
+#     through the skills CLI, like the third-party ones.
 #   - SKILL_AGENTS: which harnesses the skills CLI installs into
 #   - agents are stowed per FILE into ~/.claude/agents (the package is flat, so folding is moot) so
 #     machine-local agents can sit alongside; an agent added by a pull appears after the next `make skills`
@@ -66,15 +64,14 @@ endif
 CONFIG_PACKAGES ?= $(sort $(COMMON_PACKAGES) $(PROFILE_PACKAGES))
 # Packages under stow/ this profile leaves out, named so a skipped one is a choice, not a surprise.
 UNSELECTED_PACKAGES = $(filter-out $(CONFIG_PACKAGES) hammerspoon,$(notdir $(wildcard $(CURDIR)/stow/*)))
-SKILL_AGENTS ?= claude-code codex kiro-cli
+SKILL_AGENTS ?= claude-code codex
 PERSONAL_SKILLS ?= facebook-marketplace fresh-context skillsmith toolsmith
-DELEGATE_DIR ?= $(HOME)/projects/delegate
 EXTRA_BREWFILES ?=
 # Checkouts `make doctor` compares with their upstream main (it asks the remote, writes nothing).
-DOCTOR_UPSTREAM ?= dotfiles delegate
+DOCTOR_UPSTREAM ?= dotfiles
 SKILLS_CLI = DISABLE_TELEMETRY=1 npx -y skills@latest
 
-.PHONY: bootstrap preflight conflicts doctor brew apply configs configs-plan skills externals external-updates update delegate audiotee mictee meeting-notes test-recorder test-meeting-notes test-bootstrap
+.PHONY: bootstrap preflight conflicts doctor brew apply configs configs-plan skills externals external-updates update audiotee mictee meeting-notes test-recorder test-meeting-notes test-bootstrap
 
 # Prerequisites run left to right. Each profile first checks what it cannot do without, so
 # a machine missing one stops before anything in the home directory changes; existing
@@ -106,7 +103,7 @@ brew:
 	brew bundle --file=$(CURDIR)/Brewfile
 	@for f in $(EXTRA_BREWFILES); do brew bundle --file=$$f; done
 
-apply: configs skills externals delegate
+apply: configs skills externals
 
 configs:
 	@echo "profile: $(PROFILE)"
@@ -145,8 +142,8 @@ endif
 
 skills:
 	@# Before 2026-10-01 this repo stowed its own skills into the harness skill dirs. After a
-	@# pull those links dangle, and the skills CLI or delegate's installer replaces them.
-	@for t in $(HOME)/.claude/skills $(HOME)/.agents/skills $(HOME)/.kiro/skills; do for l in $$t/*; do \
+	@# pull those links dangle, and the skills CLI replaces them.
+	@for t in $(HOME)/.claude/skills $(HOME)/.agents/skills; do for l in $$t/*; do \
 		if [ -L "$$l" ] && [ ! -e "$$l" ]; then case "$$(readlink "$$l")" in */dotfiles/agents/skills/*) rm "$$l" && echo "removed stale link $$l";; esac; fi; \
 	done; done
 	@# hunk-review ships inside Homebrew's hunk; without both, it is skipped and the rest goes on.
@@ -177,18 +174,8 @@ endif
 doctor:
 	@PLAN="$$(MAKEFLAGS= make -s --no-print-directory -C $(CURDIR) configs-plan PROFILE=$(PROFILE) HOME=$(HOME) CONFIG_PACKAGES='$(CONFIG_PACKAGES)' 2>&1)" \
 	REPO=$(CURDIR) PROFILE=$(PROFILE) HOME=$(HOME) SKILLS="herdr humanizer $(PERSONAL_SKILLS)" \
-	DELEGATE_DIR=$(DELEGATE_DIR) UPSTREAM="$(DOCTOR_UPSTREAM)" \
+	UPSTREAM="$(DOCTOR_UPSTREAM)" \
 	NEEDS="$(if $(filter macos,$(PROFILE)),brew git make stow node npm,$(LINUX_NEEDS))" sh $(CURDIR)/scripts/doctor.sh
-
-# Clones delegate when absent. A checkout that is on main with no local changes is
-# fast-forwarded first, so `dots` installs current delegate; any other checkout is
-# left as it is, with a notice. A failed pull (offline) installs what is there.
-delegate:
-	@if [ ! -d $(DELEGATE_DIR)/.git ]; then git clone https://github.com/halloffamer11/delegate.git $(DELEGATE_DIR); \
-	elif [ "$$(git -C $(DELEGATE_DIR) symbolic-ref --short -q HEAD 2>/dev/null)" != main ]; then echo "notice: $(DELEGATE_DIR) is not on main, so it is not pulled"; \
-	elif [ -n "$$(git -C $(DELEGATE_DIR) status --porcelain 2>/dev/null)" ]; then echo "notice: $(DELEGATE_DIR) has local changes, so it is not pulled"; \
-	else git -C $(DELEGATE_DIR) pull -q --ff-only || echo "notice: could not pull $(DELEGATE_DIR); installing it as it is"; fi
-	$(MAKE) -C $(DELEGATE_DIR) install
 
 audiotee:
 	rm -rf /tmp/audiotee-build
