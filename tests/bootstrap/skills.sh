@@ -29,8 +29,8 @@ check "without brew: no hunk-review link" test ! -e "$h/.claude/skills/hunk-revi
 log=$(cat "$h/npx.log")
 check "herdr and humanizer come from their upstreams, unpinned" \
   sh -c 'has() { printf "%s\n" "$1" | grep -q -- "$2"; }; has "$1" "skills@latest add herdrdev/herdr --skill herdr " && has "$1" "skills@latest add blader/humanizer --skill humanizer "' _ "$log"
-check "skills install into Claude Code, Codex and Kiro only" \
-  [ "$(printf '%s\n' "$log" | grep -c -- '--agent claude-code codex kiro-cli -g -y$')" -eq 3 ]
+check "skills install into Claude Code and Codex only" \
+  [ "$(printf '%s\n' "$log" | grep -c -- '--agent claude-code codex -g -y$')" -eq 3 ]
 check "no skill version is pinned" sh -c '! printf "%s\n" "$1" | grep -q "@[0-9]"' _ "$log"
 
 # Idempotent: a second run leaves the same links.

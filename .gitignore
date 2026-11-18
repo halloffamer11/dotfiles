@@ -5,5 +5,3 @@ __pycache__/
 aa-key
 *.key
 .scratch/*/_work/
-# a project's delegate policy, written by the dashboard; never on main
-/.delegate/

@@ -3,8 +3,7 @@
 # installs; it exits non-zero when any line below says ACTION.
 # Inputs (from the Makefile): REPO, PROFILE, PLAN (configs-plan output),
 # NEEDS (commands the profile requires), SKILLS (declared skill names),
-# DELEGATE_DIR (the delegate checkout), UPSTREAM (checkouts to compare with
-# their upstream main: dotfiles, delegate, both or neither).
+# UPSTREAM (checkouts to compare with their upstream main: dotfiles or none).
 action=0
 say() { echo "$*"; }
 act() { echo "ACTION: $*"; action=1; }
@@ -61,22 +60,6 @@ fi
 [ -f "$HOME/.gitconfig.local" ] && say "machine git settings: ~/.gitconfig.local" \
   || say "machine git settings: none (~/.gitconfig.local absent; git uses the repo's identity)"
 
-if [ ! -d "$DELEGATE_DIR/.git" ]; then
-  act "delegate is not checked out at $DELEGATE_DIR: make delegate"
-else
-  ads="$DELEGATE_DIR/agents/skills/delegate/scripts/ads.sh"
-  if out=$(sh "$ads" check 2>&1); then
-    say "delegate relays: ${out#ads: }"
-  else
-    act "delegate relays: ${out#ads: } (sh $ads install)"
-  fi
-  [ -f "$HOME/.config/delegate/lanes.json" ] && say "delegate catalog: present" \
-    || act "no delegate catalog on this machine: make -C $DELEGATE_DIR delegate-wizard"
-  if command -v codex >/dev/null 2>&1 && [ ! -e "$HOME/.local/share/delegate/codex-home/auth.json" ]; then
-    act "delegate's codex home has no login: codex login, then make -C $DELEGATE_DIR delegate-codex-home"
-  fi
-fi
-
 # A checkout is behind when its upstream main is a commit it does not have.
 # This asks the remote and writes nothing; offline, it says so and moves on.
 behind() {  # behind NAME DIR
@@ -94,7 +77,6 @@ behind() {  # behind NAME DIR
 for r in $UPSTREAM; do
   case "$r" in
     dotfiles) behind dotfiles "$REPO" ;;
-    delegate) behind delegate "$DELEGATE_DIR" ;;
   esac
 done
 
