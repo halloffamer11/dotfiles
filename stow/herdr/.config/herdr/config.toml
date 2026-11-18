@@ -1,6 +1,6 @@
 onboarding = false
 [theme]
-name = "rose-pine"
+name = "dracula"
 auto_switch = false
 
 [theme.custom]
