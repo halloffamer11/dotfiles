@@ -19,7 +19,7 @@ split out on 2026-10-01 with their history.
 
 - Bootstrap and maintenance: `.scratch/dotfiles-bootstrap/issues/`.
 - Next-generation layout (chezmoi and the rest): the planning repo
-  `~/projects/dotfiles-refactor`.
+  `~/Documents/dotfiles-refactor`.
 - A ticket's `**Status:**` line names each open box that waits on the user.
 - Settled decisions: `docs/adr/` (none yet). Do not reopen one.
 
