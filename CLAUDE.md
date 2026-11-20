@@ -44,11 +44,6 @@ Local markdown: each effort in `.scratch/<effort>/`, with its `spec.md` and
 The five default roles, written as a waiting ticket's `**Status:**` value. See
 `docs/agents/triage-labels.md`.
 
-### Worktrees
-
-One slug names the `.scratch/` effort, the `worktree/<slug>` branch and the Herdr
-checkout under `~/.herdr/worktrees/`; never `/tmp`. See `docs/agents/worktrees.md`.
-
 ### Domain docs
 
 Single-context: a root `CONTEXT.md` and `docs/adr/`, made when the first term or
