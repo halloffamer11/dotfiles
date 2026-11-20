@@ -46,4 +46,31 @@ else
   bad "hooks: without gitleaks the commit goes through with a warning" "$nogl"
 fi
 
+# Git LFS: its hooks live in .git/hooks, which core.hooksPath hides, so the
+# dispatcher calls git-lfs. pre-push must get the refs on stdin, and so must the
+# repository's own pre-push. GIT_LFS points at a stub.
+cat > "$stubs/lfs" <<'STUB'
+#!/bin/sh
+echo "lfs $1 stdin=$(cat | tr '\n' ' ')" >> "$HOME/lfs.log"
+[ -f "$HOME/lfs-fail" ] && exit 1
+exit 0
+STUB
+chmod +x "$stubs/lfs"
+printf '#!/bin/sh\necho "local-pre-push stdin=$(cat | tr "\\n" " ")" >> "$HOME/lfs.log"\n' > "$repo/.git/hooks/pre-push"
+chmod +x "$repo/.git/hooks/pre-push"
+git init -q --bare "$h/remote.git"
+g remote add origin "$h/remote.git"
+lfs_push() { (GIT_LFS="$stubs/lfs" SKIP_GITLEAKS=1 HOME="$h" GIT_CONFIG_NOSYSTEM=1 git -C "$repo" push -q origin HEAD:refs/heads/main) >/dev/null 2>&1; }
+
+lfs_push
+check "hooks: pre-push calls git-lfs with the refs on stdin" grep -q "lfs pre-push stdin=HEAD [0-9a-f]* refs/heads/main" "$h/lfs.log"
+check "hooks: the repository's own pre-push still gets the refs" grep -q "local-pre-push stdin=HEAD [0-9a-f]* refs/heads/main" "$h/lfs.log"
+check "hooks: the push goes through" [ -n "$(g rev-parse -q --verify refs/remotes/origin/main)" ]
+
+touch "$h/lfs-fail"
+commit lfs-blocked-push >/dev/null 2>&1 || true
+lfs_push
+check "hooks: a git-lfs pre-push failure blocks the push" [ "$(g rev-parse HEAD)" != "$(g rev-parse origin/main 2>/dev/null)" ]
+rm -f "$h/lfs-fail"
+
 finish
