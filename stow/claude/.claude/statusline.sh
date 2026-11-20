@@ -151,17 +151,13 @@ S_DIR="📁 ${C_FG}${B}$(basename "${cwd:-?}")${R}"
 S_WT=""; [[ -n $wt_name ]] && S_WT="🌳 ${C_GRN}${wt_name}${R}"
 S_SESS=""; [[ -n $sname ]] && S_SESS="🔖 ${C_BLUE}${sname}${R}"
 S_AGENT=""; [[ -n $agent ]] && S_AGENT="🎭 ${C_MAG}${agent}${R}"
-S_HERDR=""
-if [[ ${HERDR_ENV:-} == 1 && -n ${HERDR_PANE_ID:-} ]]; then
-  S_HERDR="🐑 ${C_CYAN}${HERDR_WORKSPACE_ID:-?}${R}${D}:${R}${C_CYAN}${HERDR_TAB_ID##*:}${R}${D}:${R}${C_CYAN}${HERDR_PANE_ID##*:}${R}"
-fi
 S_STYLE=""; [[ -n $ostyle && $ostyle != default ]] && S_STYLE="📝 ${ostyle}"
 S_VIM=""; [[ -n $vim ]] && S_VIM="${C_YEL}${B}${vim}${R}"
 
 join() { local out="" s; for s in "$@"; do [[ -n $s ]] || continue; out+="${out:+$sep}$s"; done; printf '%s' "$out"; }
 
 LINE1=("$S_DIR" "$git_seg" "$SEC_MAIN" "$SEC_CLOCK")
-LINE2=("$S_SESS" "$S_WT" "$S_AGENT" "$S_HERDR" "$S_STYLE" "$S_VIM")
+LINE2=("$S_SESS" "$S_WT" "$S_AGENT" "$S_STYLE" "$S_VIM")
 
 case $style in
   one)
