@@ -27,10 +27,11 @@ check "without brew: every Claude agent is linked, per file" [ "$agents" -eq "$l
 check "without brew: hunk-review is skipped with a notice" has "$out" "notice: .*hunk-review skill is skipped"
 check "without brew: no hunk-review link" test ! -e "$h/.claude/skills/hunk-review"
 log=$(cat "$h/npx.log")
-check "herdr and humanizer come from their upstreams, unpinned" \
-  sh -c 'has() { printf "%s\n" "$1" | grep -q -- "$2"; }; has "$1" "skills@latest add herdrdev/herdr --skill herdr " && has "$1" "skills@latest add blader/humanizer --skill humanizer "' _ "$log"
+check "humanizer comes from its upstream, unpinned" \
+  sh -c 'printf "%s\n" "$1" | grep -q -- "skills@latest add blader/humanizer --skill humanizer "' _ "$log"
+check "the Herdr TUI skill is not installed" sh -c '! printf "%s\n" "$1" | grep -q herdrdev/herdr' _ "$log"
 check "skills install into Claude Code and Codex only" \
-  [ "$(printf '%s\n' "$log" | grep -c -- '--agent claude-code codex -g -y$')" -eq 3 ]
+  [ "$(printf '%s\n' "$log" | grep -c -- '--agent claude-code codex -g -y$')" -eq 2 ]
 check "no skill version is pinned" sh -c '! printf "%s\n" "$1" | grep -q "@[0-9]"' _ "$log"
 
 # Idempotent: a second run leaves the same links.

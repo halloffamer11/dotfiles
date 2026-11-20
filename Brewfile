@@ -2,7 +2,7 @@
 # Formula names verified against this machine's installs (homebrew-core).
 brew "stow"    # symlink manager — everything in Makefile's configs/skills targets depends on it
 brew "hunk"    # diff viewer; ships the hunk-review skill (linked by `make skills`)
-# Herdr uses its standalone installation and vendor updater.
+# The Herdr app installs and updates itself, outside Homebrew.
 brew "jq"      # the Claude Code statusline (stow/claude) parses its stdin JSON with it
 brew "node"    # npx runs the skills CLI (`make externals`); npm comes with it
 cask "hammerspoon" # hotkey/menubar orchestrator for the record-meeting rig

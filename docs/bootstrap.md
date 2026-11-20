@@ -35,9 +35,8 @@ Bootstrap stops before it changes anything if Homebrew is missing. After `brew b
 it stops if a real file sits where a link belongs. Compare that file with the repo's
 copy, move it aside (`mv ~/.zshrc ~/.zshrc.pre-dotfiles`), and run bootstrap again.
 
-Herdr uses its standalone installation and vendor updater. Install it separately
-before using its terminal workflow; the Brewfile does not select a second copy.
-The Herdr desktop app installs the same way. Bootstrap copies its `keys.json` in
+The Herdr desktop app installs and updates itself, outside Homebrew. The Herdr
+TUI (the `herdr` command) is not part of this setup. Bootstrap copies the app's `keys.json` in
 only when none is there, because the app does not reload a linked file; after you
 change keys in the app, copy `~/.config/herdr-app/keys.json` back to
 `stow/herdr-app/` to commit it.
@@ -66,7 +65,7 @@ Secret scanning).
 1. `git clone https://github.com/halloffamer11/dotfiles.git ~/dotfiles`
 2. `make -C ~/dotfiles bootstrap`
 
-This links the common configuration plus Bash, Ghostty, Herdr, Hyprland and Voxtype,
+This links the common configuration plus Bash, Ghostty, Hyprland and Voxtype,
 installs the declared skills and the Claude agents. The by-hand
 list is the macOS one, minus Homebrew, Hammerspoon and the recording grants.
 

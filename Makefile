@@ -45,8 +45,8 @@
 
 # The configuration every profile takes: nothing in it needs macOS or Omarchy.
 COMMON_PACKAGES := claude git nvim starship yazi
-MACOS_PACKAGES := borders ghostty herdr wezterm zsh
-OMARCHY_PACKAGES := bash ghostty herdr hypr voxtype
+MACOS_PACKAGES := borders ghostty wezterm zsh
+OMARCHY_PACKAGES := bash ghostty hypr voxtype
 LINUX_PACKAGES :=
 ifeq ($(shell uname -s),Darwin)
 DETECTED_PROFILE := macos
@@ -166,11 +166,10 @@ skills:
 externals:
 	@# These declarations are desired state: add installs a missing skill and refreshes an existing one.
 	$(SKILLS_CLI) add halloffamer11/skills --skill $(PERSONAL_SKILLS) --agent $(SKILL_AGENTS) -g -y
-	$(SKILLS_CLI) add herdrdev/herdr --skill herdr --agent $(SKILL_AGENTS) -g -y
 	$(SKILLS_CLI) add blader/humanizer --skill humanizer --agent $(SKILL_AGENTS) -g -y
 
 external-updates:
-	$(SKILLS_CLI) update -g -y herdr humanizer $(PERSONAL_SKILLS)
+	$(SKILLS_CLI) update -g -y humanizer $(PERSONAL_SKILLS)
 
 # Linux packages belong to the distribution, so update touches only the skills there.
 ifeq ($(PROFILE),macos)
@@ -183,7 +182,7 @@ endif
 # Writes nothing. Exits non-zero when it prints an ACTION line.
 doctor:
 	@PLAN="$$(MAKEFLAGS= make -s --no-print-directory -C $(CURDIR) configs-plan PROFILE=$(PROFILE) HOME=$(HOME) CONFIG_PACKAGES='$(CONFIG_PACKAGES)' 2>&1)" \
-	REPO=$(CURDIR) PROFILE=$(PROFILE) HOME=$(HOME) SKILLS="herdr humanizer $(PERSONAL_SKILLS)" \
+	REPO=$(CURDIR) PROFILE=$(PROFILE) HOME=$(HOME) SKILLS="humanizer $(PERSONAL_SKILLS)" \
 	UPSTREAM="$(DOCTOR_UPSTREAM)" \
 	NEEDS="$(if $(filter macos,$(PROFILE)),brew git make stow node npm,$(LINUX_NEEDS))" sh $(CURDIR)/scripts/doctor.sh
 
