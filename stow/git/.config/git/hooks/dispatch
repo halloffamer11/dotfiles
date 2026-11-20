@@ -25,6 +25,28 @@ if [ "$hook" = pre-commit ] && [ "${SKIP_GITLEAKS:-0}" != 1 ]; then
 fi
 
 local_hook="$(git rev-parse --git-common-dir)/hooks/$hook"
+
+# Git LFS puts its hooks in .git/hooks, which core.hooksPath hides, so call it here.
+# Without pre-push, a push sends LFS pointers but not the files they point to.
+lfs=${GIT_LFS:-git-lfs}  # the command to run; tests point it elsewhere
+if command -v "$lfs" >/dev/null 2>&1; then
+  case "$hook" in
+    pre-push)
+      # git passes the refs on stdin; keep a copy for the repository's own hook.
+      input=$(cat)
+      printf '%s\n' "$input" | "$lfs" pre-push "$@" || exit 1
+      if [ -x "$local_hook" ]; then
+        printf '%s\n' "$input" | "$local_hook" "$@"
+        exit $?
+      fi
+      exit 0
+      ;;
+    post-checkout|post-commit|post-merge)
+      "$lfs" "$hook" "$@" || exit 1
+      ;;
+  esac
+fi
+
 if [ -x "$local_hook" ]; then
   exec "$local_hook" "$@"
 fi
