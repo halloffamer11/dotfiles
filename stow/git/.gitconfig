@@ -14,3 +14,8 @@
 # git keeps the last value it reads for a key.
 [include]
 	path = ~/.gitconfig.local
+[filter "lfs"]
+	required = true
+	clean = git-lfs clean -- %f
+	smudge = git-lfs smudge -- %f
+	process = git-lfs filter-process
