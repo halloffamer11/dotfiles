@@ -19,7 +19,7 @@ def smoke(temp):
     for name in ("git", "sh", "env", "python3"):
         (bins / name).symlink_to(shutil.which(name))
     stub = REPO / "tests/chezmoi/stub.py"
-    for name in ("mise", "skills", "claude", "codex", "agy", "notify-send", "osascript", "playwright-mcp"):
+    for name in ("mise", "skills", "claude", "codex", "agy", "notify-send", "osascript", "playwright-mcp", "pacman"):
         (bins / name).symlink_to(stub)
     env = {"PATH": str(bins), "HOME": str(home), "SMOKE_ROOT": str(temp), "TMPDIR": str(temp),
            "FIXTURE_TOKEN": "fixture-only-value", "GIT_CONFIG_NOSYSTEM": "1",
@@ -27,6 +27,8 @@ def smoke(temp):
            "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.invalid",
            "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.invalid"}
     binary = shutil.which("chezmoi")
+    if binary and subprocess.run([binary, "--version"], capture_output=True).returncode != 0:
+        binary = None  # for example a stale mise shim for a tool that no config declares
     if not binary:
         mise = shutil.which("mise")
         if not mise:
@@ -116,12 +118,13 @@ def smoke(temp):
         assert other in value[key]["SessionStart"] and "fleet-check" in json.dumps(value)
     installed = tomllib.loads((home / ".config/mise/conf.d/50-belt.toml").read_text())["tools"]
     assert {"chezmoi", "git-lfs", "npm:skills"} <= installed.keys()
+    assert "eza" not in installed  # pacman provides it on Omarchy
     omarchy = Path("/etc/mise/conf.d/omarchy-tools.toml")
     if omarchy.exists():
         assert not installed.keys() & tomllib.loads(omarchy.read_text())["tools"].keys()
     mac = ["--override-data", '{"platform":"macos"}']
     mac_config = run("chezmoi", *mac, "cat", str(home / ".config/mise/conf.d/50-belt.toml"))
-    assert {"claude", "codex", "antigravity-cli"} <= tomllib.loads(mac_config)["tools"].keys()
+    assert {"claude", "codex", "antigravity-cli", "eza"} <= tomllib.loads(mac_config)["tools"].keys()
     plist = run("chezmoi", *mac, "cat", str(home / "Library/LaunchAgents/org.dotfiles.fleet-sync.plist"))
     assert plistlib.loads(plist.encode())["StartInterval"] == 14400
 
@@ -168,6 +171,13 @@ def smoke(temp):
 
     run(sync)
     assert state.read_text().endswith(" ok\n")
+    # A Harness writes its own settings file. Only our hook entry is ours.
+    settings = cfg(".claude/settings.json")
+    settings["model"] = "harness-choice"
+    write(home / ".claude/settings.json", json.dumps(settings))
+    assert "edited deployed" not in run(check, "--brief")
+    run(sync)
+    assert state.read_text().endswith(" ok\n") and cfg(".claude/settings.json")["model"] == "harness-choice"
     write(source / "dirty", "pending")
     stopped("dirty source")
     (source / "dirty").unlink()

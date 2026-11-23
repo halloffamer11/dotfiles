@@ -11,6 +11,10 @@ home = Path.home()
 assert Path(os.environ["SMOKE_ROOT"]) in home.parents
 name = Path(sys.argv[0]).name
 args = sys.argv[1:]
+if name == "pacman":  # read-only, called at each render, so not logged
+    assert args == ["-Qq"]
+    print("eza")
+    sys.exit()
 with (home / "calls").open("a") as log:
     print(json.dumps([name, *args]), file=log)
 if name == "mise":

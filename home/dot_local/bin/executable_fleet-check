@@ -8,7 +8,7 @@ import sys
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path.home() / ".local/lib/fleet"))
-from declarations import HOME, MCP_FILES, SKILL_DIRS, mcp_arguments, reserved_skills, selections, table
+from declarations import HOME, MCP_FILES, SKILL_DIRS, edited_targets, mcp_arguments, reserved_skills, selections, table
 
 
 def output(*args, cwd=None):
@@ -132,10 +132,12 @@ def report(current, brief):
             yield f"last fleet-sync: {last}"
     elif not brief:
         yield "last fleet-sync: never run"
-    for line in output("chezmoi", "status", "--exclude=scripts").splitlines():
-        if line and line[0] != " ":
+    status = output("chezmoi", "status", "--exclude=scripts")
+    edited = set(edited_targets(status, output("chezmoi", "managed", "--path-style=all", "--format=json")))
+    for line in status.splitlines():
+        if line[3:] in edited:
             yield f"edited deployed target: {line[3:]}"
-        elif line.strip():
+        elif line[1:2].strip():
             yield f"pending target: {line[3:]}"
     data = json.loads(output("chezmoi", "execute-template", '{{ includeTemplate "declarations" . }}'))
     yield from inventory(data)

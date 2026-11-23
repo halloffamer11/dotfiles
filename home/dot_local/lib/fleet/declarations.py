@@ -32,6 +32,18 @@ def table(path, key):
     return entries
 
 
+def edited_targets(status, managed):
+    """Targets edited since the last apply: column 1 of `chezmoi status`.
+
+    A modify_ script owns one entry of a file that its Harness also writes, so a
+    Harness edit to that file is expected and is not a local edit.
+    """
+    partial = {target for target, paths in json.loads(managed or "{}").items()
+               if Path(paths.get("sourceRelative", "")).name.startswith("modify_")}
+    return [line[3:] for line in status.splitlines()
+            if line and line[0] != " " and line[3:] not in partial]
+
+
 def reserved_skills(platform):
     reserved = {"synced", ".system"}
     if platform == "omarchy":

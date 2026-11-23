@@ -6,6 +6,10 @@ import subprocess
 import sys
 import tempfile
 
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path.home() / ".local/lib/fleet"))
+from declarations import edited_targets
+
 state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "fleet/last-sync"
 env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes"}
 
@@ -21,7 +25,8 @@ def sync():
     if run(["git", "status", "--porcelain", "--untracked-files=all"], cwd=source, capture=True):
         return "dirty source checkout"
     status = run(["chezmoi", "status", "--exclude=scripts"], capture=True)
-    edited = [line[3:] for line in status.splitlines() if line and line[0] != " "]
+    managed = run(["chezmoi", "managed", "--path-style=all", "--format=json"], capture=True)
+    edited = edited_targets(status, managed)
     if edited:
         return "edited deployed target: " + ", ".join(edited)
     run(["git", "pull", "--ff-only"], cwd=source)

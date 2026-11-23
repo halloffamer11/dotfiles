@@ -1,8 +1,16 @@
 {{- $tools := deepCopy .tools -}}
 {{- $system := "/etc/mise/conf.d/omarchy-tools.toml" -}}
-{{- if and (eq .platform "omarchy") (stat $system) -}}
-  {{- range $name, $_ := (include $system | fromToml).tools -}}
-    {{- $_ := unset $tools $name -}}
+{{- /* On Omarchy the Platform owns a tool that its mise config or pacman already provides. */ -}}
+{{- if eq .platform "omarchy" -}}
+  {{- if stat $system -}}
+    {{- range $name, $_ := (include $system | fromToml).tools -}}
+      {{- $_ := unset $tools $name -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if lookPath "pacman" -}}
+    {{- range splitList "\n" (output "pacman" "-Qq") -}}
+      {{- $_ := unset $tools . -}}
+    {{- end -}}
   {{- end -}}
 {{- end -}}
 {{ dict "tools" $tools | toToml }}
