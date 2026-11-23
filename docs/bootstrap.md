@@ -7,7 +7,8 @@ One clone, one command. `make` picks a profile from the machine: `macos` on Darw
 overrides the profile's package list.
 
 Before any change, `make configs-plan` shows the profile, the links it would make and
-the files in their way. It writes nothing.
+the files in their way. It writes nothing. Where chezmoi manages `~/.claude/CLAUDE.md`
+(a Belt Machine), `configs` leaves that file to chezmoi and reports the skip.
 
 ## Site and machine deployments
 
@@ -124,7 +125,8 @@ Run these from any directory, the same on every profile:
 
 ## Agentic Layer with chezmoi
 
-The first chezmoi scope deploys the Belt on macOS and Omarchy. Its source is
+The first chezmoi scope deploys the Belt on three Platforms, detected like the
+Make profiles: `macos`, `omarchy` and `linux` (any other Linux). Its source is
 `home/`. The Make targets above remain the Stow fallback. Give each deployed
 path one owner. Use the conversion runbook before switching an occupied Machine.
 
@@ -158,6 +160,7 @@ absolute location. A site-owned checkout should have read-only upstream access.
 | `skills.toml` | Named Pack declarations, merged over `home/.chezmoidata/packs.toml`. |
 | `mise.toml` | A mise config linked as `~/.config/mise/conf.d/90-site.toml` while present. Remove the old link manually if you retire this file. |
 | `ignore` | Target paths or patterns in chezmoiignore syntax, one per line. Own ignored targets locally. |
+| `external.toml` | `mcp = [...]` and `skills = [...]`: names that another tool owns on this Machine. `fleet-check` does not report them as undeclared, and reports a listed name that the Belt also declares. |
 
 For example, a site Pack can declare selected names in `skills.toml` as follows.
 
@@ -174,8 +177,11 @@ Use `false` to disable an inherited skill. Platform-owned and Harness-owned
 skill names stay reserved.
 
 Each MCP table accepts `command` and optional `args`, or `url`. Optional
-`platforms` is an array of `"macos"` or `"omarchy"`. Optional `requires`
-names one binary. For example, a Site kit can declare the following server.
+`platforms` is an array of `"macos"`, `"linux"` or `"omarchy"`; `"linux"` also
+matches Omarchy. Optional `requires` names one binary. Optional `enabled = false`
+turns off an entry, for example an upstream one in a Site kit; remove an entry
+that is already installed with its Harness CLI. A Harness whose CLI is not on
+PATH gets no entries. For example, a Site kit can declare the following server.
 
 ```toml
 [mcp.example]
@@ -211,12 +217,14 @@ including ad-hoc global skills. A stopped sync sends a desktop notification.
 See `~/.local/state/fleet/last-sync` (or the corresponding XDG state directory),
 resolve the reported condition, then run `fleet-sync` again.
 
-After rehearsal and cutover, enable the four-hour timer on Omarchy with
+After rehearsal and cutover, enable the four-hour timer on Linux (any host with
+systemd user units) with
 `systemctl --user daemon-reload` and `systemctl --user enable --now fleet-sync.timer`.
 On macOS, load the agent with
 `launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/org.dotfiles.fleet-sync.plist"`.
 Both schedulers include mise's shims. Upgrade binaries separately with
-`omarchy update` on Omarchy and `mise up` and `brew upgrade` on macOS.
+`omarchy update` on Omarchy, `mise up` and the distribution's package manager
+on other Linux, and `mise up` and `brew upgrade` on macOS.
 
 `make test-chezmoi` runs the agentic smoke test using disposable homes, a local
 upstream, a fixture Pack and Site kit, and stub installers and Harness CLIs.

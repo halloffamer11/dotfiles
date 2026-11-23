@@ -1,9 +1,9 @@
+{{- /* The Platform: macos, omarchy (Linux with an Omarchy marker) or linux (any other Linux). */ -}}
 {{- $platform := "macos" -}}
-{{- if ne .chezmoi.os "darwin" -}}
-{{- if and (eq .chezmoi.os "linux") (or (stat "/usr/share/omarchy") (stat (joinPath .chezmoi.homeDir ".local/share/omarchy"))) -}}
-{{- $platform = "omarchy" -}}
-{{- else -}}{{ fail "The Belt supports macOS and Omarchy" }}{{- end -}}
-{{- end -}}
+{{- if eq .chezmoi.os "linux" -}}
+{{- $platform = "linux" -}}
+{{- if or (stat "/usr/share/omarchy") (stat (joinPath .chezmoi.homeDir ".local/share/omarchy")) -}}{{- $platform = "omarchy" -}}{{- end -}}
+{{- else if ne .chezmoi.os "darwin" -}}{{ fail "The Belt supports macOS and Linux" }}{{- end -}}
 {{- $packs := (include ".chezmoidata/packs.toml" | fromToml).packs -}}
 {{- $site := joinPath .chezmoi.homeDir ".config/fleet/site/skills.toml" -}}
 {{- if stat $site -}}{{- $packs = mustMergeOverwrite $packs (get (include $site | fromToml) "packs" | default dict) -}}{{- end -}}

@@ -6,6 +6,7 @@ from pathlib import Path
 import plistlib
 import shutil
 import subprocess
+import sys
 import tempfile
 import tomllib
 
@@ -116,12 +117,20 @@ def smoke(temp):
         value = cfg(hook)
         key = "other-tool" if "gemini" in hook else "hooks"
         assert other in value[key]["SessionStart"] and "fleet-check" in json.dumps(value)
+    # The fixture's Omarchy marker counts on Linux only; on Darwin the Platform is macos.
+    platform = run("chezmoi", "execute-template", "{{ .platform }}")
+    assert platform == ("macos" if sys.platform == "darwin" else "omarchy"), platform
     installed = tomllib.loads((home / ".config/mise/conf.d/50-belt.toml").read_text())["tools"]
     assert {"chezmoi", "git-lfs", "npm:skills"} <= installed.keys()
-    assert "eza" not in installed  # pacman provides it on Omarchy
-    omarchy = Path("/etc/mise/conf.d/omarchy-tools.toml")
-    if omarchy.exists():
-        assert not installed.keys() & tomllib.loads(omarchy.read_text())["tools"].keys()
+    if platform == "omarchy":
+        assert "eza" not in installed  # pacman provides it on Omarchy
+        omarchy = Path("/etc/mise/conf.d/omarchy-tools.toml")
+        if omarchy.exists():
+            assert not installed.keys() & tomllib.loads(omarchy.read_text())["tools"].keys()
+    linux = ["--override-data", '{"platform":"linux"}']
+    linux_config = run("chezmoi", *linux, "cat", str(home / ".config/mise/conf.d/50-belt.toml"))
+    assert "eza" in tomllib.loads(linux_config)["tools"]  # no pacman lookup on plain Linux
+    assert "OnCalendar" in run("chezmoi", *linux, "cat", str(home / ".config/systemd/user/fleet-sync.timer"))
     mac = ["--override-data", '{"platform":"macos"}']
     mac_config = run("chezmoi", *mac, "cat", str(home / ".config/mise/conf.d/50-belt.toml"))
     assert {"claude", "codex", "antigravity-cli", "eza"} <= tomllib.loads(mac_config)["tools"].keys()
@@ -141,6 +150,7 @@ def smoke(temp):
     write(site / "mise.toml", '[tools]\nfixture = "1"\n')
     write(site / "mcp.toml", '[mcp.playwright]\nargs = ["--isolated", "--headless", "--site"]\n'
           '[mcp.private]\ncommand = "git"\nsecrets = ["FIXTURE_TOKEN"]\n'
+          '[mcp.off]\ncommand = "git"\nenabled = false\n'
           '[mcp.remote]\nurl = "https://example.invalid/mcp"\nsecrets = ["FIXTURE_TOKEN"]\n')
     agy_path = home / ".gemini/config/mcp_config.json"
     other_mcp = {"command": "other-tool"}
@@ -160,7 +170,18 @@ def smoke(temp):
     for expected in ("Site kit overrides MCP playwright", "undeclared skill ad-hoc",
                      "undeclared MCP ad-hoc", "skipped MCP private", "agy: skipped MCP remote"):
         assert expected in report, report
-    print("ok: Site kit override, undeclared skill and MCP preservation, environment references and skipped transports")
+    assert "off" not in report and all("off" not in p.read_text() for p in (home / ".claude.json", agy_path))
+    # Names that another tool owns are not drift; a name the Belt also declares has two owners.
+    write(site / "external.toml", 'mcp = ["ad-hoc", "playwright"]\nskills = ["ad-hoc"]\n')
+    report = run(check, "--brief")
+    assert "ad-hoc" not in report and "MCP playwright has two owners" in report, report
+    (site / "external.toml").unlink()
+    # A Harness that is not installed gets no MCP entries, so none are expected.
+    (bins / "agy").unlink()
+    assert "agy:" not in run(check, "--brief")
+    (bins / "agy").symlink_to(stub)
+    print("ok: Site kit override, disabled and outside-owned entries, undeclared skill and MCP preservation, "
+          "environment references, skipped transports and a missing Harness")
 
     state = home / ".local/state/fleet/last-sync"
     def stopped(expected):
@@ -223,10 +244,34 @@ def smoke(temp):
     for folder, tool in ((folders[0], "wrapped"), (folders[1], "wrapped"), (folders[0], "twice"), (folders[2], "twice")):
         write(folder / tool, "#!/bin/sh\n")
         (folder / tool).chmod(0o755)
+    # A PATH entry that points into a folder this user cannot read is skipped, not fatal.
+    locked = temp / "locked"
+    write(locked / "hidden", "#!/bin/sh\n")
+    (folders[2] / "hidden").symlink_to(locked / "hidden")
+    locked.chmod(0)
     env["PATH"] = os.pathsep.join([str(bins), *map(str, folders)])
-    report = run(check, "--brief")
-    assert "duplicate wrapped" not in report and "duplicate twice" in report, report
-    print("ok: duplicate commands, with the Platform's own wrappers left out")
+    try:
+        report = run(check, "--brief")
+    finally:
+        locked.chmod(0o700)
+    assert "incomplete" not in report and "duplicate twice" in report, report
+    assert ("duplicate wrapped" in report) == (platform != "omarchy"), report  # pacman owns it on Omarchy
+    print("ok: duplicate commands, the Platform's own wrappers and an unreadable PATH entry")
+    env["PATH"] = str(bins)
+
+    if platform == "macos":
+        return
+    # Linux without the Omarchy marker is the linux Platform: init and apply, no pacman lookups.
+    # On an Omarchy host the system marker stays, so only the apply is checked there.
+    shutil.rmtree(home / ".local/share/omarchy")
+    run("chezmoi", "init", "--promptDefaults", "--no-tty")
+    if not Path("/usr/share/omarchy").exists():
+        assert run("chezmoi", "execute-template", "{{ .platform }}") == "linux"
+    run("chezmoi", *linux, "apply", "--no-tty")
+    installed = tomllib.loads((home / ".config/mise/conf.d/50-belt.toml").read_text())["tools"]
+    assert "eza" in installed and (home / ".config/systemd/user/fleet-sync.timer").is_file()
+    assert not (home / "Library").exists() and "incomplete" not in run(check, "--brief")
+    print("ok: init and apply on the linux Platform")
 
 
 if __name__ == "__main__":

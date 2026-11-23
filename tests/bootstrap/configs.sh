@@ -60,5 +60,17 @@ check "the conflicting files are untouched" \
   test "$(cat "$h/.zshrc")" = mine -a "$(cat "$h/.claude/CLAUDE.md")" = mine -a ! -L "$h/.hammerspoon"
 rm -rf "$h"
 
+# One owner: where chezmoi deploys ~/.claude/CLAUDE.md, configs leaves the real file alone.
+h=$(fresh_home); stub=$(fresh_home)
+printf '#!/bin/sh\n[ "$1" = managed ] && echo .claude/CLAUDE.md\n' > "$stub/chezmoi"; chmod +x "$stub/chezmoi"
+mkdir -p "$h/.claude"; echo belt > "$h/.claude/CLAUDE.md"
+plan=$(PATH="$stub:$PATH" make -s -C "$REPO" configs-plan PROFILE=linux HOME="$h" 2>&1)
+check "a dry run reports a chezmoi-managed CLAUDE.md as skipped" has "$plan" "skip: .claude/CLAUDE.md"
+out1=$(PATH="$stub:$PATH" make -s -C "$REPO" configs PROFILE=linux HOME="$h" 2>&1) &&
+  out2=$(PATH="$stub:$PATH" make -s -C "$REPO" configs PROFILE=linux HOME="$h" 2>&1) || bad "configs runs twice beside chezmoi" "$out1$out2"
+check "the chezmoi-managed file stays a real file with its content" \
+  test ! -L "$h/.claude/CLAUDE.md" -a "$(cat "$h/.claude/CLAUDE.md")" = belt
+rm -rf "$h" "$stub"
+
 check "PROFILE outside the three is refused" sh -c '! make -s -C "$1" configs-plan PROFILE=windows HOME=/nonexistent >/dev/null 2>&1' _ "$REPO"
 finish

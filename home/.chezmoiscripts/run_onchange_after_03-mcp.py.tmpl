@@ -4,7 +4,6 @@
 import base64
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -12,7 +11,7 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path.home() / ".local/lib/fleet"))
-from declarations import HOME, MCP_FILES, mcp_arguments, table
+from declarations import HOME, MCP_FILES, installed_harnesses, mcp_arguments, table
 
 
 def run(harness, action, args, env=None):
@@ -26,8 +25,9 @@ def run(harness, action, args, env=None):
 
 
 entries = json.loads(base64.b64decode("{{ (includeTemplate "site-table" (dict "home" .chezmoi.homeDir "file" "mcp.toml" "key" "mcp" "base" .mcp) | fromJson).entries | toJson | b64enc }}"))
+harnesses = installed_harnesses()
 for harness, (path, key) in MCP_FILES.items():
-    if not shutil.which(harness):
+    if harness not in harnesses:
         print(f"Skipping {harness} MCP entries: {harness} is not installed")
         continue
     existing = table(HOME / path, key)
