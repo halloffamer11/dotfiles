@@ -4,6 +4,7 @@
 import base64
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -26,6 +27,9 @@ def run(harness, action, args, env=None):
 
 entries = json.loads(base64.b64decode("{{ (includeTemplate "site-table" (dict "home" .chezmoi.homeDir "file" "mcp.toml" "key" "mcp" "base" .mcp) | fromJson).entries | toJson | b64enc }}"))
 for harness, (path, key) in MCP_FILES.items():
+    if not shutil.which(harness):
+        print(f"Skipping {harness} MCP entries: {harness} is not installed")
+        continue
     existing = table(HOME / path, key)
     for name, item in entries.items():
         args, skip = mcp_arguments(harness, name, item, {{ .platform | toJson }})
@@ -34,8 +38,9 @@ for harness, (path, key) in MCP_FILES.items():
             continue
         # Codex and agy upsert in one call. Claude requires remove/add. Verify
         # its exact replacement in a disposable user scope before removing it.
+        # Keep HOME: mise shims and wrappers find their installs through it.
         if harness == "claude" and name in existing:
             with tempfile.TemporaryDirectory() as config:
-                run(harness, "add", args, {**os.environ, "CLAUDE_CONFIG_DIR": config, "HOME": config})
+                run(harness, "add", args, {**os.environ, "CLAUDE_CONFIG_DIR": config})
             run(harness, "remove", ["-s", "user", name])
         run(harness, "add", args)

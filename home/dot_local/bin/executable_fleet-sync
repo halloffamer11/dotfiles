@@ -8,14 +8,14 @@ import tempfile
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path.home() / ".local/lib/fleet"))
-from declarations import edited_targets
+from declarations import batch_ssh, edited_targets
 
-state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "fleet/last-sync"
-env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes"}
+state = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "fleet/last-sync"
+env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
 
 
-def run(args, *, cwd=None, capture=False, timeout=600):
-    return subprocess.run(args, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+def run(args, *, cwd=None, capture=False, timeout=600, extra=None):
+    return subprocess.run(args, cwd=cwd, env={**env, **(extra or {})}, stdin=subprocess.DEVNULL,
                           stdout=subprocess.PIPE if capture else None, text=True,
                           check=True, timeout=timeout).stdout
 
@@ -29,7 +29,8 @@ def sync():
     edited = edited_targets(status, managed)
     if edited:
         return "edited deployed target: " + ", ".join(edited)
-    run(["git", "pull", "--ff-only"], cwd=source)
+    # Only the dotfiles pull gets the dotfiles checkout's ssh settings.
+    run(["git", "pull", "--ff-only"], cwd=source, extra=batch_ssh(source))
     run(["chezmoi", "apply", "--no-tty", "--error-on-conflict"], cwd=Path.home())
     run(["skills", "update", "-g", "-y"], cwd=Path.home())
 

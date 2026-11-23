@@ -21,7 +21,7 @@ def smoke(temp):
     stub = REPO / "tests/chezmoi/stub.py"
     for name in ("mise", "skills", "claude", "codex", "agy", "notify-send", "osascript", "playwright-mcp", "pacman"):
         (bins / name).symlink_to(stub)
-    env = {"PATH": str(bins), "HOME": str(home), "SMOKE_ROOT": str(temp), "TMPDIR": str(temp),
+    env = {"PATH": str(bins), "HOME": str(home), "SMOKE_ROOT": str(temp), "SMOKE_HOME": str(temp / "home"), "TMPDIR": str(temp),
            "FIXTURE_TOKEN": "fixture-only-value", "GIT_CONFIG_NOSYSTEM": "1",
            "GIT_CONFIG_GLOBAL": os.devnull, "GIT_TERMINAL_PROMPT": "0",
            "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.invalid",
@@ -130,7 +130,7 @@ def smoke(temp):
 
     check, sync = (home / ".local/bin" / name for name in ("fleet-check", "fleet-sync"))
     assert run(check, "--brief") == ""
-    assert json.loads(run(check, "--brief", "--format", "agy", stdin='{"workspacePaths":[]}')) == {}
+    assert json.loads(run(check, "--brief", "--format", "agy", stdin='{"workspacePaths":[],"cwd":"/"}')) == {}
     before = (home / "calls").read_bytes()
     assert run("chezmoi", "status") == ""
     run("chezmoi", "apply", "--no-tty")
@@ -172,10 +172,14 @@ def smoke(temp):
     run(sync)
     assert state.read_text().endswith(" ok\n")
     # A Harness writes its own settings file. Only our hook entry is ours.
+    # Like a Harness: a new file, renamed over the old one, with the default mode.
     settings = cfg(".claude/settings.json")
     settings["model"] = "harness-choice"
-    write(home / ".claude/settings.json", json.dumps(settings))
-    assert "edited deployed" not in run(check, "--brief")
+    fresh = home / ".claude/settings.json.new"
+    write(fresh, json.dumps(settings))
+    fresh.chmod(0o644)
+    os.replace(fresh, home / ".claude/settings.json")
+    assert ".claude/settings.json" not in run(check, "--brief")
     run(sync)
     assert state.read_text().endswith(" ok\n") and cfg(".claude/settings.json")["model"] == "harness-choice"
     write(source / "dirty", "pending")
@@ -211,6 +215,18 @@ def smoke(temp):
     report = run(check, "--brief")
     assert "1 unpushed" in report and "1 upstream" in report and "last fleet-sync" in report
     print("ok: no-terminal sync, dirty source, edited target, replaced link, pending target and divergent branch")
+
+    # Duplicates: a Platform wrapper owned by pacman is not reported; a second own copy is.
+    folders = [temp / n for n in ("platform-a", "platform-b", "own")]
+    for folder in folders:
+        folder.mkdir()
+    for folder, tool in ((folders[0], "wrapped"), (folders[1], "wrapped"), (folders[0], "twice"), (folders[2], "twice")):
+        write(folder / tool, "#!/bin/sh\n")
+        (folder / tool).chmod(0o755)
+    env["PATH"] = os.pathsep.join([str(bins), *map(str, folders)])
+    report = run(check, "--brief")
+    assert "duplicate wrapped" not in report and "duplicate twice" in report, report
+    print("ok: duplicate commands, with the Platform's own wrappers left out")
 
 
 if __name__ == "__main__":

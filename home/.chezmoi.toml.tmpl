@@ -6,7 +6,7 @@
 {{- end -}}
 {{- $packs := (include ".chezmoidata/packs.toml" | fromToml).packs -}}
 {{- $site := joinPath .chezmoi.homeDir ".config/fleet/site/skills.toml" -}}
-{{- if stat $site -}}{{- $packs = mustMergeOverwrite $packs ((include $site | fromToml).packs | default dict) -}}{{- end -}}
+{{- if stat $site -}}{{- $packs = mustMergeOverwrite $packs (get (include $site | fromToml) "packs" | default dict) -}}{{- end -}}
 {{- $names := keys $packs | sortAlpha -}}
 {{- $selected := promptMultichoiceOnce . "selectedPacks" "Packs" $names $names -}}
 {{- $ids := promptStringOnce . "providerIDs" "T3 Antigravity instance IDs (space-separated)" "antigravity" -}}

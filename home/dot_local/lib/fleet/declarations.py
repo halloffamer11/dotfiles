@@ -1,13 +1,15 @@
 """Read the global Harness inventories and interpret the Belt declarations."""
 
 import json
+import os
 import re
 import shutil
+import subprocess
 import tomllib
 from pathlib import Path
 from urllib.parse import urlsplit
 
-HOME = Path.home()
+HOME = Path.home().resolve()  # PATH entries and links are compared resolved
 MCP_FILES = {
     "claude": (".claude.json", "mcpServers"),
     "codex": (".codex/config.toml", "mcp_servers"),
@@ -42,6 +44,20 @@ def edited_targets(status, managed):
                if Path(paths.get("sourceRelative", "")).name.startswith("modify_")}
     return [line[3:] for line in status.splitlines()
             if line and line[0] != " " and line[3:] not in partial]
+
+
+def batch_ssh(repo):
+    """Make Git's ssh fail instead of prompt, unless the user chose an ssh command.
+
+    A configured command can be any shell form (a wrapper, an env prefix, a
+    quoted path), so it is left exactly as it is.
+    """
+    if os.environ.get("GIT_SSH_COMMAND") or os.environ.get("GIT_SSH"):
+        return {}
+    configured = subprocess.run(["git", "config", "--get", "core.sshCommand"], cwd=repo,
+                                stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                                timeout=5).stdout.strip()
+    return {} if configured else {"GIT_SSH_COMMAND": "ssh -o BatchMode=yes"}
 
 
 def reserved_skills(platform):
