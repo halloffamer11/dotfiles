@@ -4,6 +4,7 @@
 import base64
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -26,6 +27,9 @@ def run(harness, action, args, env=None):
 
 entries = json.loads(base64.b64decode("{{ (includeTemplate "site-table" (dict "home" .chezmoi.homeDir "file" "mcp.toml" "key" "mcp" "base" .mcp) | fromJson).entries | toJson | b64enc }}"))
 for harness, (path, key) in MCP_FILES.items():
+    if not shutil.which(harness):
+        print(f"Skipping {harness} MCP entries: {harness} is not installed")
+        continue
     existing = table(HOME / path, key)
     for name, item in entries.items():
         args, skip = mcp_arguments(harness, name, item, {{ .platform | toJson }})

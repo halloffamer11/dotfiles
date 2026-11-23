@@ -8,15 +8,14 @@ import sys
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path.home() / ".local/lib/fleet"))
-from declarations import HOME, MCP_FILES, SKILL_DIRS, edited_targets, mcp_arguments, reserved_skills, selections, table
+from declarations import HOME, MCP_FILES, SKILL_DIRS, batch_ssh, edited_targets, mcp_arguments, reserved_skills, selections, table
 
 
-def output(*args, cwd=None):
+def output(*args, cwd=None, extra=None):
     return subprocess.run(args, cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                           stderr=subprocess.DEVNULL, text=True, check=True, timeout=8,
                           env={**os.environ, "GIT_TERMINAL_PROMPT": "0",
-                               "GIT_SSH_COMMAND": "ssh -o BatchMode=yes",
-                               "GIT_OPTIONAL_LOCKS": "0"}).stdout
+                               "GIT_OPTIONAL_LOCKS": "0", **(extra or {})}).stdout
 
 
 def git_report(root):
@@ -30,7 +29,7 @@ def git_report(root):
     remote = output("git", "for-each-ref", "--format=%(upstream:remotename)",
                     output("git", "symbolic-ref", "HEAD", cwd=root).strip(), cwd=root).strip()
     try:
-        output("git", "fetch", "--quiet", remote, cwd=root)
+        output("git", "fetch", "--quiet", remote, cwd=root, extra=batch_ssh(root))
     except (OSError, subprocess.SubprocessError):
         yield f"{root}: fetch failed, upstream counts use the last fetch"
     ahead, behind = map(int, output("git", "rev-list", "--left-right", "--count",
@@ -112,7 +111,17 @@ def duplicates(platform):
         if name == "codex":
             direct = [p for p in direct if "Codex.app" not in p.parts]
         if len({(s.st_dev, s.st_ino) for s in (p.stat() for p in direct)}) > 1:
+            if platform == "omarchy" and pacman_owns(direct):
+                continue  # the Platform's own wrapper, for example Limine's mkinitcpio
             yield f"duplicate {name}: " + ", ".join(map(str, direct))
+
+
+def pacman_owns(paths):
+    try:
+        return subprocess.run(["pacman", "-Qqo", *map(str, paths)], stdin=subprocess.DEVNULL,
+                              capture_output=True, timeout=8).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 def report(current, brief):

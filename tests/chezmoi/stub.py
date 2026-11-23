@@ -12,6 +12,8 @@ assert Path(os.environ["SMOKE_ROOT"]) in home.parents
 name = Path(sys.argv[0]).name
 args = sys.argv[1:]
 if name == "pacman":  # read-only, called at each render, so not logged
+    if args[:1] == ["-Qqo"]:  # fixture rule: only files under a "platform" folder are packaged
+        sys.exit(0 if all("/platform" in path for path in args[1:]) else 1)
     assert args == ["-Qq"]
     print("eza")
     sys.exit()

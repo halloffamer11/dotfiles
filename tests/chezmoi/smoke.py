@@ -212,6 +212,18 @@ def smoke(temp):
     assert "1 unpushed" in report and "1 upstream" in report and "last fleet-sync" in report
     print("ok: no-terminal sync, dirty source, edited target, replaced link, pending target and divergent branch")
 
+    # Duplicates: a Platform wrapper owned by pacman is not reported; a second own copy is.
+    folders = [temp / n for n in ("platform-a", "platform-b", "own")]
+    for folder in folders:
+        folder.mkdir()
+    for folder, tool in ((folders[0], "wrapped"), (folders[1], "wrapped"), (folders[0], "twice"), (folders[2], "twice")):
+        write(folder / tool, "#!/bin/sh\n")
+        (folder / tool).chmod(0o755)
+    env["PATH"] = os.pathsep.join([str(bins), *map(str, folders)])
+    report = run(check, "--brief")
+    assert "duplicate wrapped" not in report and "duplicate twice" in report, report
+    print("ok: duplicate commands, with the Platform's own wrappers left out")
+
 
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory(prefix="fleet-smoke-") as folder:

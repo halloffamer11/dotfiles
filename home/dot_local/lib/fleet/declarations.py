@@ -1,8 +1,10 @@
 """Read the global Harness inventories and interpret the Belt declarations."""
 
 import json
+import os
 import re
 import shutil
+import subprocess
 import tomllib
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -42,6 +44,16 @@ def edited_targets(status, managed):
                if Path(paths.get("sourceRelative", "")).name.startswith("modify_")}
     return [line[3:] for line in status.splitlines()
             if line and line[0] != " " and line[3:] not in partial]
+
+
+def batch_ssh(repo):
+    """Make Git's ssh fail instead of prompt, and keep the user's own ssh command."""
+    if os.environ.get("GIT_SSH_COMMAND"):
+        return {}
+    configured = subprocess.run(["git", "config", "--get", "core.sshCommand"], cwd=repo,
+                                stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                                timeout=5).stdout.strip()
+    return {"GIT_SSH_COMMAND": f"{configured or 'ssh'} -o BatchMode=yes"}
 
 
 def reserved_skills(platform):
