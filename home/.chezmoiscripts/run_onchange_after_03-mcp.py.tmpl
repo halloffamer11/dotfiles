@@ -38,8 +38,9 @@ for harness, (path, key) in MCP_FILES.items():
             continue
         # Codex and agy upsert in one call. Claude requires remove/add. Verify
         # its exact replacement in a disposable user scope before removing it.
+        # Keep HOME: mise shims and wrappers find their installs through it.
         if harness == "claude" and name in existing:
             with tempfile.TemporaryDirectory() as config:
-                run(harness, "add", args, {**os.environ, "CLAUDE_CONFIG_DIR": config, "HOME": config})
+                run(harness, "add", args, {**os.environ, "CLAUDE_CONFIG_DIR": config})
             run(harness, "remove", ["-s", "user", name])
         run(harness, "add", args)

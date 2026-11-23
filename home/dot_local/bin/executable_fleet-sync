@@ -10,7 +10,7 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path.home() / ".local/lib/fleet"))
 from declarations import batch_ssh, edited_targets
 
-state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "fleet/last-sync"
+state = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "fleet/last-sync"
 env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
 
 

@@ -9,7 +9,7 @@ import tomllib
 from pathlib import Path
 from urllib.parse import urlsplit
 
-HOME = Path.home()
+HOME = Path.home().resolve()  # PATH entries and links are compared resolved
 MCP_FILES = {
     "claude": (".claude.json", "mcpServers"),
     "codex": (".codex/config.toml", "mcp_servers"),

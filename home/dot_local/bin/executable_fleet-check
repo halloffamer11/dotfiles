@@ -134,7 +134,7 @@ def report(current, brief):
         project = None
     if project and project != root:
         yield from git_report(project)
-    state = Path(os.environ.get("XDG_STATE_HOME", HOME / ".local/state")) / "fleet/last-sync"
+    state = Path(os.environ.get("XDG_STATE_HOME") or HOME / ".local/state") / "fleet/last-sync"
     if state.exists():
         last = state.read_text().strip()
         if not brief or not last.endswith(" ok"):
@@ -161,14 +161,15 @@ lines = []
 try:
     current = Path.cwd()
     if args.format == "agy":
-        workspaces = json.load(sys.stdin).get("workspacePaths", [])
-        if workspaces:
-            current = Path(workspaces[0])
+        event = json.load(sys.stdin)
+        workspace = (event.get("workspacePaths") or [None])[0] or event.get("cwd")
+        if workspace:
+            current = Path(workspace)
     lines.extend(report(current, args.brief))
 except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as exc:
     # Parse errors can contain fragments of machine-local configuration.
     lines.append(f"fleet-check incomplete ({type(exc).__name__})")
 if args.format == "agy":
-    print(json.dumps({"injectSteps": [{"ephemeralMessage": "\n".join(lines)}]} if lines else {}))
+    print(json.dumps({"injectSteps": [{"systemMessage": {"systemMessage": "\n".join(lines)}}]} if lines else {}))
 elif lines:
     print("\n".join(lines))

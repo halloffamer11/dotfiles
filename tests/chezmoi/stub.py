@@ -9,6 +9,7 @@ import tomllib
 
 home = Path.home()
 assert Path(os.environ["SMOKE_ROOT"]) in home.parents
+assert os.environ["HOME"] == os.environ["SMOKE_HOME"]  # a Harness CLI keeps the real HOME
 name = Path(sys.argv[0]).name
 args = sys.argv[1:]
 if name == "pacman":  # read-only, called at each render, so not logged
