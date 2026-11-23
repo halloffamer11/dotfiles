@@ -4,7 +4,7 @@ skills = { council = true, fleet = true, fresh-context = true, skillsmith = true
 
 [packs.personal]
 repo = "halloffamer11/skills-personal"
-skills = { facebook-marketplace = true }
+skills = { facebook-marketplace = true, google-access = true }
 
 [packs.humanizer]
 repo = "blader/humanizer"

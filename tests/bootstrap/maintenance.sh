@@ -32,7 +32,7 @@ for profile in macos omarchy linux; do
   check "$profile: doctor writes nothing" [ -z "$(find "$h" -mindepth 1)" ]
 
   make -s -C "$REPO" configs PROFILE=$profile HOME="$h" >/dev/null 2>&1
-  for s in humanizer council facebook-marketplace fresh-context skillsmith toolsmith; do mkdir -p "$h/.agents/skills/$s"; done
+  for s in humanizer council facebook-marketplace google-access fresh-context skillsmith toolsmith; do mkdir -p "$h/.agents/skills/$s"; done
   out=$(PATH="$stub:$PATH" make -s -C "$REPO" doctor PROFILE=$profile HOME="$h" 2>&1); rc=$?
   # a missing prerequisite (no brew in this container) is the one thing allowed to remain
   rest=$(printf '%s\n' "$out" | grep ACTION | grep -v "missing prerequisites")
