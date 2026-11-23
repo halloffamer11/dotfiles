@@ -113,6 +113,12 @@ Run these from any directory, the same on every profile:
   its upstream `main` (it asks the
   remote; `make doctor DOCTOR_UPSTREAM=` skips that). It exits non-zero when a line
   says `ACTION`.
+- `make -C ~/dotfiles externals` and `make -C ~/dotfiles external-updates`
+  install or refresh the declared skills from their source for Claude Code, Codex
+  and Antigravity CLI. In `local.mk`, use `CORE_SKILLS` for names from
+  `halloffamer11/skills` and `PERSONAL_PACK_SKILLS` for `facebook-marketplace` from
+  `halloffamer11/skills-personal`. Existing `PERSONAL_SKILLS` overrides keep their combined selection. An empty list skips its Pack.
+  Humanizer comes from `blader/humanizer`.
 - `make -C ~/dotfiles test-bootstrap` runs the isolated-home checks for every profile.
   It needs GNU Stow and never touches your own home.
 
@@ -161,7 +167,7 @@ repo = "https://example.invalid/skills.git"
 skills = { example = true }
 ```
 
-The same schema accepts a personal Pack when its repository exists. Re-run
+Select the personal Pack for `facebook-marketplace`. Re-run
 `chezmoi init --prompt` to select a newly declared Pack. An overlapping entry
 inherits upstream fields and the site value wins for each field it supplies.
 Use `false` to disable an inherited skill. Platform-owned and Harness-owned
@@ -210,7 +216,7 @@ After rehearsal and cutover, enable the four-hour timer on Omarchy with
 On macOS, load the agent with
 `launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/org.dotfiles.fleet-sync.plist"`.
 Both schedulers include mise's shims. Upgrade binaries separately with
-`omarchy update` on Omarchy and `mise up` on macOS.
+`omarchy update` on Omarchy and `mise up` and `brew upgrade` on macOS.
 
 `make test-chezmoi` runs the agentic smoke test using disposable homes, a local
 upstream, a fixture Pack and Site kit, and stub installers and Harness CLIs.

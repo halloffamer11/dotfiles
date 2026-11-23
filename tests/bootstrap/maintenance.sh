@@ -49,10 +49,10 @@ for profile in macos omarchy linux; do
   graph=$(make -n -C "$REPO" update PROFILE=$profile HOME=/nonexistent 2>&1)
   if [ $profile = macos ]; then
     check "macos: update reconciles Homebrew and the declared skills" \
-      sh -c 'printf "%s\n" "$1" | grep -q "brew bundle" && printf "%s\n" "$1" | grep -q "skills@latest update"' _ "$graph"
+      sh -c 'printf "%s\n" "$1" | grep -q "brew bundle" && printf "%s\n" "$1" | grep -q "skills@latest add"' _ "$graph"
   else
     check "$profile: update leaves system packages alone and updates the skills" \
-      sh -c '! printf "%s\n" "$1" | grep -q "brew" && printf "%s\n" "$1" | grep -q "skills@latest update"' _ "$graph"
+      sh -c '! printf "%s\n" "$1" | grep -q "brew" && printf "%s\n" "$1" | grep -q "skills@latest add"' _ "$graph"
   fi
 done
 

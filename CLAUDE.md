@@ -1,8 +1,8 @@
 # Dotfiles
 
-Machine configuration managed as one Git repository. The repo is public. Agent skills
-live in their own repo, `halloffamer11/skills`, installed through the skills CLI. They
-split out on 2026-10-01 with their history.
+Machine configuration managed as one Git repository. The repo is public. The skills CLI installs
+authored skills from the core Pack (`halloffamer11/skills`) and the personal Pack
+(`halloffamer11/skills-personal`).
 
 ## Start here
 
@@ -11,8 +11,10 @@ split out on 2026-10-01 with their history.
   `make test-bootstrap` checks it in isolated homes.
 - The chezmoi agentic Layer lives in `home/`. Its declarations are in
   `home/.chezmoidata/`. Run `make test-chezmoi` to rehearse it.
-- Stow fallback skills are declared in the Makefile (`externals`), not stored here. To change a
-  personal skill, edit `halloffamer11/skills`, push, then `make external-updates`.
+- Edit an authored skill in its Pack and push it. Chezmoi selects Packs in
+  `home/.chezmoidata/packs.toml`, and `fleet-sync` refreshes installed skills.
+  The Stow fallback selects skills in the Makefile. Use `make external-updates`
+  to refresh them.
 - `tools/` holds machine tools; each tool directory owns its own `CLAUDE.md`.
 - `references/CLAUDE.md` is the user's global `~/.claude/CLAUDE.md`; `make configs` links
   it there. Edit it here. It is not an instruction for this repo.
