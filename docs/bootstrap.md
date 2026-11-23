@@ -116,7 +116,7 @@ Run these from any directory, the same on every profile:
 - `make -C ~/dotfiles externals` and `make -C ~/dotfiles external-updates`
   install or refresh the declared skills from their source for Claude Code, Codex
   and Antigravity CLI. In `local.mk`, use `CORE_SKILLS` for names from
-  `halloffamer11/skills` and `PERSONAL_PACK_SKILLS` for `facebook-marketplace` from
+  `halloffamer11/skills` and `PERSONAL_PACK_SKILLS` for `facebook-marketplace` and `google-access` from
   `halloffamer11/skills-personal`. Existing `PERSONAL_SKILLS` overrides keep their combined selection. An empty list skips its Pack.
   Humanizer comes from `blader/humanizer`.
 - `make -C ~/dotfiles test-bootstrap` runs the isolated-home checks for every profile.
@@ -167,7 +167,7 @@ repo = "https://example.invalid/skills.git"
 skills = { example = true }
 ```
 
-Select the personal Pack for `facebook-marketplace`. Re-run
+Select the personal Pack for `facebook-marketplace` and `google-access` (read-only Google through `gog`; set the account aliases on each Machine with `gog auth alias set <alias> <email>`). Re-run
 `chezmoi init --prompt` to select a newly declared Pack. An overlapping entry
 inherits upstream fields and the site value wins for each field it supplies.
 Use `false` to disable an inherited skill. Platform-owned and Harness-owned

@@ -33,7 +33,7 @@ check "the Herdr TUI skill is not installed" sh -c '! printf "%s\n" "$1" | grep 
 check "the core Pack supplies the Stow core skills" \
   has "$log" 'add halloffamer11/skills --skill council fresh-context skillsmith toolsmith --agent'
 check "the personal Pack supplies Marketplace" \
-  has "$log" 'add halloffamer11/skills-personal --skill facebook-marketplace --agent'
+  has "$log" 'add halloffamer11/skills-personal --skill facebook-marketplace google-access --agent'
 check "all sources install into the three Harnesses" \
   [ "$(printf '%s\n' "$log" | grep -c -- '--agent claude-code codex antigravity-cli -g -y$')" -eq 3 ]
 STUB_LOG="$h/updates.log" HOME="$h" PATH="$stubs:$BASE_PATH" \

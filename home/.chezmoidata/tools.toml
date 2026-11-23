@@ -15,6 +15,7 @@ jq = "latest"
 lazygit = "latest"
 neovim = "latest"
 node = "latest"
+"github:openclaw/gogcli" = "0.48.1"  # pinned: the read-only Google trial
 "npm:@playwright/mcp" = "latest"
 "npm:skills" = "latest"
 opencode = "latest"

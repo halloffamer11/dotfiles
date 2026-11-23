@@ -69,13 +69,14 @@ CONFIG_PACKAGES ?= $(sort $(COMMON_PACKAGES) $(PROFILE_PACKAGES))
 # Packages under stow/ this profile leaves out, named so a skipped one is a choice, not a surprise.
 UNSELECTED_PACKAGES = $(filter-out $(CONFIG_PACKAGES) hammerspoon herdr-app,$(notdir $(wildcard $(CURDIR)/stow/*)))
 SKILL_AGENTS ?= claude-code codex antigravity-cli
+PERSONAL_PACK_NAMES = facebook-marketplace google-access
 ifeq ($(origin PERSONAL_SKILLS),undefined)
 CORE_SKILLS ?= council fresh-context skillsmith toolsmith
-PERSONAL_PACK_SKILLS ?= facebook-marketplace
+PERSONAL_PACK_SKILLS ?= $(PERSONAL_PACK_NAMES)
 else
 # Existing local.mk files selected both Packs with this single variable.
-CORE_SKILLS ?= $(filter-out facebook-marketplace,$(PERSONAL_SKILLS))
-PERSONAL_PACK_SKILLS ?= $(filter facebook-marketplace,$(PERSONAL_SKILLS))
+CORE_SKILLS ?= $(filter-out $(PERSONAL_PACK_NAMES),$(PERSONAL_SKILLS))
+PERSONAL_PACK_SKILLS ?= $(filter $(PERSONAL_PACK_NAMES),$(PERSONAL_SKILLS))
 endif
 EXTRA_BREWFILES ?=
 # Checkouts `make doctor` compares with their upstream main (it asks the remote, writes nothing).
