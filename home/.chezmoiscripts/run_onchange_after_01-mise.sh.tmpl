@@ -1,0 +1,6 @@
+#!/bin/sh
+# Belt tools: {{ includeTemplate "dot_config/mise/conf.d/50-belt.toml.tmpl" . | sha256sum }}
+# Site tools: {{ $site := joinPath .chezmoi.homeDir ".config/fleet/site/mise.toml" }}{{ if stat $site }}{{ include $site | sha256sum }}{{ end }}
+set -eu
+cd "$HOME"
+exec mise install </dev/null

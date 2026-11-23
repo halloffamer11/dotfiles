@@ -115,3 +115,104 @@ Run these from any directory, the same on every profile:
   says `ACTION`.
 - `make -C ~/dotfiles test-bootstrap` runs the isolated-home checks for every profile.
   It needs GNU Stow and never touches your own home.
+
+## Agentic Layer with chezmoi
+
+The first chezmoi scope deploys the Belt on macOS and Omarchy. Its source is
+`home/`. The Make targets above remain the Stow fallback. Give each deployed
+path one owner. Use the conversion runbook before switching an occupied Machine.
+
+On a new Machine, install Git and mise, make Python 3 available for the initial
+hook edits, and put mise's shims on PATH in the login shell. With chezmoi
+installed, run `chezmoi init --apply halloffamer11/dotfiles`. To bootstrap
+chezmoi itself, use `mise exec chezmoi@latest -- chezmoi init --apply halloffamer11/dotfiles`.
+Prepare any Site kit first. Init detects the Platform and asks which Packs to
+install and which T3 Antigravity provider instance IDs to use. The default ID
+is `antigravity`. The answers live in the Machine's chezmoi config.
+Use `chezmoi init --prompt` to choose again. To take part of a Pack, set
+`core = ["toolsmith", "council"]` under `[data.skillSelection]` in that config.
+An omitted selection takes every enabled skill declared for the Pack.
+
+On an occupied Machine, use `chezmoi init` first. Back up the current global
+skills (contents, link targets and lock file), user MCP entries and replaced
+rules locally. Move a provider's existing plain MCP config into that backup.
+Release each path from its previous owner, inspect `chezmoi diff`, then use
+`chezmoi apply`. The skills installer can replace a same-name directory.
+Review and trust the Codex session hook in `/hooks`, including after it changes.
+
+### Site kit
+
+Place these optional files under `~/.config/fleet/site/`. Templates use this
+absolute location. A site-owned checkout should have read-only upstream access.
+
+| File | Contents |
+| --- | --- |
+| `rules.md` | Text appended to all three global rules files. The total must be under 24,000 bytes. |
+| `mcp.toml` | Named MCP declarations, merged over `home/.chezmoidata/mcp.toml`. |
+| `skills.toml` | Named Pack declarations, merged over `home/.chezmoidata/packs.toml`. |
+| `mise.toml` | A mise config linked as `~/.config/mise/conf.d/90-site.toml` while present. Remove the old link manually if you retire this file. |
+| `ignore` | Target paths or patterns in chezmoiignore syntax, one per line. Own ignored targets locally. |
+
+For example, a site Pack can declare selected names in `skills.toml` as follows.
+
+```toml
+[packs.extra]
+repo = "https://example.invalid/skills.git"
+skills = { example = true }
+```
+
+The same schema accepts a personal Pack when its repository exists. Re-run
+`chezmoi init --prompt` to select a newly declared Pack. An overlapping entry
+inherits upstream fields and the site value wins for each field it supplies.
+Use `false` to disable an inherited skill. Platform-owned and Harness-owned
+skill names stay reserved.
+
+Each MCP table accepts `command` and optional `args`, or `url`. Optional
+`platforms` is an array of `"macos"` or `"omarchy"`. Optional `requires`
+names one binary. For example, a Site kit can declare the following server.
+
+```toml
+[mcp.example]
+url = "https://example.invalid/mcp"
+platforms = ["macos"]
+secrets = ["EXAMPLE_TOKEN"]
+```
+
+Keep credentials out of URLs, commands, arguments and TOML. The `secrets` array
+contains environment variable names only. A single name on HTTP maps to Codex's
+bearer-token option. Other secret-bearing combinations are skipped and reported.
+A Platform mismatch or absent prerequisite keeps an entry from installing.
+Remove retired entries manually with their Harness CLI. Use `-s user` for Claude.
+Site additions can extend these paths and keys. A replacement keeps the previous
+interface working with a `fleet-check` deprecation notice for at least 30 days.
+
+### Sync and checks
+
+Run `fleet-check` to see the Git state of the source and current repo, the last
+sync, local edits, missing and ad-hoc entries, overlapping declarations,
+duplicate commands and T3 links. `--brief` prints only findings.
+It fetches remote-tracking refs with a short timeout. Antigravity's hook reads
+`workspacePaths` from stdin and requests `--format agy`. T3 Antigravity keeps
+its own hooks. A small archive in `references/t3-mcp-link.tar.gz` holds one
+relative symlink. Chezmoi can deploy that archive member at each computed profile
+path and detect a replaced link in its normal status output. Verify rules, one selected skill and Playwright in a fresh direct
+and T3 session for each Harness after cutover.
+
+Use `chezmoi apply` to try uncommitted source edits on the current branch.
+`fleet-sync` checks the checkout and deployed edits, pulls with `--ff-only`,
+applies with `--no-tty --error-on-conflict`, then runs `skills update -g -y`,
+including ad-hoc global skills. A stopped sync sends a desktop notification.
+See `~/.local/state/fleet/last-sync` (or the corresponding XDG state directory),
+resolve the reported condition, then run `fleet-sync` again.
+
+After rehearsal and cutover, enable the four-hour timer on Omarchy with
+`systemctl --user daemon-reload` and `systemctl --user enable --now fleet-sync.timer`.
+On macOS, load the agent with
+`launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/org.dotfiles.fleet-sync.plist"`.
+Both schedulers include mise's shims. Upgrade binaries separately with
+`omarchy update` on Omarchy and `mise up` on macOS.
+
+`make test-chezmoi` runs the agentic smoke test using disposable homes, a local
+upstream, a fixture Pack and Site kit, and stub installers and Harness CLIs.
+It needs Python 3.11+, Git and either chezmoi or mise. The mise fallback
+downloads chezmoi into a temporary home.

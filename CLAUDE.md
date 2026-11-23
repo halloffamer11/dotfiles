@@ -9,7 +9,9 @@ split out on 2026-10-01 with their history.
 - Read `Makefile` before changing installation or stow behavior.
 - `docs/bootstrap.md` is the operator guide (profiles, fresh machine, maintenance);
   `make test-bootstrap` checks it in isolated homes.
-- Skills are declared in the Makefile (`externals`), not stored here. To change a
+- The chezmoi agentic Layer lives in `home/`. Its declarations are in
+  `home/.chezmoidata/`. Run `make test-chezmoi` to rehearse it.
+- Stow fallback skills are declared in the Makefile (`externals`), not stored here. To change a
   personal skill, edit `halloffamer11/skills`, push, then `make external-updates`.
 - `tools/` holds machine tools; each tool directory owns its own `CLAUDE.md`.
 - `references/CLAUDE.md` is the user's global `~/.claude/CLAUDE.md`; `make configs` links

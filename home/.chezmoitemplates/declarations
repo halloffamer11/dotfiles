@@ -1,0 +1,8 @@
+{{- $packs := includeTemplate "site-table" (dict "home" .chezmoi.homeDir "file" "skills.toml" "key" "packs" "base" .packs) | fromJson -}}
+{{- $mcp := includeTemplate "site-table" (dict "home" .chezmoi.homeDir "file" "mcp.toml" "key" "mcp" "base" .mcp) | fromJson -}}
+{{- $links := list -}}
+{{- range regexFindAll "\\S+" .providerIDs -1 | uniq -}}
+  {{- $links = append $links (joinPath ".t3/userdata/providers/antigravity" (sha256sum .) "config/mcp_config.json") -}}
+{{- end -}}
+{{- dict "platform" .platform "selectedPacks" .selectedPacks "skillSelection" (get . "skillSelection" | default dict)
+         "packs" $packs.entries "packsOverrides" $packs.overrides "mcp" $mcp.entries "mcpOverrides" $mcp.overrides "profileLinks" $links | toJson -}}

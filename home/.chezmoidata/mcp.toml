@@ -1,0 +1,3 @@
+[mcp.playwright]
+command = "playwright-mcp"
+args = ["--isolated", "--headless"]

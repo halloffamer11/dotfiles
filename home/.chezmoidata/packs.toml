@@ -1,0 +1,7 @@
+[packs.core]
+repo = "halloffamer11/skills"
+skills = { council = true, fleet = true, fresh-context = true, skillsmith = true, toolsmith = true }
+
+[packs.humanizer]
+repo = "blader/humanizer"
+skills = { humanizer = true }

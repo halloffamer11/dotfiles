@@ -1,0 +1,7 @@
+{{- /* An archive-file can declare a native symlink at a data-dependent target path. */ -}}
+{{- range regexFindAll "\\S+" .providerIDs -1 | uniq }}
+[".t3/userdata/providers/antigravity/{{ sha256sum . }}/config/mcp_config.json"]
+type = "archive-file"
+url = {{ urlJoin (dict "scheme" "file" "path" (joinPath $.chezmoi.workingTree "references/t3-mcp-link.tar.gz")) | toJson }}
+path = "mcp_config.json"
+{{ end }}
