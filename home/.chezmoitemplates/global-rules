@@ -1,0 +1,5 @@
+{{- $rules := include (joinPath .chezmoi.workingTree "references/CLAUDE.md") -}}
+{{- $site := joinPath .chezmoi.homeDir ".config/fleet/site/rules.md" -}}
+{{- if stat $site -}}{{- $rules = printf "%s\n%s" $rules (include $site) -}}{{- end -}}
+{{- if ge (len $rules) 24000 -}}{{ fail "Global rules must be under 24,000 bytes including Site kit rules" }}{{- end -}}
+{{- $rules -}}

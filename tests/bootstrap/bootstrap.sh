@@ -50,28 +50,22 @@ while [ $# -gt 0 ]; do [ "$1" = -o ] && printf '%s\n' '#!/bin/sh' \
 STUB
 chmod +x "$stubs"/*
 
-# A stand-in delegate checkout whose installer only records that it ran.
-fake_delegate() {
-  mkdir -p "$1/delegate/.git"
-  printf 'install:\n\t@echo delegate-install >> $(HOME)/calls.log\n' > "$1/delegate/Makefile"
-}
-
 boot() {  # boot HOME PROFILE PATH
-  fake_delegate "$1"
-  HOME="$1" PATH="$3" make -s -C "$REPO" bootstrap PROFILE="$2" HOME="$1" DELEGATE_DIR="$1/delegate" 2>&1
+  HOME="$1" PATH="$3" make -s -C "$REPO" bootstrap PROFILE="$2" HOME="$1" 2>&1
 }
 
 # --- macOS ---------------------------------------------------------------
-g=$(fresh_home); fake_delegate "$g"
-graph=$(make -n -C "$REPO" bootstrap PROFILE=macos HOME="$g" DELEGATE_DIR="$g/delegate" 2>&1)
+g=$(fresh_home)
+graph=$(make -n -C "$REPO" bootstrap PROFILE=macos HOME="$g" 2>&1)
 check "macos: the command graph runs brew bundle, both audio builds and the Hammerspoon link" \
   sh -c 'for p in "brew bundle" "swift build" "swiftc" "ln -sfn .*hammerspoon"; do printf "%s\n" "$1" | grep -q "$p" || exit 1; done' _ "$graph"
 check "the Brewfile declares node, which brings npm" grep -q '^brew "node"' "$REPO/Brewfile"
+check "macos: the command graph installs nothing from Delegate" sh -c '! printf "%s\n" "$1" | grep -qi delegate' _ "$graph"
 
 h=$(fresh_home)
 out=$(boot "$h" macos "$bin") && bad "macos without brew stops" "$out"
 check "macos without Homebrew stops with the starting instruction" has "$out" "Homebrew is missing.*brew.sh"
-check "macos without Homebrew changes nothing in the home" [ -z "$(find "$h" -mindepth 1 -not -path "$h/delegate*")" ]
+check "macos without Homebrew changes nothing in the home" [ -z "$(find "$h" -mindepth 1)" ]
 rm -rf "$h"
 
 h=$(fresh_home)
@@ -85,16 +79,15 @@ rm -rf "$h"
 h=$(fresh_home)
 out=$(boot "$h" macos "$stubs:$bin") || bad "macos: bootstrap succeeds in an isolated home" "$out"
 log=$(cat "$h/calls.log" 2>/dev/null)
-check "macos: brew bundle, the herdr installer, the skills CLI, both audio builds and delegate's installer ran" \
-  sh -c 'for p in "brew bundle" "herdr-install" "npx" "swift build" "swiftc" "delegate-install"; do printf "%s\n" "$1" | grep -q "$p" || exit 1; done' _ "$log"
+check "macos: brew bundle, the herdr installer, the skills CLI and both audio builds ran" \
+  sh -c 'for p in "brew bundle" "herdr-install" "npx" "swift build" "swiftc"; do printf "%s\n" "$1" | grep -q "$p" || exit 1; done' _ "$log"
 check "macos: config, Hammerspoon, herdr and the audio binaries are in place" \
   test -L "$h/.zshrc" -a -L "$h/.hammerspoon" -a -x "$h/.local/bin/herdr" -a -f "$h/.local/bin/mictee" -a -f "$h/.local/bin/audiotee"
 rm -rf "$h"
 
 # --- Linux ---------------------------------------------------------------
 for profile in omarchy linux; do
-  graph=$(make -n -C "$REPO" bootstrap PROFILE=$profile HOME="$g" DELEGATE_DIR="$g/delegate" 2>&1)
-  check "$profile: the command graph reaches delegate's installer" has "$graph" "delegate-install"
+  graph=$(make -n -C "$REPO" bootstrap PROFILE=$profile HOME="$g" 2>&1)
   check "$profile: no brew, cask, Swift build, Borders or Hammerspoon in the command graph" \
     sh -c '! printf "%s\n" "$1" | grep -q -e "brew bundle" -e "swift build" -e "swiftc" -e "ln -sfn .*hammerspoon" -e "^stow .* borders"' _ "$graph"
 
@@ -102,13 +95,13 @@ for profile in omarchy linux; do
   out=$(boot "$h" $profile "$bin") && bad "$profile without npm stops" "$out"
   check "$profile: missing prerequisites are named, with no distro command" \
     sh -c 'printf "%s\n" "$1" | grep -q "missing: .*node npm" && ! printf "%s\n" "$1" | grep -q -e apt -e pacman -e dnf' _ "$out"
-  check "$profile: a failed preflight changes nothing" [ -z "$(find "$h" -mindepth 1 -not -path "$h/delegate*")" ]
+  check "$profile: a failed preflight changes nothing" [ -z "$(find "$h" -mindepth 1)" ]
   rm -rf "$h"
 
   h=$(fresh_home)
   out=$(boot "$h" $profile "$stubs:$bin") || bad "$profile: bootstrap succeeds" "$out"
-  check "$profile: skills, agents and delegate reconciled" \
-    sh -c 'grep -q "npx" "$1/calls.log" && grep -q delegate-install "$1/calls.log" && [ -n "$(ls "$1/.claude/agents")" ]' _ "$h"
+  check "$profile: skills and agents reconciled" \
+    sh -c 'grep -q "npx" "$1/calls.log" && [ -n "$(ls "$1/.claude/agents")" ]' _ "$h"
   check "$profile: the result says system packages stay the distribution's" has "$out" "bootstrap installs none"
   before=$(find "$h" -type l | sort)
   boot "$h" $profile "$stubs:$bin" >/dev/null 2>&1 || bad "$profile: rerun succeeds"

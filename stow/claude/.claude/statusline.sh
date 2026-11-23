@@ -151,29 +151,13 @@ S_DIR="📁 ${C_FG}${B}$(basename "${cwd:-?}")${R}"
 S_WT=""; [[ -n $wt_name ]] && S_WT="🌳 ${C_GRN}${wt_name}${R}"
 S_SESS=""; [[ -n $sname ]] && S_SESS="🔖 ${C_BLUE}${sname}${R}"
 S_AGENT=""; [[ -n $agent ]] && S_AGENT="🎭 ${C_MAG}${agent}${R}"
-S_HERDR=""
-if [[ ${HERDR_ENV:-} == 1 && -n ${HERDR_PANE_ID:-} ]]; then
-  S_HERDR="🐑 ${C_CYAN}${HERDR_WORKSPACE_ID:-?}${R}${D}:${R}${C_CYAN}${HERDR_TAB_ID##*:}${R}${D}:${R}${C_CYAN}${HERDR_PANE_ID##*:}${R}"
-fi
 S_STYLE=""; [[ -n $ostyle && $ostyle != default ]] && S_STYLE="📝 ${ostyle}"
 S_VIM=""; [[ -n $vim ]] && S_VIM="${C_YEL}${B}${vim}${R}"
 
 join() { local out="" s; for s in "$@"; do [[ -n $s ]] || continue; out+="${out:+$sep}$s"; done; printf '%s' "$out"; }
 
 LINE1=("$S_DIR" "$git_seg" "$SEC_MAIN" "$SEC_CLOCK")
-LINE2=("$S_SESS" "$S_WT" "$S_AGENT" "$S_HERDR" "$S_STYLE" "$S_VIM")
-
-# ---------- delegate meter rows (ticket 23) ----------
-# One row per catalog meter from the installed skill: remaining 5h and weekly
-# windows, the tier each harness wins now, and running agents. Reads caches
-# only, never probes. Absent python3 or script, or a non-zero exit, adds nothing.
-# Switch: `report.py statusline off|on|toggle` (flag file
-# ~/.cache/delegate/statusline.off); the next refresh, 30 s at most, follows it.
-extra_rows=""
-script="$HOME/.claude/skills/delegate/scripts/report.py"
-if command -v python3 >/dev/null 2>&1 && [[ -f $script ]]; then
-  extra_rows=$(python3 "$script" statusline 2>/dev/null) || extra_rows=""
-fi
+LINE2=("$S_SESS" "$S_WT" "$S_AGENT" "$S_STYLE" "$S_VIM")
 
 case $style in
   one)
@@ -182,7 +166,3 @@ case $style in
     join "${LINE1[@]}"; echo
     join "${LINE2[@]}"; echo ;;
 esac
-
-if [[ -n $extra_rows ]]; then
-  printf '%s\n' "$extra_rows"
-fi

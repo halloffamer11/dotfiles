@@ -1,0 +1,165 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path.home() / ".local/lib/fleet"))
+from declarations import HOME, MCP_FILES, SKILL_DIRS, edited_targets, mcp_arguments, reserved_skills, selections, table
+
+
+def output(*args, cwd=None):
+    return subprocess.run(args, cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                          stderr=subprocess.DEVNULL, text=True, check=True, timeout=8,
+                          env={**os.environ, "GIT_TERMINAL_PROMPT": "0",
+                               "GIT_SSH_COMMAND": "ssh -o BatchMode=yes",
+                               "GIT_OPTIONAL_LOCKS": "0"}).stdout
+
+
+def git_report(root):
+    if output("git", "status", "--porcelain", "--untracked-files=all", cwd=root):
+        yield f"{root}: uncommitted edits"
+    try:
+        upstream = output("git", "rev-parse", "--abbrev-ref", "@{upstream}", cwd=root).strip()
+    except subprocess.CalledProcessError:
+        yield f"{root}: no upstream branch"
+        return
+    remote = output("git", "for-each-ref", "--format=%(upstream:remotename)",
+                    output("git", "symbolic-ref", "HEAD", cwd=root).strip(), cwd=root).strip()
+    try:
+        output("git", "fetch", "--quiet", remote, cwd=root)
+    except (OSError, subprocess.SubprocessError):
+        yield f"{root}: fetch failed, upstream counts use the last fetch"
+    ahead, behind = map(int, output("git", "rev-list", "--left-right", "--count",
+                                     f"HEAD...{upstream}", cwd=root).split())
+    if ahead:
+        yield f"{root}: {ahead} unpushed commit(s)"
+    if behind:
+        yield f"{root}: {behind} upstream commit(s) to pull"
+
+
+def inventory(data):
+    expected = {name for _, skills in selections(data) for name in skills}
+    reserved = reserved_skills(data["platform"])
+    for pack in set(data["selectedPacks"]) - data["packs"].keys():
+        yield f"selected Pack {pack} has no declaration"
+    for harness, folders in SKILL_DIRS.items():
+        installed = {p.name for folder in folders for p in (HOME / folder).glob("*")
+                     if (p / "SKILL.md").is_file()}
+        for name in sorted(expected - installed):
+            yield f"{harness}: missing skill {name}"
+        for name in sorted(installed - expected - reserved):
+            yield f"{harness}: undeclared skill {name}"
+    for harness, (path, key) in MCP_FILES.items():
+        try:
+            installed = table(HOME / path, key)
+        except (ValueError, OSError):
+            yield f"{harness}: cannot read MCP entries in {path}"
+            continue
+        for name, item in data["mcp"].items():
+            try:
+                _, skip = mcp_arguments(harness, name, item, data["platform"])
+            except ValueError as exc:
+                yield f"{harness}: {exc}"
+                if name not in installed:
+                    yield f"{harness}: missing MCP {name}"
+                continue
+            if skip and skip != "other Platform":
+                yield f"{harness}: skipped MCP {name} ({skip})"
+            elif not skip and name not in installed:
+                yield f"{harness}: missing MCP {name}"
+        for name in sorted(installed.keys() - data["mcp"].keys()):
+            yield f"{harness}: undeclared MCP {name}"
+    for key, kind in (("mcpOverrides", "MCP"), ("packsOverrides", "Pack")):
+        for name in data[key]:
+            yield f"Site kit overrides {kind} {name}"
+
+    mise = HOME / ".config/mise"
+    for name in table(mise / "config.toml", "tools"):
+        yield f"mise: ad-hoc tool {name}"
+    site_tools = table(HOME / ".config/fleet/site/mise.toml", "tools")
+    for name in sorted(site_tools.keys() & table(mise / "conf.d/50-belt.toml", "tools").keys()):
+        yield f"Site kit overrides mise tool {name}"
+    for link in data["profileLinks"]:
+        path = HOME / link
+        if not path.is_symlink() or path.resolve() != HOME / ".gemini/config/mcp_config.json" or not path.exists():
+            yield f"T3 Antigravity: missing or replaced link {link}"
+
+
+def duplicates(platform):
+    # Like which -a across PATH. Collapse repeated directories, hard links and
+    # symlinks. Mise shims and command wrappers dispatch to the installed copy.
+    copies = {}
+    dispatchers = HOME / ".local/share/mise"
+    for folder in dict.fromkeys(Path(p).resolve() for p in os.get_exec_path()):
+        if not folder.is_dir() or not os.access(folder, os.R_OK | os.X_OK):
+            continue
+        for path in folder.iterdir():
+            if path.is_file() and os.access(path, os.X_OK):
+                copies.setdefault(path.name, []).append(path)
+    for name, paths in sorted(copies.items()):
+        direct = [p for p in paths if p.parent not in
+                  (dispatchers / "shims", dispatchers / "command-wrappers/bin")]
+        wrappers = [p for p in paths if p not in direct]
+        if wrappers and not any((dispatchers / "installs") in p.resolve().parents for p in direct):
+            direct.append(wrappers[0])
+        mise_command = wrappers or any((dispatchers / "installs") in p.resolve().parents for p in direct)
+        if platform == "omarchy" and mise_command and name in {"node", "npm", "npx"}:
+            direct = [p for p in direct if p.parent != Path("/usr/bin")]
+        if name == "codex":
+            direct = [p for p in direct if "Codex.app" not in p.parts]
+        if len({(s.st_dev, s.st_ino) for s in (p.stat() for p in direct)}) > 1:
+            yield f"duplicate {name}: " + ", ".join(map(str, direct))
+
+
+def report(current, brief):
+    source = Path(output("chezmoi", "source-path").strip())
+    root = Path(output("git", "rev-parse", "--show-toplevel", cwd=source).strip())
+    yield from git_report(root)
+    try:
+        project = Path(output("git", "rev-parse", "--show-toplevel", cwd=current).strip())
+    except subprocess.CalledProcessError:
+        project = None
+    if project and project != root:
+        yield from git_report(project)
+    state = Path(os.environ.get("XDG_STATE_HOME", HOME / ".local/state")) / "fleet/last-sync"
+    if state.exists():
+        last = state.read_text().strip()
+        if not brief or not last.endswith(" ok"):
+            yield f"last fleet-sync: {last}"
+    elif not brief:
+        yield "last fleet-sync: never run"
+    status = output("chezmoi", "status", "--exclude=scripts")
+    edited = set(edited_targets(status, output("chezmoi", "managed", "--path-style=all", "--format=json")))
+    for line in status.splitlines():
+        if line[3:] in edited:
+            yield f"edited deployed target: {line[3:]}"
+        elif line[1:2].strip():
+            yield f"pending target: {line[3:]}"
+    data = json.loads(output("chezmoi", "execute-template", '{{ includeTemplate "declarations" . }}'))
+    yield from inventory(data)
+    yield from duplicates(data["platform"])
+
+
+parser = argparse.ArgumentParser(description="Report Belt and Git drift")
+parser.add_argument("--brief", action="store_true")
+parser.add_argument("--format", choices=["text", "agy"], default="text")
+args = parser.parse_args()
+lines = []
+try:
+    current = Path.cwd()
+    if args.format == "agy":
+        workspaces = json.load(sys.stdin).get("workspacePaths", [])
+        if workspaces:
+            current = Path(workspaces[0])
+    lines.extend(report(current, args.brief))
+except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as exc:
+    # Parse errors can contain fragments of machine-local configuration.
+    lines.append(f"fleet-check incomplete ({type(exc).__name__})")
+if args.format == "agy":
+    print(json.dumps({"injectSteps": [{"ephemeralMessage": "\n".join(lines)}]} if lines else {}))
+elif lines:
+    print("\n".join(lines))

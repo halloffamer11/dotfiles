@@ -10,6 +10,11 @@
 [user]
 	name = dreiss
 	email = ojhall11@gmail.com
+[filter "lfs"]
+	required = true
+	clean = git-lfs clean -- %f
+	smudge = git-lfs smudge -- %f
+	process = git-lfs filter-process
 # Last, so a machine's own settings (its identity first) win over the defaults above:
 # git keeps the last value it reads for a key.
 [include]

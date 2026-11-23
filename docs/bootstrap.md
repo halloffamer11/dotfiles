@@ -35,10 +35,16 @@ Bootstrap stops before it changes anything if Homebrew is missing. After `brew b
 it stops if a real file sits where a link belongs. Compare that file with the repo's
 copy, move it aside (`mv ~/.zshrc ~/.zshrc.pre-dotfiles`), and run bootstrap again.
 
-Herdr uses its standalone installation and vendor updater, not Homebrew. Bootstrap
-runs `make herdr`, which installs it into `~/.local/bin` with the upstream installer,
-and `make update` runs `herdr update`. Both stop, changing nothing, while a Homebrew
-login service or a second herdr on `PATH` could start a different server build.
+The Herdr desktop app installs and updates itself, outside Homebrew. Bootstrap copies
+the app's `keys.json` in only when none is there, because the app does not reload a
+linked file; after you change keys in the app, copy `~/.config/herdr-app/keys.json`
+back to `stow/herdr-app/` to commit it.
+
+The standalone `herdr` binary also uses its upstream installer and vendor updater, not
+Homebrew (the Herdr TUI config and skill are not part of this setup). Bootstrap runs
+`make herdr`, which installs it into `~/.local/bin` with the upstream installer, and
+`make update` runs `herdr update`. Both stop, changing nothing, while a Homebrew login
+service or a second herdr on `PATH` could start a different server build.
 
 Upstream herdr builds are ad-hoc signed, so macOS keys each privacy grant (Full Disk
 Access, Files and Folders, Screen Recording) to one build, and every update adds new
@@ -62,13 +68,11 @@ You still do these by hand, because no command can:
 - Remap Caps Lock to Control (System Settings, Keyboard, Modifier Keys).
 - Create `~/.gitconfig.local` with this machine's git identity, and `~/.zshrc.local`
   for anything that belongs to this machine only.
-- Run `codex login`, then `make -C ~/projects/delegate delegate-codex-home`. Bootstrap
-  reminds you if you skip it.
+- Run `codex login`.
 - Run `gh auth login`.
 - For the meeting recorder, grant Screen & System Audio Recording and Microphone to
   both the terminal and Hammerspoon (Privacy & Security). Without the grant, macOS
   records silence and reports no error.
-- Delegate's catalog: `make -C ~/projects/delegate delegate-wizard`.
 
 `make -C ~/dotfiles doctor` then lists whatever is still missing.
 
@@ -81,8 +85,8 @@ Secret scanning).
 1. `git clone https://github.com/halloffamer11/dotfiles.git ~/dotfiles`
 2. `make -C ~/dotfiles bootstrap`
 
-This links the common configuration plus Bash, Ghostty, Herdr, Hyprland and Voxtype,
-installs the declared skills and the Claude agents, and installs delegate. The by-hand
+This links the common configuration plus Bash, Ghostty, Hyprland and Voxtype,
+installs the declared skills and the Claude agents. The by-hand
 list is the macOS one, minus Homebrew, Hammerspoon and the recording grants.
 
 ## Generic Linux
@@ -109,29 +113,126 @@ commit if it finds a secret. Then each hook runs the repository's own copy from
 
 ## Bring an existing machine up to date
 
-`dots` does it all: it pulls `~/dotfiles`, and `make apply` then pulls delegate
-(`make delegate` fast-forwards `~/projects/delegate` when it is on `main` with no local
-changes), reinstalls it, and fetches its relays at the pinned commit.
+`dots` does it all: it pulls `~/dotfiles`, and `make apply` then relinks the
+configuration and refreshes the declared skills.
 
 1. `dots`
-2. `make -C ~/dotfiles doctor`, and fix each `ACTION` line it prints. A delegate
-   checkout on another branch or with local edits is not pulled; doctor reports it as
-   behind, and you pull it yourself.
+2. `make -C ~/dotfiles doctor`, and fix each `ACTION` line it prints.
 
 ## Maintenance
 
 Run these from any directory, the same on every profile:
 
 - `dots`, a shell alias in zsh and bash. It pulls `~/dotfiles`, then runs `make apply`,
-  which relinks the configuration, refreshes the declared skills from upstream, and
-  pulls and reinstalls delegate.
+  which relinks the configuration and refreshes the declared skills from upstream.
 - `make -C ~/dotfiles update`. On macOS it reconciles the Brewfile and updates the
   declared skills. On Linux it updates the skills only.
 - `make -C ~/dotfiles doctor`. It is read only and reports the profile, missing
   prerequisites, files in the way, links not in place yet, broken links into the repo,
-  declared skills that are missing, gitleaks, the delegate checkout, relays and catalog,
-  and a dotfiles or delegate checkout that is behind its upstream `main` (it asks the
+  declared skills that are missing, gitleaks, and a dotfiles checkout that is behind
+  its upstream `main` (it asks the
   remote; `make doctor DOCTOR_UPSTREAM=` skips that). It exits non-zero when a line
   says `ACTION`.
 - `make -C ~/dotfiles test-bootstrap` runs the isolated-home checks for every profile.
   It needs GNU Stow and never touches your own home.
+
+## Agentic Layer with chezmoi
+
+The first chezmoi scope deploys the Belt on macOS and Omarchy. Its source is
+`home/`. The Make targets above remain the Stow fallback. Give each deployed
+path one owner. Use the conversion runbook before switching an occupied Machine.
+
+On a new Machine, install Git and mise, make Python 3 available for the initial
+hook edits, and put mise's shims on PATH in the login shell. With chezmoi
+installed, run `chezmoi init --apply halloffamer11/dotfiles`. To bootstrap
+chezmoi itself, use `mise exec chezmoi@latest -- chezmoi init --apply halloffamer11/dotfiles`.
+Prepare any Site kit first. Init detects the Platform and asks which Packs to
+install and which T3 Antigravity provider instance IDs to use. The default ID
+is `antigravity`. The answers live in the Machine's chezmoi config.
+Use `chezmoi init --prompt` to choose again. To take part of a Pack, set
+`core = ["toolsmith", "council"]` under `[data.skillSelection]` in that config.
+An omitted selection takes every enabled skill declared for the Pack.
+
+On an occupied Machine, use `chezmoi init` first. Back up the current global
+skills (contents, link targets and lock file), user MCP entries and replaced
+rules locally. Move a provider's existing plain MCP config into that backup.
+Release each path from its previous owner, inspect `chezmoi diff`, then use
+`chezmoi apply`. The skills installer can replace a same-name directory.
+Review and trust the Codex session hook in `/hooks`, including after it changes.
+
+### Site kit
+
+Place these optional files under `~/.config/fleet/site/`. Templates use this
+absolute location. A site-owned checkout should have read-only upstream access.
+
+| File | Contents |
+| --- | --- |
+| `rules.md` | Text appended to all three global rules files. The total must be under 24,000 bytes. |
+| `mcp.toml` | Named MCP declarations, merged over `home/.chezmoidata/mcp.toml`. |
+| `skills.toml` | Named Pack declarations, merged over `home/.chezmoidata/packs.toml`. |
+| `mise.toml` | A mise config linked as `~/.config/mise/conf.d/90-site.toml` while present. Remove the old link manually if you retire this file. |
+| `ignore` | Target paths or patterns in chezmoiignore syntax, one per line. Own ignored targets locally. |
+
+For example, a site Pack can declare selected names in `skills.toml` as follows.
+
+```toml
+[packs.extra]
+repo = "https://example.invalid/skills.git"
+skills = { example = true }
+```
+
+The same schema accepts a personal Pack when its repository exists. Re-run
+`chezmoi init --prompt` to select a newly declared Pack. An overlapping entry
+inherits upstream fields and the site value wins for each field it supplies.
+Use `false` to disable an inherited skill. Platform-owned and Harness-owned
+skill names stay reserved.
+
+Each MCP table accepts `command` and optional `args`, or `url`. Optional
+`platforms` is an array of `"macos"` or `"omarchy"`. Optional `requires`
+names one binary. For example, a Site kit can declare the following server.
+
+```toml
+[mcp.example]
+url = "https://example.invalid/mcp"
+platforms = ["macos"]
+secrets = ["EXAMPLE_TOKEN"]
+```
+
+Keep credentials out of URLs, commands, arguments and TOML. The `secrets` array
+contains environment variable names only. A single name on HTTP maps to Codex's
+bearer-token option. Other secret-bearing combinations are skipped and reported.
+A Platform mismatch or absent prerequisite keeps an entry from installing.
+Remove retired entries manually with their Harness CLI. Use `-s user` for Claude.
+Site additions can extend these paths and keys. A replacement keeps the previous
+interface working with a `fleet-check` deprecation notice for at least 30 days.
+
+### Sync and checks
+
+Run `fleet-check` to see the Git state of the source and current repo, the last
+sync, local edits, missing and ad-hoc entries, overlapping declarations,
+duplicate commands and T3 links. `--brief` prints only findings.
+It fetches remote-tracking refs with a short timeout. Antigravity's hook reads
+`workspacePaths` from stdin and requests `--format agy`. T3 Antigravity keeps
+its own hooks. A small archive in `references/t3-mcp-link.tar.gz` holds one
+relative symlink. Chezmoi can deploy that archive member at each computed profile
+path and detect a replaced link in its normal status output. Verify rules, one selected skill and Playwright in a fresh direct
+and T3 session for each Harness after cutover.
+
+Use `chezmoi apply` to try uncommitted source edits on the current branch.
+`fleet-sync` checks the checkout and deployed edits, pulls with `--ff-only`,
+applies with `--no-tty --error-on-conflict`, then runs `skills update -g -y`,
+including ad-hoc global skills. A stopped sync sends a desktop notification.
+See `~/.local/state/fleet/last-sync` (or the corresponding XDG state directory),
+resolve the reported condition, then run `fleet-sync` again.
+
+After rehearsal and cutover, enable the four-hour timer on Omarchy with
+`systemctl --user daemon-reload` and `systemctl --user enable --now fleet-sync.timer`.
+On macOS, load the agent with
+`launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/org.dotfiles.fleet-sync.plist"`.
+Both schedulers include mise's shims. Upgrade binaries separately with
+`omarchy update` on Omarchy and `mise up` on macOS.
+
+`make test-chezmoi` runs the agentic smoke test using disposable homes, a local
+upstream, a fixture Pack and Site kit, and stub installers and Harness CLIs.
+It needs Python 3.11+, Git and either chezmoi or mise. The mise fallback
+downloads chezmoi into a temporary home.

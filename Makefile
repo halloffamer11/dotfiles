@@ -1,22 +1,21 @@
 # ~/dotfiles/Makefile — machine provisioning entry points.
 #
 # Usage:
-#   make bootstrap   # fresh machine. macOS: brew packages + config/skills + audiotee/mictee + delegate.
-#                    # Linux (omarchy, linux): config/skills + delegate; system packages stay the distro's.
+#   make bootstrap   # fresh machine. macOS: brew packages + config/skills + audiotee/mictee.
+#                    # Linux (omarchy, linux): config/skills; system packages stay the distro's.
 #   make brew        # install/verify Brewfile packages only
 #   make herdr       # macOS: install herdr with its own installer into ~/.local/bin, then sign it (HERDR_SIGN_IDENTITY)
 #   make herdr-update  # macOS: `herdr update`, then sign the new binary again
-#   make apply       # reconcile configs, agent links, declared skills, and the delegate install
+#   make apply       # reconcile configs, agent links and declared skills
 #   make configs     # restow the profile's config packages and link ~/.claude/CLAUDE.md
 #   make configs-plan  # dry run of configs: the profile, its links and any conflicts; writes nothing
 #   make test-bootstrap  # isolated-home checks of configs and skills (needs stow and make)
 #   make skills      # drop stale authored-skill links + brew-provided skill links + per-file agent links
 #   make externals   # ensure declared skills (personal and third-party) are installed at current upstream
 #   make external-updates  # update only the skills declared by this repo
-#   make delegate    # clone halloffamer11/delegate into DELEGATE_DIR if absent (else pull a clean main), then run its `make install`
 #   make update      # macOS: Brewfile packages + herdr + declared skills; Linux: declared skills only
 #   make doctor      # read-only diagnosis: profile, prerequisites, conflicts, broken links, skills,
-#                    # gitleaks, delegate (checkout, relays, catalog) and checkouts behind upstream
+#                    # gitleaks and a dotfiles checkout behind upstream
 #   make audiotee    # build the audiotee system-audio capture binary into ~/.local/bin (Swift 5.9+, macOS 14.2+)
 #   make mictee      # build the mictee mic capture binary into ~/.local/bin (Swift)
 #   make test-recorder  # regression harness for the record-meeting rig
@@ -33,9 +32,12 @@
 #     needs ~/.hammerspoon to be ONE whole-directory symlink (per-file links break
 #     hs.configdir and the pathwatcher auto-reload — upstream issue #830), so `configs`
 #     links it explicitly instead of stowing it
+#   - herdr-app is NOT in CONFIG_PACKAGES either: the Herdr app watches its own folder and
+#     misses edits made through a symlink (tested 2026-11-02), so live key reload needs a
+#     regular file. `configs` copies keys.json in only when it is missing; after editing the
+#     live file, copy it back to stow/herdr-app to commit it
 #   - This repo holds no authored skills. PERSONAL_SKILLS come from halloffamer11/skills
-#     through the skills CLI, like the third-party ones; delegate has its own repo and
-#     installer (DELEGATE_DIR), because it needs machine setup the skills CLI cannot do.
+#     through the skills CLI, like the third-party ones.
 #   - SKILL_AGENTS: which harnesses the skills CLI installs into
 #   - agents are stowed per FILE into ~/.claude/agents (the package is flat, so folding is moot) so
 #     machine-local agents can sit alongside; an agent added by a pull appears after the next `make skills`
@@ -45,8 +47,8 @@
 
 # The configuration every profile takes: nothing in it needs macOS or Omarchy.
 COMMON_PACKAGES := claude git nvim starship yazi
-MACOS_PACKAGES := borders ghostty herdr wezterm zsh
-OMARCHY_PACKAGES := bash ghostty herdr hypr voxtype
+MACOS_PACKAGES := borders ghostty wezterm zsh
+OMARCHY_PACKAGES := bash ghostty hypr voxtype
 LINUX_PACKAGES :=
 ifeq ($(shell uname -s),Darwin)
 DETECTED_PROFILE := macos
@@ -67,10 +69,9 @@ $(error PROFILE must be macos, omarchy or linux, not '$(PROFILE)')
 endif
 CONFIG_PACKAGES ?= $(sort $(COMMON_PACKAGES) $(PROFILE_PACKAGES))
 # Packages under stow/ this profile leaves out, named so a skipped one is a choice, not a surprise.
-UNSELECTED_PACKAGES = $(filter-out $(CONFIG_PACKAGES) hammerspoon,$(notdir $(wildcard $(CURDIR)/stow/*)))
-SKILL_AGENTS ?= claude-code codex kiro-cli
-PERSONAL_SKILLS ?= facebook-marketplace fresh-context skillsmith toolsmith
-DELEGATE_DIR ?= $(HOME)/projects/delegate
+UNSELECTED_PACKAGES = $(filter-out $(CONFIG_PACKAGES) hammerspoon herdr-app,$(notdir $(wildcard $(CURDIR)/stow/*)))
+SKILL_AGENTS ?= claude-code codex
+PERSONAL_SKILLS ?= council facebook-marketplace fresh-context skillsmith toolsmith
 EXTRA_BREWFILES ?=
 # The upstream installer's own variable and default; `make herdr` passes it through.
 HERDR_INSTALL_DIR ?= $(HOME)/.local/bin
@@ -81,10 +82,10 @@ HERDR_INSTALL_DIR ?= $(HOME)/.local/bin
 HERDR_SIGN_IDENTITY ?=
 HERDR_IDENTIFIER ?= dev.herdr.herdr
 # Checkouts `make doctor` compares with their upstream main (it asks the remote, writes nothing).
-DOCTOR_UPSTREAM ?= dotfiles delegate
+DOCTOR_UPSTREAM ?= dotfiles
 SKILLS_CLI = DISABLE_TELEMETRY=1 npx -y skills@latest
 
-.PHONY: bootstrap preflight conflicts doctor brew apply configs configs-plan skills externals external-updates update herdr herdr-sign herdr-update delegate audiotee mictee meeting-notes test-recorder test-meeting-notes test-bootstrap
+.PHONY: bootstrap preflight conflicts doctor brew apply configs configs-plan skills externals external-updates update herdr herdr-sign herdr-update audiotee mictee meeting-notes test-recorder test-meeting-notes test-bootstrap
 
 # Prerequisites run left to right. Each profile first checks what it cannot do without, so
 # a machine missing one stops before anything in the home directory changes; existing
@@ -156,7 +157,7 @@ herdr-update: herdr
 	"$(HERDR_INSTALL_DIR)/herdr" update
 	@$(MAKE) --no-print-directory herdr-sign
 
-apply: configs skills externals delegate
+apply: configs skills externals
 
 configs:
 	@echo "profile: $(PROFILE)"
@@ -166,6 +167,9 @@ ifeq ($(PROFILE),macos)
 	@if [ -d $(HOME)/.hammerspoon ] && [ ! -L $(HOME)/.hammerspoon ]; then \
 		echo "ERROR: ~/.hammerspoon is a real directory (Hammerspoon launched before configs?) — move it aside first"; exit 1; fi
 	ln -sfn $(CURDIR)/stow/hammerspoon/.hammerspoon $(HOME)/.hammerspoon
+	@# A copy, never a link, and never over the live file (see herdr-app above).
+	@if [ ! -e $(HOME)/.config/herdr-app/keys.json ]; then mkdir -p $(HOME)/.config/herdr-app && \
+		cp $(CURDIR)/stow/herdr-app/.config/herdr-app/keys.json $(HOME)/.config/herdr-app/keys.json && echo "copied herdr-app keys.json"; fi
 endif
 	@# ~/.claude/CLAUDE.md is the user's global steering file, kept in references/. A real
 	@# file there is someone's data: stop rather than replace it.
@@ -188,6 +192,9 @@ ifeq ($(PROFILE),macos)
 	@if [ -e $(HOME)/.hammerspoon ] && [ ! -L $(HOME)/.hammerspoon ]; then echo "CONFLICT: ~/.hammerspoon is a real directory"; \
 		elif [ "$$(readlink $(HOME)/.hammerspoon)" = $(CURDIR)/stow/hammerspoon/.hammerspoon ]; then echo "in place: .hammerspoon"; \
 		else echo "LINK: .hammerspoon => $(CURDIR)/stow/hammerspoon/.hammerspoon"; fi
+	@if [ ! -e $(HOME)/.config/herdr-app/keys.json ]; then echo "COPY: .config/herdr-app/keys.json"; \
+		elif cmp -s $(HOME)/.config/herdr-app/keys.json $(CURDIR)/stow/herdr-app/.config/herdr-app/keys.json; then echo "in place: .config/herdr-app/keys.json"; \
+		else echo "differs: .config/herdr-app/keys.json (live copy kept; copy it back to commit)"; fi
 endif
 	@if [ -e $(HOME)/.claude/CLAUDE.md ] && [ ! -L $(HOME)/.claude/CLAUDE.md ]; then echo "CONFLICT: ~/.claude/CLAUDE.md is a real file"; \
 		elif [ "$$(readlink $(HOME)/.claude/CLAUDE.md)" = $(CURDIR)/references/CLAUDE.md ]; then echo "in place: .claude/CLAUDE.md"; \
@@ -195,8 +202,8 @@ endif
 
 skills:
 	@# Before 2026-10-01 this repo stowed its own skills into the harness skill dirs. After a
-	@# pull those links dangle, and the skills CLI or delegate's installer replaces them.
-	@for t in $(HOME)/.claude/skills $(HOME)/.agents/skills $(HOME)/.kiro/skills; do for l in $$t/*; do \
+	@# pull those links dangle, and the skills CLI replaces them.
+	@for t in $(HOME)/.claude/skills $(HOME)/.agents/skills; do for l in $$t/*; do \
 		if [ -L "$$l" ] && [ ! -e "$$l" ]; then case "$$(readlink "$$l")" in */dotfiles/agents/skills/*) rm "$$l" && echo "removed stale link $$l";; esac; fi; \
 	done; done
 	@# hunk-review ships inside Homebrew's hunk; without both, it is skipped and the rest goes on.
@@ -209,11 +216,10 @@ skills:
 externals:
 	@# These declarations are desired state: add installs a missing skill and refreshes an existing one.
 	$(SKILLS_CLI) add halloffamer11/skills --skill $(PERSONAL_SKILLS) --agent $(SKILL_AGENTS) -g -y
-	$(SKILLS_CLI) add herdrdev/herdr --skill herdr --agent $(SKILL_AGENTS) -g -y
 	$(SKILLS_CLI) add blader/humanizer --skill humanizer --agent $(SKILL_AGENTS) -g -y
 
 external-updates:
-	$(SKILLS_CLI) update -g -y herdr humanizer $(PERSONAL_SKILLS)
+	$(SKILLS_CLI) update -g -y humanizer $(PERSONAL_SKILLS)
 
 # Linux packages belong to the distribution, so update touches only the skills there.
 ifeq ($(PROFILE),macos)
@@ -226,19 +232,9 @@ endif
 # Writes nothing. Exits non-zero when it prints an ACTION line.
 doctor:
 	@PLAN="$$(MAKEFLAGS= make -s --no-print-directory -C $(CURDIR) configs-plan PROFILE=$(PROFILE) HOME=$(HOME) CONFIG_PACKAGES='$(CONFIG_PACKAGES)' 2>&1)" \
-	REPO=$(CURDIR) PROFILE=$(PROFILE) HOME=$(HOME) SKILLS="herdr humanizer $(PERSONAL_SKILLS)" \
-	DELEGATE_DIR=$(DELEGATE_DIR) UPSTREAM="$(DOCTOR_UPSTREAM)" \
+	REPO=$(CURDIR) PROFILE=$(PROFILE) HOME=$(HOME) SKILLS="humanizer $(PERSONAL_SKILLS)" \
+	UPSTREAM="$(DOCTOR_UPSTREAM)" \
 	NEEDS="$(if $(filter macos,$(PROFILE)),brew git make stow node npm,$(LINUX_NEEDS))" sh $(CURDIR)/scripts/doctor.sh
-
-# Clones delegate when absent. A checkout that is on main with no local changes is
-# fast-forwarded first, so `dots` installs current delegate; any other checkout is
-# left as it is, with a notice. A failed pull (offline) installs what is there.
-delegate:
-	@if [ ! -d $(DELEGATE_DIR)/.git ]; then git clone https://github.com/halloffamer11/delegate.git $(DELEGATE_DIR); \
-	elif [ "$$(git -C $(DELEGATE_DIR) symbolic-ref --short -q HEAD 2>/dev/null)" != main ]; then echo "notice: $(DELEGATE_DIR) is not on main, so it is not pulled"; \
-	elif [ -n "$$(git -C $(DELEGATE_DIR) status --porcelain 2>/dev/null)" ]; then echo "notice: $(DELEGATE_DIR) has local changes, so it is not pulled"; \
-	else git -C $(DELEGATE_DIR) pull -q --ff-only || echo "notice: could not pull $(DELEGATE_DIR); installing it as it is"; fi
-	$(MAKE) -C $(DELEGATE_DIR) install
 
 audiotee:
 	rm -rf /tmp/audiotee-build
@@ -268,3 +264,7 @@ test-meeting-notes:
 test-recorder:
 	python3 $(CURDIR)/tools/record-meeting-tests/finalize_test.py
 	python3 $(CURDIR)/tools/record-meeting-tests/harness.py
+
+.PHONY: test-chezmoi
+test-chezmoi:
+	@python3 tests/chezmoi/smoke.py

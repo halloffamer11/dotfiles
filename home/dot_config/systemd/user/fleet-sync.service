@@ -1,0 +1,7 @@
+[Unit]
+Description=Sync the Belt
+
+[Service]
+Type=oneshot
+Environment="PATH=%h/.local/share/mise/shims:%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart="%h/.local/bin/fleet-sync"

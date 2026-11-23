@@ -27,7 +27,7 @@ by a chevron), `bar` (two lines, `┃`), `one` (single dense line).
 ## Layout
 
     line 1   folder · git branch · model+effort+context · 5h usage · cache+duration
-    line 2   session · worktree · agent · herdr pane · output style · vim mode
+    line 2   session · worktree · agent · output style · vim mode
 
 Empty segments drop out, so line 2 disappears entirely in a plain session.
 Glyphs are nerd-font — the Brewfile's nerd fonts cover them.

@@ -27,10 +27,12 @@ for profile in macos omarchy linux; do
     macos)
       check "macos: Borders, zsh and a whole-directory Hammerspoon link" \
         test -L "$h/.config/borders/bordersrc" -a -L "$h/.zshrc" -a -L "$h/.hammerspoon"
+      check "macos: Herdr app keys are a copied file, not a link (live reload)" \
+        test -f "$h/.config/herdr-app/keys.json" -a ! -L "$h/.config/herdr-app/keys.json"
       check "macos: no Omarchy config" test ! -e "$h/.config/hypr" -a ! -e "$h/.bashrc" ;;
     omarchy)
-      check "omarchy: Bash, Ghostty, Herdr, Hyprland and Voxtype" \
-        test -L "$h/.bashrc" -a -L "$h/.config/ghostty/config" -a -L "$h/.config/herdr/config.toml" \
+      check "omarchy: Bash, Ghostty, Hyprland and Voxtype" \
+        test -L "$h/.bashrc" -a -L "$h/.config/ghostty/config" \
              -a -L "$h/.config/hypr/bindings.lua" -a -L "$h/.config/voxtype/config.toml"
       check "omarchy: no macOS artifact" \
         test ! -e "$h/.hammerspoon" -a ! -e "$h/.config/borders" -a ! -e "$h/.config/wezterm" ;;

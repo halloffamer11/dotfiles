@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>org.dotfiles.fleet-sync</string>
+    <key>ProgramArguments</key><array><string>{{ .chezmoi.homeDir | html }}/.local/bin/fleet-sync</string></array>
+    <key>StartInterval</key><integer>14400</integer>
+    <key>EnvironmentVariables</key>
+    <dict><key>PATH</key><string>{{ .chezmoi.homeDir | html }}/.local/share/mise/shims:{{ .chezmoi.homeDir | html }}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
+</dict>
+</plist>
