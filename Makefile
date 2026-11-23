@@ -10,7 +10,7 @@
 #   make test-bootstrap  # isolated-home checks of configs and skills (needs stow and make)
 #   make skills      # drop stale authored-skill links + brew-provided skill links + per-file agent links
 #   make externals   # ensure declared skills (personal and third-party) are installed at current upstream
-#   make external-updates  # update only the skills declared by this repo
+#   make external-updates  # reinstall the declared skills from their sources (a hand edit to one is replaced)
 #   make update      # macOS: Brewfile packages + declared skills; Linux: declared skills only
 #   make doctor      # read-only diagnosis: profile, prerequisites, conflicts, broken links, skills,
 #                    # gitleaks and a dotfiles checkout behind upstream

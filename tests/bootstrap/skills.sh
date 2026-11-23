@@ -47,6 +47,18 @@ legacy=$(cat "$h/legacy.log")
 check "a former one-Pack override retains its core selection" has "$legacy" 'add halloffamer11/skills --skill toolsmith --agent'
 check "an empty personal selection skips its installer" test "$(wc -l < "$h/legacy.log")" -eq 2
 
+STUB_LOG="$h/personal.log" HOME="$h" PATH="$stubs:$BASE_PATH" \
+  make -s -C "$REPO" external-updates PERSONAL_SKILLS=facebook-marketplace >/dev/null || bad "personal-only override"
+personal=$(cat "$h/personal.log")
+check "a personal-only override uses the personal Pack" has "$personal" 'add halloffamer11/skills-personal --skill facebook-marketplace --agent'
+check "a personal-only override skips the core Pack" sh -c '! printf "%s\n" "$1" | grep -q "add halloffamer11/skills --skill"' _ "$personal"
+
+STUB_LOG="$h/both.log" HOME="$h" PATH="$stubs:$BASE_PATH" \
+  make -s -C "$REPO" external-updates PERSONAL_SKILLS="toolsmith facebook-marketplace" >/dev/null || bad "mixed override"
+both=$(cat "$h/both.log")
+check "a mixed override splits by Pack" sh -c 'printf "%s\n" "$1" | grep -q "add halloffamer11/skills --skill toolsmith --agent" &&
+  printf "%s\n" "$1" | grep -q "add halloffamer11/skills-personal --skill facebook-marketplace --agent"' _ "$both"
+
 # Idempotent: a second run leaves the same links.
 before=$(find "$h/.claude" -type l | sort)
 run "$h" "$stubs:$BASE_PATH" >/dev/null || bad "without brew: rerun"
