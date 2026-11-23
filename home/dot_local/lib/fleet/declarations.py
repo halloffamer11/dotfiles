@@ -47,15 +47,17 @@ def edited_targets(status, managed):
 
 
 def batch_ssh(repo):
-    """Make Git's ssh fail instead of prompt, and keep the user's own ssh command."""
-    if os.environ.get("GIT_SSH_COMMAND"):
+    """Make Git's ssh fail instead of prompt, unless the user chose an ssh command.
+
+    A configured command can be any shell form (a wrapper, an env prefix, a
+    quoted path), so it is left exactly as it is.
+    """
+    if os.environ.get("GIT_SSH_COMMAND") or os.environ.get("GIT_SSH"):
         return {}
     configured = subprocess.run(["git", "config", "--get", "core.sshCommand"], cwd=repo,
                                 stdin=subprocess.DEVNULL, capture_output=True, text=True,
                                 timeout=5).stdout.strip()
-    # ssh keeps the first value it gets for an option, so BatchMode goes first.
-    program, _, rest = (configured or "ssh").partition(" ")
-    return {"GIT_SSH_COMMAND": f"{program} -o BatchMode=yes {rest}".rstrip()}
+    return {} if configured else {"GIT_SSH_COMMAND": "ssh -o BatchMode=yes"}
 
 
 def reserved_skills(platform):
