@@ -30,9 +30,22 @@ log=$(cat "$h/npx.log")
 check "humanizer comes from its upstream, unpinned" \
   sh -c 'printf "%s\n" "$1" | grep -q -- "skills@latest add blader/humanizer --skill humanizer "' _ "$log"
 check "the Herdr TUI skill is not installed" sh -c '! printf "%s\n" "$1" | grep -q herdrdev/herdr' _ "$log"
-check "skills install into Claude Code and Codex only" \
-  [ "$(printf '%s\n' "$log" | grep -c -- '--agent claude-code codex -g -y$')" -eq 2 ]
+check "the core Pack supplies the Stow core skills" \
+  has "$log" 'add halloffamer11/skills --skill council fresh-context skillsmith toolsmith --agent'
+check "the personal Pack supplies Marketplace" \
+  has "$log" 'add halloffamer11/skills-personal --skill facebook-marketplace --agent'
+check "all sources install into the three Harnesses" \
+  [ "$(printf '%s\n' "$log" | grep -c -- '--agent claude-code codex antigravity-cli -g -y$')" -eq 3 ]
+STUB_LOG="$h/updates.log" HOME="$h" PATH="$stubs:$BASE_PATH" \
+  make -s -C "$REPO" external-updates >/dev/null || bad "refresh declared sources"
+check "external-updates refreshes from the same declared sources" cmp "$h/npx.log" "$h/updates.log"
 check "no skill version is pinned" sh -c '! printf "%s\n" "$1" | grep -q "@[0-9]"' _ "$log"
+
+STUB_LOG="$h/legacy.log" HOME="$h" PATH="$stubs:$BASE_PATH" \
+  make -s -C "$REPO" external-updates PERSONAL_SKILLS=toolsmith >/dev/null || bad "legacy subset"
+legacy=$(cat "$h/legacy.log")
+check "a former one-Pack override retains its core selection" has "$legacy" 'add halloffamer11/skills --skill toolsmith --agent'
+check "an empty personal selection skips its installer" test "$(wc -l < "$h/legacy.log")" -eq 2
 
 # Idempotent: a second run leaves the same links.
 before=$(find "$h/.claude" -type l | sort)

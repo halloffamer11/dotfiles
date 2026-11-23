@@ -34,8 +34,8 @@
 #     misses edits made through a symlink (tested 2026-11-02), so live key reload needs a
 #     regular file. `configs` copies keys.json in only when it is missing; after editing the
 #     live file, copy it back to stow/herdr-app to commit it
-#   - This repo holds no authored skills. PERSONAL_SKILLS come from halloffamer11/skills
-#     through the skills CLI, like the third-party ones.
+#   - CORE_SKILLS and PERSONAL_PACK_SKILLS select Stow skills from their respective Packs.
+#     Leave either list empty to skip its Pack.
 #   - SKILL_AGENTS: which harnesses the skills CLI installs into
 #   - agents are stowed per FILE into ~/.claude/agents (the package is flat, so folding is moot) so
 #     machine-local agents can sit alongside; an agent added by a pull appears after the next `make skills`
@@ -68,8 +68,15 @@ endif
 CONFIG_PACKAGES ?= $(sort $(COMMON_PACKAGES) $(PROFILE_PACKAGES))
 # Packages under stow/ this profile leaves out, named so a skipped one is a choice, not a surprise.
 UNSELECTED_PACKAGES = $(filter-out $(CONFIG_PACKAGES) hammerspoon herdr-app,$(notdir $(wildcard $(CURDIR)/stow/*)))
-SKILL_AGENTS ?= claude-code codex
-PERSONAL_SKILLS ?= council facebook-marketplace fresh-context skillsmith toolsmith
+SKILL_AGENTS ?= claude-code codex antigravity-cli
+ifeq ($(origin PERSONAL_SKILLS),undefined)
+CORE_SKILLS ?= council fresh-context skillsmith toolsmith
+PERSONAL_PACK_SKILLS ?= facebook-marketplace
+else
+# Existing local.mk files selected both Packs with this single variable.
+CORE_SKILLS ?= $(filter-out facebook-marketplace,$(PERSONAL_SKILLS))
+PERSONAL_PACK_SKILLS ?= $(filter facebook-marketplace,$(PERSONAL_SKILLS))
+endif
 EXTRA_BREWFILES ?=
 # Checkouts `make doctor` compares with their upstream main (it asks the remote, writes nothing).
 DOCTOR_UPSTREAM ?= dotfiles
@@ -165,11 +172,16 @@ skills:
 
 externals:
 	@# These declarations are desired state: add installs a missing skill and refreshes an existing one.
-	$(SKILLS_CLI) add halloffamer11/skills --skill $(PERSONAL_SKILLS) --agent $(SKILL_AGENTS) -g -y
+ifneq ($(strip $(CORE_SKILLS)),)
+	$(SKILLS_CLI) add halloffamer11/skills --skill $(CORE_SKILLS) --agent $(SKILL_AGENTS) -g -y
+endif
+ifneq ($(strip $(PERSONAL_PACK_SKILLS)),)
+	$(SKILLS_CLI) add halloffamer11/skills-personal --skill $(PERSONAL_PACK_SKILLS) --agent $(SKILL_AGENTS) -g -y
+endif
 	$(SKILLS_CLI) add blader/humanizer --skill humanizer --agent $(SKILL_AGENTS) -g -y
 
-external-updates:
-	$(SKILLS_CLI) update -g -y humanizer $(PERSONAL_SKILLS)
+# Reinstall from the declared sources so old lock entries migrate to the new Pack.
+external-updates: externals
 
 # Linux packages belong to the distribution, so update touches only the skills there.
 ifeq ($(PROFILE),macos)
@@ -182,7 +194,7 @@ endif
 # Writes nothing. Exits non-zero when it prints an ACTION line.
 doctor:
 	@PLAN="$$(MAKEFLAGS= make -s --no-print-directory -C $(CURDIR) configs-plan PROFILE=$(PROFILE) HOME=$(HOME) CONFIG_PACKAGES='$(CONFIG_PACKAGES)' 2>&1)" \
-	REPO=$(CURDIR) PROFILE=$(PROFILE) HOME=$(HOME) SKILLS="humanizer $(PERSONAL_SKILLS)" \
+	REPO=$(CURDIR) PROFILE=$(PROFILE) HOME=$(HOME) SKILLS="humanizer $(CORE_SKILLS) $(PERSONAL_PACK_SKILLS)" \
 	UPSTREAM="$(DOCTOR_UPSTREAM)" \
 	NEEDS="$(if $(filter macos,$(PROFILE)),brew git make stow node npm,$(LINUX_NEEDS))" sh $(CURDIR)/scripts/doctor.sh
 
