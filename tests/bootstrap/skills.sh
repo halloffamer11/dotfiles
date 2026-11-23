@@ -32,7 +32,7 @@ check "humanizer comes from its upstream, unpinned" \
 check "the Herdr TUI skill is not installed" sh -c '! printf "%s\n" "$1" | grep -q herdrdev/herdr' _ "$log"
 check "the core Pack supplies the Stow core skills" \
   has "$log" 'add halloffamer11/skills --skill council fresh-context skillsmith toolsmith --agent'
-check "the personal Pack supplies Marketplace" \
+check "the personal Pack supplies Marketplace and google-access" \
   has "$log" 'add halloffamer11/skills-personal --skill facebook-marketplace google-access --agent'
 check "all sources install into the three Harnesses" \
   [ "$(printf '%s\n' "$log" | grep -c -- '--agent claude-code codex antigravity-cli -g -y$')" -eq 3 ]
