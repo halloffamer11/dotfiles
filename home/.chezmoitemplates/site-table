@@ -1,0 +1,16 @@
+{{- $site := dict -}}
+{{- $path := joinPath .home ".config/fleet/site" .file -}}
+{{- if stat $path -}}{{- $site = get (include $path | fromToml) .key | default dict -}}{{- end -}}
+{{- $base := deepCopy .base -}}
+{{- /* A change of MCP transport replaces the old transport's mutually exclusive fields. */ -}}
+{{- if eq .key "mcp" -}}
+  {{- range $name, $entry := $site -}}
+    {{- with get $base $name -}}
+      {{- if get $entry "url" -}}{{- $_ := unset . "command" -}}{{- $_ := unset . "args" -}}{{- end -}}
+      {{- if get $entry "command" -}}{{- $_ := unset . "url" -}}{{- end -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- $overrides := list -}}
+{{- range keys $site | sortAlpha -}}{{- if hasKey $.base . -}}{{- $overrides = append $overrides . -}}{{- end -}}{{- end -}}
+{{- dict "entries" (mustMergeOverwrite $base $site) "overrides" $overrides | toJson -}}

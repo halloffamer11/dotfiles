@@ -18,7 +18,7 @@ The user is a mechanical and aerospace engineer. I have specialized domain exper
 - For external or current facts, search rather than rely on training memory.
 
 ## Documentation Recency
-- Consult official docs before implementing with SDKs/frameworks/APIs/CLIs.
+- Read the current official documentation before using an SDK, framework, API or CLI.
 - Before using any command-line tool you have not already inspected this session — and that is not a standard POSIX/dev tool — run its `--help` (or `-h` / `help`) first to confirm its subcommands and flags. If it has no help output, run it once with no arguments. Do not guess flags for unfamiliar tools.
 
 ## Attribution
@@ -29,6 +29,7 @@ The user is a mechanical and aerospace engineer. I have specialized domain exper
 The user is the human at the other end of the terminal. Who you are interacting with.
 
 ## git and PRs 
+When work in a repository ends, push the branch or tell the owner it is not pushed. Follow an explicit instruction to keep work local.
 Regardless of your level of involvement NEVER watermark or attribute content to claude, codex, or any other agent. 
 Example of BAD: 🤖 Generated with Claude Code
 

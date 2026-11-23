@@ -1,0 +1,10 @@
+{{ if eq .platform "macos" -}}
+.config/systemd
+{{ else -}}
+Library
+{{ end -}}
+{{ if not (stat (joinPath .chezmoi.homeDir ".config/fleet/site/mise.toml")) -}}
+.config/mise/conf.d/90-site.toml
+{{ end -}}
+{{ $ignore := joinPath .chezmoi.homeDir ".config/fleet/site/ignore" -}}
+{{ if stat $ignore }}{{ include $ignore }}{{ end }}
