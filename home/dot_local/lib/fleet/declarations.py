@@ -53,7 +53,9 @@ def batch_ssh(repo):
     configured = subprocess.run(["git", "config", "--get", "core.sshCommand"], cwd=repo,
                                 stdin=subprocess.DEVNULL, capture_output=True, text=True,
                                 timeout=5).stdout.strip()
-    return {"GIT_SSH_COMMAND": f"{configured or 'ssh'} -o BatchMode=yes"}
+    # ssh keeps the first value it gets for an option, so BatchMode goes first.
+    program, _, rest = (configured or "ssh").partition(" ")
+    return {"GIT_SSH_COMMAND": f"{program} -o BatchMode=yes {rest}".rstrip()}
 
 
 def reserved_skills(platform):

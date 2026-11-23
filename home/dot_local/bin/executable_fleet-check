@@ -84,7 +84,7 @@ def inventory(data):
         yield f"Site kit overrides mise tool {name}"
     for link in data["profileLinks"]:
         path = HOME / link
-        if not path.is_symlink() or path.resolve() != HOME / ".gemini/config/mcp_config.json" or not path.exists():
+        if not path.is_symlink() or path.resolve() != (HOME / ".gemini/config/mcp_config.json").resolve() or not path.exists():
             yield f"T3 Antigravity: missing or replaced link {link}"
 
 
