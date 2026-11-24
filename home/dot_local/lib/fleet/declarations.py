@@ -21,6 +21,8 @@ SKILL_DIRS = {
     "agy": [".gemini/config/skills"],
 }
 NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")
+# Each Platform also answers to the families it belongs to: Omarchy is a Linux.
+PLATFORMS = {"macos": {"macos"}, "linux": {"linux"}, "omarchy": {"omarchy", "linux"}}
 
 
 def table(path, key):
@@ -32,6 +34,26 @@ def table(path, key):
     if not isinstance(entries, dict):
         raise ValueError(f"Expected a table in {path.name}")
     return entries
+
+
+def installed_harnesses():
+    """The Harnesses with a CLI on PATH. MCP entries go only to these."""
+    return {harness for harness in MCP_FILES if shutil.which(harness)}
+
+
+def external(path):
+    """Names that another tool owns on this Machine: {"mcp": set, "skills": set}."""
+    if not path.exists():
+        return {"mcp": set(), "skills": set()}
+    with path.open("rb") as stream:
+        data = tomllib.load(stream)
+    names = {}
+    for key in ("mcp", "skills"):
+        values = data.get(key, [])
+        if not isinstance(values, list) or not all(isinstance(v, str) for v in values):
+            raise ValueError(f"Expected a list of names for {key} in {path.name}")
+        names[key] = set(values)
+    return names
 
 
 def edited_targets(status, managed):
@@ -94,14 +116,18 @@ def selections(data):
 
 def mcp_arguments(harness, name, item, platform):
     """Return add arguments and an optional reason the entry cannot be installed."""
-    allowed = {"command", "args", "url", "secrets", "platforms", "requires"}
+    allowed = {"command", "args", "url", "secrets", "platforms", "requires", "enabled"}
     if not NAME.fullmatch(name) or item.keys() - allowed:
         raise ValueError(f"Invalid MCP declaration: {name}")
     for key in ("platforms", "args", "secrets"):
         values = item.get(key, [])
         if not isinstance(values, list) or not all(isinstance(s, str) and "\0" not in s for s in values):
             raise ValueError(f"Invalid {key} for MCP {name}")
-    if item.get("platforms") and platform not in item["platforms"]:
+    if not isinstance(item.get("enabled", True), bool):
+        raise ValueError(f"Invalid enabled for MCP {name}")
+    if item.get("enabled") is False:
+        return None, "disabled"
+    if item.get("platforms") and not PLATFORMS.get(platform, {platform}) & set(item["platforms"]):
         return None, "other Platform"
     if item.get("requires") and not shutil.which(item["requires"]):
         return None, f"requires {item['requires']}"

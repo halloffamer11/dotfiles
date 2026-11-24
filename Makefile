@@ -82,6 +82,9 @@ EXTRA_BREWFILES ?=
 # Checkouts `make doctor` compares with their upstream main (it asks the remote, writes nothing).
 DOCTOR_UPSTREAM ?= dotfiles
 SKILLS_CLI = DISABLE_TELEMETRY=1 npx -y skills@latest
+# True when chezmoi (the Belt) deploys ~/.claude/CLAUDE.md; then `configs` leaves it to chezmoi.
+BELT_OWNS_RULES = command -v chezmoi >/dev/null 2>&1 && \
+	chezmoi managed --include=files --path-style=relative 2>/dev/null | grep -qx '.claude/CLAUDE.md'
 
 .PHONY: bootstrap preflight conflicts doctor brew apply configs configs-plan skills externals external-updates update audiotee mictee meeting-notes test-recorder test-meeting-notes test-bootstrap
 
@@ -129,11 +132,12 @@ ifeq ($(PROFILE),macos)
 	@if [ ! -e $(HOME)/.config/herdr-app/keys.json ]; then mkdir -p $(HOME)/.config/herdr-app && \
 		cp $(CURDIR)/stow/herdr-app/.config/herdr-app/keys.json $(HOME)/.config/herdr-app/keys.json && echo "copied herdr-app keys.json"; fi
 endif
-	@# ~/.claude/CLAUDE.md is the user's global steering file, kept in references/. A real
-	@# file there is someone's data: stop rather than replace it.
-	@if [ -e $(HOME)/.claude/CLAUDE.md ] && [ ! -L $(HOME)/.claude/CLAUDE.md ]; then \
-		echo "ERROR: ~/.claude/CLAUDE.md is a real file — diff it against references/CLAUDE.md, then move it aside"; exit 1; fi
-	mkdir -p $(HOME)/.claude && ln -sfn $(CURDIR)/references/CLAUDE.md $(HOME)/.claude/CLAUDE.md
+	@# ~/.claude/CLAUDE.md is the user's global steering file, kept in references/. One owner:
+	@# where chezmoi deploys it, leave it alone. Any other real file is someone's data: stop.
+	@if $(BELT_OWNS_RULES); then echo "skipped: ~/.claude/CLAUDE.md (chezmoi manages it)"; \
+	elif [ -e $(HOME)/.claude/CLAUDE.md ] && [ ! -L $(HOME)/.claude/CLAUDE.md ]; then \
+		echo "ERROR: ~/.claude/CLAUDE.md is a real file — diff it against references/CLAUDE.md, then move it aside"; exit 1; \
+	else mkdir -p $(HOME)/.claude && ln -sfn $(CURDIR)/references/CLAUDE.md $(HOME)/.claude/CLAUDE.md; fi
 	@# stow -R unlinks before relinking; a Hyprland reload landing in that
 	@# window raises a persistent "config has errors" overlay that outlives
 	@# the restow. Reloading here clears it. No-op without hyprctl (macOS).
@@ -154,7 +158,8 @@ ifeq ($(PROFILE),macos)
 		elif cmp -s $(HOME)/.config/herdr-app/keys.json $(CURDIR)/stow/herdr-app/.config/herdr-app/keys.json; then echo "in place: .config/herdr-app/keys.json"; \
 		else echo "differs: .config/herdr-app/keys.json (live copy kept; copy it back to commit)"; fi
 endif
-	@if [ -e $(HOME)/.claude/CLAUDE.md ] && [ ! -L $(HOME)/.claude/CLAUDE.md ]; then echo "CONFLICT: ~/.claude/CLAUDE.md is a real file"; \
+	@if $(BELT_OWNS_RULES); then echo "skip: .claude/CLAUDE.md (chezmoi manages it)"; \
+		elif [ -e $(HOME)/.claude/CLAUDE.md ] && [ ! -L $(HOME)/.claude/CLAUDE.md ]; then echo "CONFLICT: ~/.claude/CLAUDE.md is a real file"; \
 		elif [ "$$(readlink $(HOME)/.claude/CLAUDE.md)" = $(CURDIR)/references/CLAUDE.md ]; then echo "in place: .claude/CLAUDE.md"; \
 		else echo "LINK: .claude/CLAUDE.md => $(CURDIR)/references/CLAUDE.md"; fi
 

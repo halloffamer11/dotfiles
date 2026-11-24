@@ -8,7 +8,8 @@ import sys
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path.home() / ".local/lib/fleet"))
-from declarations import HOME, MCP_FILES, SKILL_DIRS, batch_ssh, edited_targets, mcp_arguments, reserved_skills, selections, table
+from declarations import (HOME, MCP_FILES, SKILL_DIRS, batch_ssh, edited_targets, external,
+                          installed_harnesses, mcp_arguments, reserved_skills, selections, table)
 
 
 def output(*args, cwd=None, extra=None):
@@ -43,6 +44,12 @@ def git_report(root):
 def inventory(data):
     expected = {name for _, skills in selections(data) for name in skills}
     reserved = reserved_skills(data["platform"])
+    # Names another tool owns on this Machine are not drift, unless the Belt declares them too.
+    outside = external(HOME / ".config/fleet/site/external.toml")
+    for name in sorted(outside["skills"] & expected):
+        yield f"skill {name} has two owners: the Belt and external.toml"
+    for name in sorted(outside["mcp"] & data["mcp"].keys()):
+        yield f"MCP {name} has two owners: the Belt and external.toml"
     for pack in set(data["selectedPacks"]) - data["packs"].keys():
         yield f"selected Pack {pack} has no declaration"
     for harness, folders in SKILL_DIRS.items():
@@ -50,9 +57,12 @@ def inventory(data):
                      if (p / "SKILL.md").is_file()}
         for name in sorted(expected - installed):
             yield f"{harness}: missing skill {name}"
-        for name in sorted(installed - expected - reserved):
+        for name in sorted(installed - expected - reserved - outside["skills"]):
             yield f"{harness}: undeclared skill {name}"
+    harnesses = installed_harnesses()
     for harness, (path, key) in MCP_FILES.items():
+        if harness not in harnesses:
+            continue  # the MCP script skips a Harness that is not installed
         try:
             installed = table(HOME / path, key)
         except (ValueError, OSError):
@@ -66,11 +76,13 @@ def inventory(data):
                 if name not in installed:
                     yield f"{harness}: missing MCP {name}"
                 continue
-            if skip and skip != "other Platform":
+            if skip == "disabled" and name in installed:
+                yield f"{harness}: disabled MCP {name} is still installed"
+            elif skip and skip not in ("other Platform", "disabled"):
                 yield f"{harness}: skipped MCP {name} ({skip})"
             elif not skip and name not in installed:
                 yield f"{harness}: missing MCP {name}"
-        for name in sorted(installed.keys() - data["mcp"].keys()):
+        for name in sorted(installed.keys() - data["mcp"].keys() - outside["mcp"]):
             yield f"{harness}: undeclared MCP {name}"
     for key, kind in (("mcpOverrides", "MCP"), ("packsOverrides", "Pack")):
         for name in data[key]:
@@ -97,8 +109,12 @@ def duplicates(platform):
         if not folder.is_dir() or not os.access(folder, os.R_OK | os.X_OK):
             continue
         for path in folder.iterdir():
-            if path.is_file() and os.access(path, os.X_OK):
-                copies.setdefault(path.name, []).append(path)
+            try:  # an entry can point into a folder this user cannot read
+                if path.is_file() and os.access(path, os.X_OK):
+                    path.stat()  # the later comparison needs it; fail here, not there
+                    copies.setdefault(path.name, []).append(path)
+            except OSError:
+                continue
     for name, paths in sorted(copies.items()):
         direct = [p for p in paths if p.parent not in
                   (dispatchers / "shims", dispatchers / "command-wrappers/bin")]
@@ -106,7 +122,8 @@ def duplicates(platform):
         if wrappers and not any((dispatchers / "installs") in p.resolve().parents for p in direct):
             direct.append(wrappers[0])
         mise_command = wrappers or any((dispatchers / "installs") in p.resolve().parents for p in direct)
-        if platform == "omarchy" and mise_command and name in {"node", "npm", "npx"}:
+        # A Linux distribution's own node is a system dependency, kept beside mise's.
+        if platform != "macos" and mise_command and name in {"node", "npm", "npx"}:
             direct = [p for p in direct if p.parent != Path("/usr/bin")]
         if name == "codex":
             direct = [p for p in direct if "Codex.app" not in p.parts]
